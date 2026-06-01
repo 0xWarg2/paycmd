@@ -9,7 +9,7 @@ import {
   Send,
   Sparkles,
 } from "lucide-react";
-import { FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useLayoutEffect, useRef, useState, WheelEvent } from "react";
 
 import { PayCmdShell } from "@/components/paycmd-shell";
 import { Badge } from "@/components/ui/badge";
@@ -98,6 +98,8 @@ export function PayCmdApp() {
   const [scrollMetrics, setScrollMetrics] = useState({ top: 0, height: 1, client: 1 });
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const previousScrollHeightRef = useRef<number | null>(null);
+  const isLoadingOlderRef = useRef(false);
+  const skipNextAutoScrollRef = useRef(false);
 
   const showPalette = input.trim() === "/" || input.startsWith("/");
   const unreadCount = notifications.filter((item) => item.status === "unread").length;
@@ -173,14 +175,27 @@ export function PayCmdApp() {
 
   async function loadOlderMessages() {
     const viewport = viewportRef.current;
-    if (!viewport || !threadId || isLoadingOlder || !hasOlderMessages || !messages.length) return;
+    if (
+      !viewport ||
+      !threadId ||
+      isLoadingOlder ||
+      isLoadingOlderRef.current ||
+      !hasOlderMessages ||
+      !messages.length
+    ) {
+      return;
+    }
 
+    isLoadingOlderRef.current = true;
+    skipNextAutoScrollRef.current = true;
     previousScrollHeightRef.current = viewport.scrollHeight;
     setIsLoadingOlder(true);
 
     const oldestMessage = messages[0] as ChatMessage & { createdAt?: string };
     const oldestCreatedAt = oldestMessage.createdAt;
     if (!oldestCreatedAt) {
+      isLoadingOlderRef.current = false;
+      skipNextAutoScrollRef.current = false;
       previousScrollHeightRef.current = null;
       setIsLoadingOlder(false);
       return;
@@ -197,6 +212,8 @@ export function PayCmdApp() {
 
     if (error) {
       console.error("Failed to load older messages", error);
+      isLoadingOlderRef.current = false;
+      skipNextAutoScrollRef.current = false;
       previousScrollHeightRef.current = null;
       setIsLoadingOlder(false);
       return;
@@ -204,6 +221,8 @@ export function PayCmdApp() {
 
     const olderRows = ((data ?? []) as ChatMessageRow[]).reverse();
     if (!olderRows.length) {
+      isLoadingOlderRef.current = false;
+      skipNextAutoScrollRef.current = false;
       previousScrollHeightRef.current = null;
       setHasOlderMessages(false);
       setIsLoadingOlder(false);
@@ -218,6 +237,7 @@ export function PayCmdApp() {
       })),
       ...current,
     ]);
+    isLoadingOlderRef.current = false;
     setIsLoadingOlder(false);
   }
 
@@ -230,6 +250,14 @@ export function PayCmdApp() {
       client: viewport.clientHeight,
     });
     if (viewport.scrollTop < 48) {
+      void loadOlderMessages();
+    }
+  }
+
+  function handleViewportWheel(event: WheelEvent<HTMLDivElement>) {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    if (event.deltaY < 0 && viewport.scrollTop < 48) {
       void loadOlderMessages();
     }
   }
@@ -321,6 +349,10 @@ export function PayCmdApp() {
   }, [messages.length]);
 
   useEffect(() => {
+    if (skipNextAutoScrollRef.current) {
+      skipNextAutoScrollRef.current = false;
+      return;
+    }
     if (previousScrollHeightRef.current !== null) return;
     window.requestAnimationFrame(scrollToLatest);
   }, [messages.length]);
@@ -433,6 +465,7 @@ export function PayCmdApp() {
           <div
             ref={viewportRef}
             onScroll={handleViewportScroll}
+            onWheel={handleViewportWheel}
             className="paycmd-chat-scrollbar h-full overflow-y-scroll px-3 py-4 pr-6 md:px-6 md:pr-9"
           >
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
