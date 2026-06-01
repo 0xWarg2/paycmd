@@ -1,29 +1,33 @@
-name: Continuous Integration
+name: PayCMD CI
+
 on:
   pull_request:
+    branches: [main, dev]
   push:
-    branches: [master]
+    branches: [main, dev]
+
 jobs:
-  lint-and-test:
+  lint-and-build:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-        with:
-          submodules: 'true'
 
-      - name: Install Node
+      - name: Set up Node
         uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        with:
+          node-version: 24
+          cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci --legacy-peer-deps
 
-  # scan:
-  #   needs: lint-and-test
-  #   if: ${{ github.event_name == 'pull_request' && github.event.repository.private == false }}
-  #   uses: circlefin/circle-public-github-workflows/.github/workflows/pr-scan.yaml@v1
+      - name: Lint
+        run: npm run lint
 
-  # release-sbom:
-  #   needs: lint-and-test
-  #   if: github.event_name == 'push'
-  #   uses: circlefin/circle-public-github-workflows/.github/workflows/attach-release-assets.yaml@v1
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_PAYCMD_DEMO_MODE: "true"
