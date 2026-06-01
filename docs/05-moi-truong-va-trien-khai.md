@@ -17,6 +17,10 @@ Sau khi tạo project, áp migration bằng Supabase MCP hoặc Supabase CLI.
 
 PayCMD dùng Vercel Git Integration để deploy tự động từ GitHub.
 
+- Vercel project: `paycmd`.
+- Vercel project id: `prj_OoE5yuJ12FN6WjdRsHAoeObaPNSh`.
+- Production URL hiện tại: `https://paycmd.vercel.app`.
+- Deployment đầu tiên đã được tạo bằng Vercel CLI từ branch `dev`.
 - Branch phát triển: `dev`.
 - Branch production: `main`.
 - Pull request từ `dev` sang `main` tạo preview deployment.
@@ -30,6 +34,13 @@ Các bước cấu hình lần đầu:
 3. Chọn production branch là `main`.
 4. Thêm environment variables bên dưới cho cả Preview và Production.
 5. Sau khi có domain Vercel, thêm URL đó vào Supabase Auth redirect URLs.
+
+Trạng thái hiện tại:
+
+- Đã tạo Vercel project.
+- Đã set environment variables demo trên Vercel.
+- Đã deploy production thành công lên `https://paycmd.vercel.app`.
+- Chưa connect GitHub repo vào Vercel Git Integration vì Vercel báo tài khoản/token chưa có quyền truy cập GitHub repo qua Vercel GitHub App. Cần vào Vercel UI và cấp quyền GitHub App cho repo `0xWarg2/paycmd`, sau đó connect project `paycmd` với repo này.
 
 Biến môi trường bắt buộc cho demo:
 
