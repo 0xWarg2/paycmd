@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { ThemeSwitcher } from "@/components/theme-switcher";
 import { availableBudget, demoNotifications, navigationItems } from "@/lib/paycmd/demo-data";
 
 export function PayCmdShell({ children }: { children: ReactNode }) {
@@ -61,6 +62,16 @@ export function PayCmdShell({ children }: { children: ReactNode }) {
               );
             })}
           </nav>
+
+          <div className="border-t p-3">
+            <div className="flex items-center justify-between rounded-md border bg-background px-3 py-2">
+              <div>
+                <div className="text-sm font-medium">Appearance</div>
+                <div className="text-xs text-muted-foreground">Light, dark, system</div>
+              </div>
+              <ThemeSwitcher />
+            </div>
+          </div>
         </aside>
 
         <header className="flex items-center justify-between border-b bg-card px-4 py-3 lg:hidden">
@@ -68,7 +79,10 @@ export function PayCmdShell({ children }: { children: ReactNode }) {
             <Command className="h-5 w-5 text-primary" />
             PayCMD
           </Link>
-          <Badge variant="secondary">${availableBudget().toLocaleString()} USDC</Badge>
+          <div className="flex items-center gap-2">
+            <ThemeSwitcher />
+            <Badge variant="secondary">${availableBudget().toLocaleString()} USDC</Badge>
+          </div>
         </header>
 
         <section className="min-h-0 overflow-hidden">{children}</section>

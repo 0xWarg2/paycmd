@@ -9,7 +9,7 @@ import {
   Send,
   Sparkles,
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { PayCmdShell } from "@/components/paycmd-shell";
 import { Badge } from "@/components/ui/badge";
@@ -97,6 +97,7 @@ export function PayCmdApp() {
   const [, setExecutions] = useState<ExecutionItem[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const previousScrollHeightRef = useRef<number | null>(null);
 
   const showPalette = input.trim() === "/" || input.startsWith("/");
   const visibleMessages = useMemo(
@@ -120,13 +121,8 @@ export function PayCmdApp() {
     const viewport = viewportRef.current;
     if (!viewport || visibleCount >= messages.length) return;
 
-    const previousHeight = viewport.scrollHeight;
+    previousScrollHeightRef.current = viewport.scrollHeight;
     setVisibleCount((current) => Math.min(messages.length, current + MESSAGE_PAGE_SIZE));
-
-    window.requestAnimationFrame(() => {
-      const nextHeight = viewport.scrollHeight;
-      viewport.scrollTop = nextHeight - previousHeight;
-    });
   }
 
   function handleViewportScroll() {
@@ -216,13 +212,23 @@ export function PayCmdApp() {
     }, 4200);
   }
 
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    const previousHeight = previousScrollHeightRef.current;
+    if (!viewport || previousHeight === null) return;
+
+    viewport.scrollTop = viewport.scrollHeight - previousHeight;
+    previousScrollHeightRef.current = null;
+  }, [visibleCount]);
+
   useEffect(() => {
+    if (previousScrollHeightRef.current !== null) return;
     window.requestAnimationFrame(scrollToLatest);
-  }, [messages.length, visibleMessages.length]);
+  }, [messages.length]);
 
   return (
     <PayCmdShell>
-      <div className="flex h-full min-h-0 flex-col bg-[radial-gradient(circle_at_top_left,oklch(0.96_0.035_168),transparent_32%),linear-gradient(180deg,oklch(0.99_0.006_84),oklch(0.965_0.012_240))]">
+      <div className="flex h-full min-h-0 flex-col bg-[radial-gradient(circle_at_top_left,oklch(0.96_0.035_168),transparent_32%),linear-gradient(180deg,oklch(0.99_0.006_84),oklch(0.965_0.012_240))] dark:bg-[radial-gradient(circle_at_top_left,oklch(0.28_0.07_166),transparent_30%),linear-gradient(180deg,oklch(0.16_0.018_250),oklch(0.11_0.012_250))]">
         <header className="flex shrink-0 items-center justify-between border-b bg-card/92 px-4 py-3 backdrop-blur md:px-6">
           <div>
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
