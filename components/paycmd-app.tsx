@@ -265,6 +265,7 @@ async function executeCommand(draft: ParsedCommand) {
         sourceChain: draft.fields.sourceChain,
         destinationChain: draft.fields.destinationChain,
         amount: draft.fields.amount,
+        autoDeposit: true,
       }),
     });
   }
@@ -431,7 +432,10 @@ export function PayCmdApp() {
     }
 
     if (draft.command === "transfer") {
-      return `Transfer thành công: ${result.amount} USDC từ ${result.sourceChain} sang ${result.destinationChain}.`;
+      const autoDeposit = result.autoDeposit
+        ? ` Đã auto-deposit ${result.autoDepositedAmount} USDC trước khi transfer.`
+        : "";
+      return `Transfer thành công: ${result.amount} USDC từ ${result.sourceChain} sang ${result.destinationChain}.${autoDeposit}`;
     }
 
     if (draft.command === "gas") {
@@ -1002,6 +1006,7 @@ function CommandPreviewCard({
       </div>
       <div className="rounded-lg border bg-background p-2 text-xs text-muted-foreground">
         Rail: Circle Gateway · Mode: real
+        {draft.command === "transfer" ? " · Auto-deposit nếu Gateway balance thiếu" : ""}
       </div>
       <Button className="w-full" disabled={disabled} onClick={onConfirm}>
         <Check className="mr-2 h-4 w-4" />

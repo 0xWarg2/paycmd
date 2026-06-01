@@ -20,15 +20,33 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   transferGatewayBalanceWithEOA,
   executeMintCircle,
-  withdrawFromCustodialWallet,
-  getCircleWalletAddress,
+  fetchGatewayBalance,
+  getUsdcBalance,
+  initiateDepositFromCustodialWallet,
   type SupportedChain,
   CIRCLE_CHAIN_NAMES,
+  CHAIN_BY_DOMAIN,
 } from "@/lib/circle/gateway-sdk";
 import { createClient } from "@/lib/supabase/server";
 import type { Address } from "viem";
-import { Transaction, Blockchain } from "@circle-fin/developer-controlled-wallets";
+import { Transaction } from "@circle-fin/developer-controlled-wallets";
 import { circleDeveloperSdk } from "@/lib/circle/sdk";
+
+function decimalUsdcToAtomic(value: string | number) {
+  const [wholeRaw, fractionRaw = ""] = String(value).split(".");
+  const whole = wholeRaw.replace(/[^\d]/g, "") || "0";
+  const fraction = fractionRaw.replace(/[^\d]/g, "").padEnd(6, "0").slice(0, 6);
+  return BigInt(whole) * 1_000_000n + BigInt(fraction || "0");
+}
+
+async function getSourceGatewayBalance(address: Address, sourceChain: SupportedChain) {
+  const gatewayResponse = await fetchGatewayBalance(address);
+  const sourceBalance = gatewayResponse.balances.find(
+    (balance) => CHAIN_BY_DOMAIN[balance.domain] === sourceChain,
+  );
+
+  return decimalUsdcToAtomic(sourceBalance?.balance ?? "0");
+}
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
@@ -40,7 +58,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { sourceChain, destinationChain, amount, recipientAddress } =
+  const { sourceChain, destinationChain, amount, recipientAddress, autoDeposit = true } =
     await req.json();
 
   try {
@@ -103,6 +121,8 @@ export async function POST(req: NextRequest) {
     const walletId = wallet.circle_wallet_id;
     const walletAddress = wallet.address as Address;
     const recipient = recipientAddress || walletAddress;
+    let autoDepositTxHash: string | undefined;
+    let autoDepositedAmount = 0;
 
     // Determine if we're using external recipient
     const isExternalRecipient = recipientAddress && recipientAddress.toLowerCase() !== walletAddress.toLowerCase();
@@ -151,6 +171,51 @@ export async function POST(req: NextRequest) {
       // Continue anyway - the actual mint will catch this if it's a real issue
     }
 
+    if (autoDeposit) {
+      const gatewayBalance = await getSourceGatewayBalance(walletAddress, sourceChain as SupportedChain);
+      if (gatewayBalance < amountInAtomicUnits) {
+        const missingAmount = amountInAtomicUnits - gatewayBalance;
+        const walletUsdcBalance = await getUsdcBalance(walletAddress, sourceChain as SupportedChain);
+
+        if (walletUsdcBalance < missingAmount) {
+          return NextResponse.json(
+            {
+              error: "INSUFFICIENT_USDC",
+              message: `Gateway balance is short by ${Number(missingAmount) / 1_000_000} USDC and wallet balance on ${sourceChain} is not enough to auto-deposit.`,
+              sourceChain,
+              gatewayBalance: Number(gatewayBalance) / 1_000_000,
+              walletBalance: Number(walletUsdcBalance) / 1_000_000,
+              requiredAmount: parseFloat(amount),
+            },
+            { status: 400 },
+          );
+        }
+
+        const { getOrCreateGatewayEOAWallet } = await import("@/lib/circle/create-gateway-eoa-wallets");
+        const { address: eoaAddress } = await getOrCreateGatewayEOAWallet(user.id, sourceChain);
+        autoDepositTxHash = await initiateDepositFromCustodialWallet(
+          walletId,
+          sourceChain as SupportedChain,
+          missingAmount,
+          eoaAddress as Address,
+        );
+        autoDepositedAmount = Number(missingAmount) / 1_000_000;
+
+        await supabase.from("transaction_history").insert([
+          {
+            user_id: user.id,
+            chain: sourceChain,
+            tx_type: "deposit",
+            amount: autoDepositedAmount,
+            tx_hash: autoDepositTxHash,
+            gateway_wallet_address: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9",
+            status: "success",
+            created_at: new Date().toISOString(),
+          },
+        ]);
+      }
+    }
+
     // Use EOA-signed burn/mint process for all transfers (same-chain and cross-chain)
     const { attestation, attestationSignature } = await transferGatewayBalanceWithEOA(
       user.id,
@@ -194,6 +259,9 @@ export async function POST(req: NextRequest) {
       success: true,
       attestation: attestationHash,
       mintTxHash,
+      autoDeposit: Boolean(autoDepositTxHash),
+      autoDepositTxHash,
+      autoDepositedAmount,
       sourceChain,
       destinationChain,
       amount: parseFloat(amount),
