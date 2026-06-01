@@ -30,11 +30,18 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const { data: transactions, error } = await supabase
+    const txType = req.nextUrl.searchParams.get("type");
+    let query = supabase
       .from("transaction_history")
       .select("*")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
+
+    if (txType === "deposit" || txType === "transfer") {
+      query = query.eq("tx_type", txType);
+    }
+
+    const { data: transactions, error } = await query;
 
     if (error) {
       console.error("Error fetching transaction history:", error);

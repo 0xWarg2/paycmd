@@ -18,9 +18,9 @@ import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import {
   commandRegistry,
-  createDemoExecution,
   parsePayCmd,
   ParsedCommand,
+  requiresConfirmation,
 } from "@/lib/paycmd/commands";
 
 type ChatMessage = {
@@ -41,9 +41,21 @@ type NotificationItem = {
   commandExecutionId: string;
 };
 
-type ExecutionItem = ReturnType<typeof createDemoExecution> & {
+type ExecutionItem = {
+  id: string;
+  draftId: string;
+  command: ParsedCommand["command"];
   status: "queued" | "running" | "waiting_gateway" | "success" | "failed";
+  title: string;
+  createdAt: string;
+  gateway: {
+    network: string;
+    rail: string;
+    mode: string;
+  };
   txHash?: string;
+  result?: unknown;
+  error?: string;
 };
 
 type ChatMessageRow = {
@@ -66,7 +78,11 @@ function missingFieldQuestion(field: string) {
     recipient: "Bạn muốn gửi cho ai?",
     budgetName: "Bạn muốn đặt tên ngân sách là gì?",
     frequency: "Bạn muốn lịch chạy daily, weekly hay monthly?",
-    command: "Bạn muốn dùng /pay, /createbudget hay /schedule?",
+    action: "Bạn muốn dùng action nào?",
+    sourceChain: "Bạn muốn dùng source chain nào? Ví dụ: arc, base, avalanche.",
+    destinationChain: "Bạn muốn chuyển sang chain nào? Ví dụ: arc, base, avalanche.",
+    chain: "Bạn muốn kiểm tra chain nào? Ví dụ: arc, base, avalanche.",
+    command: "Bạn muốn dùng /wallet, /balance, /deposit, /transfer, /gas, /gateway hay /history?",
   };
 
   return labels[field] ?? `Bạn cần bổ sung ${field}.`;
@@ -82,6 +98,77 @@ function statusLabel(status: ExecutionItem["status"]) {
   };
 
   return labels[status];
+}
+
+async function requestJson(path: string, init?: RequestInit) {
+  const response = await fetch(path, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+  });
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const message = data?.error ?? data?.message ?? `Request failed: ${response.status}`;
+    throw new Error(message);
+  }
+
+  return data;
+}
+
+async function executeCommand(draft: ParsedCommand) {
+  if (draft.command === "wallet") {
+    if (draft.fields.action === "create") {
+      return requestJson("/api/wallet-set", { method: "POST", body: JSON.stringify({}) });
+    }
+    return requestJson("/api/wallet/status");
+  }
+
+  if (draft.command === "balance") {
+    return requestJson("/api/gateway/balance", { method: "POST", body: JSON.stringify({}) });
+  }
+
+  if (draft.command === "deposit") {
+    return requestJson("/api/gateway/deposit", {
+      method: "POST",
+      body: JSON.stringify({
+        chain: draft.fields.sourceChain,
+        amount: draft.fields.amount,
+      }),
+    });
+  }
+
+  if (draft.command === "transfer") {
+    return requestJson("/api/gateway/transfer", {
+      method: "POST",
+      body: JSON.stringify({
+        sourceChain: draft.fields.sourceChain,
+        destinationChain: draft.fields.destinationChain,
+        amount: draft.fields.amount,
+      }),
+    });
+  }
+
+  if (draft.command === "gas") {
+    return requestJson("/api/gateway/gas-check", {
+      method: "POST",
+      body: JSON.stringify({ chain: draft.fields.chain }),
+    });
+  }
+
+  if (draft.command === "gateway") {
+    return requestJson("/api/gateway/info");
+  }
+
+  if (draft.command === "history") {
+    const filter = draft.fields.filter;
+    const suffix = filter ? `?type=${encodeURIComponent(filter)}` : "";
+    return requestJson(`/api/transactions${suffix}`);
+  }
+
+  throw new Error("Unsupported command");
 }
 
 export function PayCmdApp() {
@@ -171,6 +258,148 @@ export function PayCmdApp() {
 
   async function addSystemStatus(text: string, execution: ExecutionItem) {
     await saveMessage({ role: "system", text, kind: "status", execution });
+  }
+
+  function createExecution(draft: ParsedCommand): ExecutionItem {
+    const now = new Date();
+    return {
+      id: `cmd_${now.getTime()}`,
+      draftId: `draft_${now.getTime()}`,
+      command: draft.command,
+      status: "queued",
+      title: draft.summary,
+      createdAt: now.toISOString(),
+      gateway: {
+        network: "Arc Testnet, Base Sepolia, Avalanche Fuji",
+        rail: "Circle Gateway",
+        mode: "real",
+      },
+    };
+  }
+
+  function resultText(draft: ParsedCommand, result: any) {
+    if (draft.command === "wallet") {
+      if (draft.fields.action === "create") {
+        const wallet = result?.wallets?.[0];
+        return wallet?.address
+          ? `Wallet đã sẵn sàng: ${wallet.address}`
+          : result?.message ?? "Wallet đã sẵn sàng.";
+      }
+      return result?.hasWallet
+        ? `Wallet active: ${result.scaWallet?.address ?? result.scaWallet?.wallet_address}`
+        : "Chưa có Circle wallet. Dùng /wallet create để tạo.";
+    }
+
+    if (draft.command === "balance") {
+      const chain = draft.fields.chain;
+      const balances = result?.balances ?? [];
+      if (chain) {
+        const chainTotal = balances.reduce((sum: number, item: any) => {
+          const gateway = (item.gatewayBalances ?? [])
+            .filter((entry: any) => entry.chain === chain)
+            .reduce((inner: number, entry: any) => inner + Number(entry.balance || 0), 0);
+          const wallet = (item.chainBalances ?? [])
+            .filter((entry: any) => entry.chain === chain)
+            .reduce((inner: number, entry: any) => inner + Number(entry.balance || 0), 0);
+          return sum + gateway + wallet;
+        }, 0);
+        return `${chain}: ${chainTotal.toFixed(6)} USDC.`;
+      }
+      return `Unified balance: ${Number(result?.totalUnified ?? 0).toFixed(6)} USDC.`;
+    }
+
+    if (draft.command === "deposit") {
+      return `Deposit thành công: ${result.amount} USDC từ ${result.chain}.`;
+    }
+
+    if (draft.command === "transfer") {
+      return `Transfer thành công: ${result.amount} USDC từ ${result.sourceChain} sang ${result.destinationChain}.`;
+    }
+
+    if (draft.command === "gas") {
+      return result?.hasGas
+        ? `${result.chain}: có gas. Balance native: ${result.balance}.`
+        : `${result.chain}: chưa có native gas cho wallet ${result.address}.`;
+    }
+
+    if (draft.command === "gateway") {
+      return `Gateway online. Domains: ${(result?.domains ?? []).length}.`;
+    }
+
+    if (draft.command === "history") {
+      const rows = Array.isArray(result) ? result : [];
+      if (!rows.length) return "Chưa có transaction history.";
+      return `Có ${rows.length} transaction. Gần nhất: ${rows[0].tx_type} ${rows[0].amount} trên ${rows[0].chain}.`;
+    }
+
+    return "Command đã hoàn tất.";
+  }
+
+  async function runCommand(draft: ParsedCommand) {
+    if (draft.missingFields.length) return;
+
+    const execution = createExecution(draft);
+    setActiveDraftId(null);
+    setExecutions((current) => [execution, ...current]);
+    await addSystemStatus(`${execution.title} đã được đưa vào hàng đợi.`, execution);
+
+    const running = { ...execution, status: "running" as const };
+    setExecutions((current) =>
+      current.map((item) => (item.id === execution.id ? running : item)),
+    );
+    await addSystemStatus(`${execution.title} đang được xử lý.`, running);
+
+    const waiting = { ...execution, status: "waiting_gateway" as const };
+    setExecutions((current) =>
+      current.map((item) => (item.id === execution.id ? waiting : item)),
+    );
+    await addSystemStatus(`${execution.title} đang gọi Circle Gateway.`, waiting);
+
+    try {
+      const result = await executeCommand(draft);
+      const txHash = result?.txHash ?? result?.mintTxHash;
+      const success = {
+        ...execution,
+        status: "success" as const,
+        txHash,
+        result,
+      };
+      setExecutions((current) =>
+        current.map((item) => (item.id === execution.id ? success : item)),
+      );
+      setNotifications((current) => [
+        {
+          id: `notif_${execution.id}`,
+          title: "Command completed",
+          body: resultText(draft, result),
+          status: "unread",
+          commandExecutionId: execution.id,
+        },
+        ...current,
+      ]);
+      await addSystemStatus(resultText(draft, result), success);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Command failed";
+      const failed = {
+        ...execution,
+        status: "failed" as const,
+        error: message,
+      };
+      setExecutions((current) =>
+        current.map((item) => (item.id === execution.id ? failed : item)),
+      );
+      setNotifications((current) => [
+        {
+          id: `notif_${execution.id}`,
+          title: "Command failed",
+          body: message,
+          status: "unread",
+          commandExecutionId: execution.id,
+        },
+        ...current,
+      ]);
+      await addSystemStatus(message, failed);
+    }
   }
 
   async function loadOlderMessages() {
@@ -282,6 +511,11 @@ export function PayCmdApp() {
       return;
     }
 
+    if (!requiresConfirmation(parsed)) {
+      await runCommand(parsed);
+      return;
+    }
+
     const previewMessage = await saveMessage({
       role: "assistant",
       text: parsed.summary,
@@ -296,47 +530,7 @@ export function PayCmdApp() {
   }
 
   function confirmDraft(draft: ParsedCommand) {
-    if (draft.missingFields.length) return;
-
-    const execution = createDemoExecution(draft) as ExecutionItem;
-    setActiveDraftId(null);
-    setExecutions((current) => [execution, ...current]);
-    void addSystemStatus(`${execution.title} đã được đưa vào hàng đợi.`, execution);
-
-    window.setTimeout(() => {
-      const running = { ...execution, status: "running" as const };
-      setExecutions((current) =>
-        current.map((item) => (item.id === execution.id ? running : item)),
-      );
-      void addSystemStatus(`${execution.title} đang được xử lý.`, running);
-    }, 900);
-
-    window.setTimeout(() => {
-      const waiting = { ...execution, status: "waiting_gateway" as const };
-      setExecutions((current) =>
-        current.map((item) => (item.id === execution.id ? waiting : item)),
-      );
-      void addSystemStatus(`${execution.title} đang chờ Circle Gateway.`, waiting);
-    }, 2100);
-
-    window.setTimeout(() => {
-      const txHash = `0x${execution.id.replace(/\D/g, "").padEnd(64, "0").slice(0, 64)}`;
-      const success = { ...execution, status: "success" as const, txHash };
-      setExecutions((current) =>
-        current.map((item) => (item.id === execution.id ? success : item)),
-      );
-      setNotifications((current) => [
-        {
-          id: `notif_${execution.id}`,
-          title: "Command completed",
-          body: `${execution.title} đã settlement trên demo rail.`,
-          status: "unread",
-          commandExecutionId: execution.id,
-        },
-        ...current,
-      ]);
-      void addSystemStatus(`${execution.title} đã hoàn tất.`, success);
-    }, 4200);
+    void runCommand(draft);
   }
 
   useLayoutEffect(() => {
@@ -487,7 +681,7 @@ export function PayCmdApp() {
                   message={{
                     id: "welcome",
                     role: "assistant",
-                    text: "PayCMD đã sẵn sàng. Gõ / để chọn command hoặc thử /pay 50 USDC to Minh.",
+                    text: "PayCMD đã sẵn sàng. Gõ / để chọn command hoặc thử /balance.",
                   }}
                   activeDraftId={activeDraftId}
                   onConfirm={confirmDraft}
@@ -612,7 +806,7 @@ function CommandPreviewCard({
         )}
       </div>
       <div className="rounded-lg border bg-background p-2 text-xs text-muted-foreground">
-        Rail: Circle Gateway · Network: Arc Testnet · Mode: demo
+        Rail: Circle Gateway · Mode: real
       </div>
       <Button className="w-full" disabled={disabled} onClick={onConfirm}>
         <Check className="mr-2 h-4 w-4" />
@@ -624,12 +818,15 @@ function CommandPreviewCard({
 
 function ExecutionStatus({ execution, text }: { execution: ExecutionItem; text: string }) {
   const done = execution.status === "success";
+  const failed = execution.status === "failed";
 
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 font-medium">
         {done ? (
           <Check className="h-4 w-4 text-primary" />
+        ) : failed ? (
+          <Clock3 className="h-4 w-4 text-destructive" />
         ) : (
           <Loader2 className="h-4 w-4 animate-spin text-primary" />
         )}
