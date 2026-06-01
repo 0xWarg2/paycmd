@@ -1,13 +1,18 @@
 "use client";
 
 import {
+  BadgeDollarSign,
   Check,
   ChevronRight,
   Clock3,
+  History,
   Loader2,
   Paperclip,
   Send,
   Sparkles,
+  Wallet,
+  WalletCards,
+  Waypoints,
 } from "lucide-react";
 import { FormEvent, useEffect, useLayoutEffect, useRef, useState, WheelEvent } from "react";
 
@@ -17,7 +22,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import {
-  commandRegistry,
   parsePayCmd,
   ParsedCommand,
   requiresConfirmation,
@@ -70,6 +74,120 @@ type ChatMessageRow = {
 };
 
 const MESSAGE_PAGE_SIZE = 10;
+
+const commandTemplates = [
+  {
+    group: "Wallet",
+    items: [
+      {
+        sample: "/wallet create",
+        title: "Tạo Circle wallet",
+        description: "Khởi tạo wallet set và SCA wallet cho tài khoản.",
+        badge: "write",
+        icon: Wallet,
+      },
+      {
+        sample: "/wallet status",
+        title: "Xem trạng thái ví",
+        description: "Kiểm tra ví Circle và Gateway signer đã có chưa.",
+        badge: "read",
+        icon: WalletCards,
+      },
+    ],
+  },
+  {
+    group: "Balance",
+    items: [
+      {
+        sample: "/balance",
+        title: "Unified balance",
+        description: "Tổng USDC on-chain và Gateway trên mọi chain.",
+        badge: "read",
+        icon: BadgeDollarSign,
+      },
+      {
+        sample: "/balance arc",
+        title: "Balance Arc",
+        description: "Lọc USDC balance trên Arc Testnet.",
+        badge: "read",
+        icon: BadgeDollarSign,
+      },
+      {
+        sample: "/balance base",
+        title: "Balance Base",
+        description: "Lọc USDC balance trên Base Sepolia.",
+        badge: "read",
+        icon: BadgeDollarSign,
+      },
+      {
+        sample: "/balance avalanche",
+        title: "Balance Avalanche",
+        description: "Lọc USDC balance trên Avalanche Fuji.",
+        badge: "read",
+        icon: BadgeDollarSign,
+      },
+    ],
+  },
+  {
+    group: "Gateway Actions",
+    items: [
+      {
+        sample: "/deposit 50 from arc",
+        title: "Deposit vào Gateway",
+        description: "Approve và deposit USDC từ source chain.",
+        badge: "confirm",
+        icon: Waypoints,
+      },
+      {
+        sample: "/transfer 10 from base to arc",
+        title: "Cross-chain transfer",
+        description: "Burn intent, attestation, rồi mint ở destination.",
+        badge: "confirm",
+        icon: Waypoints,
+      },
+      {
+        sample: "/gas check arc",
+        title: "Kiểm tra gas",
+        description: "Kiểm tra native gas cho wallet mint transaction.",
+        badge: "read",
+        icon: Clock3,
+      },
+      {
+        sample: "/gateway info",
+        title: "Gateway info",
+        description: "Xem domains và contract data từ Circle Gateway.",
+        badge: "read",
+        icon: Sparkles,
+      },
+    ],
+  },
+  {
+    group: "History",
+    items: [
+      {
+        sample: "/history",
+        title: "Tất cả giao dịch",
+        description: "Xem các deposit và transfer mới nhất.",
+        badge: "read",
+        icon: History,
+      },
+      {
+        sample: "/history deposit",
+        title: "Deposit history",
+        description: "Lọc riêng các giao dịch deposit.",
+        badge: "read",
+        icon: History,
+      },
+      {
+        sample: "/history transfer",
+        title: "Transfer history",
+        description: "Lọc riêng các giao dịch transfer.",
+        badge: "read",
+        icon: History,
+      },
+    ],
+  },
+];
 
 function missingFieldQuestion(field: string) {
   const labels: Record<string, string> = {
@@ -703,23 +821,7 @@ export function PayCmdApp() {
 
         <div className="shrink-0 border-t bg-card/94 px-3 py-3 backdrop-blur md:px-6">
           <div className="mx-auto w-full max-w-3xl">
-            {showPalette ? (
-              <div className="mb-2 grid gap-2 rounded-xl border bg-background p-2 shadow-sm md:grid-cols-3">
-                {commandRegistry.map((command) => (
-                  <button
-                    key={command.name}
-                    className="rounded-lg border bg-card p-3 text-left transition hover:border-primary hover:bg-accent"
-                    onClick={() => selectCommand(command.sample)}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="font-medium">/{command.name}</div>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                    <div className="mt-1 text-xs text-muted-foreground">{command.sample}</div>
-                  </button>
-                ))}
-              </div>
-            ) : null}
+            {showPalette ? <CommandPalette onSelect={selectCommand} /> : null}
 
             <form
               className="flex items-center gap-2 rounded-2xl border bg-background p-2 shadow-sm"
@@ -742,6 +844,65 @@ export function PayCmdApp() {
         </div>
       </div>
     </PayCmdShell>
+  );
+}
+
+function CommandPalette({ onSelect }: { onSelect: (sample: string) => void }) {
+  return (
+    <div className="mb-2 overflow-hidden rounded-xl border bg-background shadow-sm">
+      <div className="flex items-center justify-between border-b px-3 py-2">
+        <div className="text-sm font-medium">Commands</div>
+        <div className="text-xs text-muted-foreground">Click để điền mẫu</div>
+      </div>
+      <div className="paycmd-command-palette-scrollbar max-h-[42vh] overflow-y-auto p-2">
+        <div className="grid gap-3">
+          {commandTemplates.map((section) => (
+            <section key={section.group} className="space-y-2">
+              <div className="px-1 text-xs font-semibold uppercase text-muted-foreground">
+                {section.group}
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                {section.items.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.sample}
+                      className="group min-w-0 rounded-lg border bg-card p-3 text-left transition hover:border-primary hover:bg-accent"
+                      onClick={() => onSelect(item.sample)}
+                      type="button"
+                    >
+                      <div className="flex min-w-0 items-start gap-3">
+                        <span className="mt-0.5 rounded-md border bg-background p-1.5 text-primary">
+                          <Icon className="h-4 w-4" />
+                        </span>
+                        <span className="min-w-0 flex-1 space-y-1">
+                          <span className="flex min-w-0 items-center justify-between gap-2">
+                            <span className="truncate font-medium">{item.title}</span>
+                            <Badge
+                              variant={item.badge === "confirm" ? "default" : "secondary"}
+                              className="shrink-0 text-[10px]"
+                            >
+                              {item.badge}
+                            </Badge>
+                          </span>
+                          <code className="block break-words rounded-md bg-muted px-2 py-1 text-xs text-foreground">
+                            {item.sample}
+                          </code>
+                          <span className="block text-xs leading-5 text-muted-foreground">
+                            {item.description}
+                          </span>
+                        </span>
+                        <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground transition group-hover:text-primary" />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 

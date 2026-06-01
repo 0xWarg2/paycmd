@@ -155,4 +155,22 @@
   .paycmd-chat-scrollbar::-webkit-scrollbar {
     display: none;
   }
+
+  .paycmd-command-palette-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--primary) 72%, transparent) transparent;
+  }
+
+  .paycmd-command-palette-scrollbar::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .paycmd-command-palette-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .paycmd-command-palette-scrollbar::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: color-mix(in oklch, var(--primary) 72%, transparent);
+  }
 }
