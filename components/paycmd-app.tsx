@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ArrowDown,
   Check,
   ChevronRight,
   Clock3,
@@ -244,16 +243,6 @@ export function PayCmdApp() {
           className="min-h-0 flex-1 overflow-y-auto px-3 py-4 md:px-6"
         >
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
-            {visibleCount < messages.length ? (
-              <button
-                className="mx-auto flex items-center gap-2 rounded-full border bg-card px-3 py-1.5 text-xs text-muted-foreground shadow-sm hover:text-foreground"
-                onClick={loadOlderMessages}
-              >
-                <ArrowDown className="h-3.5 w-3.5 rotate-180" />
-                Load older commands
-              </button>
-            ) : null}
-
             {visibleMessages.map((message) => (
               <MessageBubble
                 key={message.id}
