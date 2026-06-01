@@ -821,7 +821,7 @@ export function PayCmdApp() {
 
         <div className="shrink-0 border-t bg-card/94 px-3 py-3 backdrop-blur md:px-6">
           <div className="mx-auto w-full max-w-3xl">
-            {showPalette ? <CommandPalette onSelect={selectCommand} /> : null}
+            {showPalette ? <CommandPalette query={input} onSelect={selectCommand} /> : null}
 
             <form
               className="flex items-center gap-2 rounded-2xl border bg-background p-2 shadow-sm"
@@ -847,16 +847,45 @@ export function PayCmdApp() {
   );
 }
 
-function CommandPalette({ onSelect }: { onSelect: (sample: string) => void }) {
+function normalizePaletteQuery(query: string) {
+  return query.trim().replace(/^\/+/, "").toLowerCase();
+}
+
+function CommandPalette({
+  query,
+  onSelect,
+}: {
+  query: string;
+  onSelect: (sample: string) => void;
+}) {
+  const normalizedQuery = normalizePaletteQuery(query);
+  const filteredSections = commandTemplates
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => {
+        if (!normalizedQuery) return true;
+
+        const sample = item.sample.replace(/^\/+/, "").toLowerCase();
+        const firstToken = sample.split(/\s+/)[0] ?? "";
+        const searchable = `${sample} ${item.title} ${item.description}`.toLowerCase();
+
+        return firstToken.startsWith(normalizedQuery) || searchable.includes(normalizedQuery);
+      }),
+    }))
+    .filter((section) => section.items.length > 0);
+
   return (
     <div className="mb-2 overflow-hidden rounded-xl border bg-background shadow-sm">
       <div className="flex items-center justify-between border-b px-3 py-2">
         <div className="text-sm font-medium">Commands</div>
-        <div className="text-xs text-muted-foreground">Click để điền mẫu</div>
+        <div className="text-xs text-muted-foreground">
+          {normalizedQuery ? `Filter: ${normalizedQuery}` : "Click để điền mẫu"}
+        </div>
       </div>
       <div className="paycmd-command-palette-scrollbar max-h-[42vh] overflow-y-auto p-2">
-        <div className="grid gap-3">
-          {commandTemplates.map((section) => (
+        {filteredSections.length ? (
+          <div className="grid gap-3">
+            {filteredSections.map((section) => (
             <section key={section.group} className="space-y-2">
               <div className="px-1 text-xs font-semibold uppercase text-muted-foreground">
                 {section.group}
@@ -899,8 +928,13 @@ function CommandPalette({ onSelect }: { onSelect: (sample: string) => void }) {
                 })}
               </div>
             </section>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
+            Không có command khớp với “{normalizedQuery}”.
+          </div>
+        )}
       </div>
     </div>
   );
