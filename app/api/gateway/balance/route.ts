@@ -32,12 +32,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { addresses } = await req.json();
+    const { addresses: requestAddresses } = await req.json().catch(() => ({}));
+    let addresses = requestAddresses;
+
+    if (!addresses || !Array.isArray(addresses) || addresses.length === 0) {
+      const { data: wallets, error: walletError } = await supabase
+        .from("wallets")
+        .select("address, wallet_address")
+        .eq("user_id", user.id)
+        .eq("type", "sca")
+        .limit(1);
+
+      if (walletError) {
+        return NextResponse.json({ error: walletError.message }, { status: 500 });
+      }
+
+      addresses = (wallets ?? [])
+        .map((wallet) => wallet.address || wallet.wallet_address)
+        .filter(Boolean);
+    }
 
     if (!addresses || !Array.isArray(addresses) || addresses.length === 0) {
       return NextResponse.json(
-        { error: "Missing or invalid addresses array" },
-        { status: 400 }
+        { error: "No wallet address found. Run /wallet create first." },
+        { status: 404 }
       );
     }
 

@@ -1,6 +1,14 @@
 import { z } from "zod";
 
-export const commandNames = ["pay", "createbudget", "schedule"] as const;
+export const commandNames = [
+  "wallet",
+  "balance",
+  "deposit",
+  "transfer",
+  "gas",
+  "gateway",
+  "history",
+] as const;
 
 export type CommandName = (typeof commandNames)[number];
 
@@ -33,6 +41,19 @@ export type PayCmdCommand = {
 };
 
 const amountSchema = z.string().regex(/^\d+(\.\d{1,6})?$/);
+const chainAliases = {
+  arc: "arcTestnet",
+  arctestnet: "arcTestnet",
+  "arc-testnet": "arcTestnet",
+  base: "baseSepolia",
+  basesepolia: "baseSepolia",
+  "base-sepolia": "baseSepolia",
+  avalanche: "avalancheFuji",
+  avax: "avalancheFuji",
+  fuji: "avalancheFuji",
+  avalanchefuji: "avalancheFuji",
+  "avalanche-fuji": "avalancheFuji",
+} as const;
 
 function tokenFrom(input: string) {
   return input.match(/\b(USDC|EURC|USYC)\b/i)?.[1].toUpperCase() ?? "USDC";
@@ -40,6 +61,24 @@ function tokenFrom(input: string) {
 
 function amountFrom(input: string) {
   return input.match(/\b\d+(\.\d{1,6})?\b/)?.[0] ?? "";
+}
+
+function chainFrom(input: string) {
+  const token = input
+    .match(/\b(arc(?:-?testnet)?|base(?:-?sepolia)?|avalanche(?:-?fuji)?|avax|fuji)\b/i)?.[1]
+    ?.toLowerCase();
+
+  return token ? chainAliases[token as keyof typeof chainAliases] ?? "" : "";
+}
+
+function sourceChainFrom(input: string) {
+  const token = input.match(/\bfrom\s+(arc(?:-?testnet)?|base(?:-?sepolia)?|avalanche(?:-?fuji)?|avax|fuji)\b/i)?.[1];
+  return token ? chainAliases[token.toLowerCase() as keyof typeof chainAliases] ?? "" : "";
+}
+
+function destinationChainFrom(input: string) {
+  const token = input.match(/\bto\s+(arc(?:-?testnet)?|base(?:-?sepolia)?|avalanche(?:-?fuji)?|avax|fuji)\b/i)?.[1];
+  return token ? chainAliases[token.toLowerCase() as keyof typeof chainAliases] ?? "" : "";
 }
 
 function compact(raw: string) {
@@ -69,85 +108,158 @@ function result(
 
 export const commandRegistry: PayCmdCommand[] = [
   {
-    name: "pay",
-    aliases: ["/pay", "pay", "send"],
-    title: "Thanh toán một lần",
-    sample: "/pay 50 USDC to Minh",
-    requiredFields: ["amount", "token", "recipient"],
+    name: "wallet",
+    aliases: ["/wallet", "wallet"],
+    title: "Quản lý ví Circle",
+    sample: "/wallet status",
+    requiredFields: ["action"],
     parse(input) {
       const raw = compact(input);
-      const amount = amountFrom(raw);
-      const token = tokenFrom(raw);
-      const recipient =
-        raw.match(/\bto\s+([a-zA-Z0-9_. -]+)$/i)?.[1]?.trim() ?? "";
-      const safeAmount = amountSchema.safeParse(amount).success ? amount : "";
+      const action = raw.match(/\b(create|status)\b/i)?.[1]?.toLowerCase() ?? "";
 
       return result(
-        "pay",
+        "wallet",
         raw,
-        { amount: safeAmount, token, recipient },
+        { action },
         this.requiredFields,
         this.sample,
-        recipient && safeAmount
-          ? `Gửi ${safeAmount} ${token} cho ${recipient}`
-          : "Tạo payment draft",
+        action === "create"
+          ? "Tạo Circle wallet cho tài khoản này"
+          : action === "status"
+            ? "Kiểm tra trạng thái Circle wallet"
+            : "Chọn wallet action",
       );
     },
   },
   {
-    name: "createbudget",
-    aliases: ["/createbudget", "createbudget", "budget"],
-    title: "Tạo ngân sách",
-    sample: "/createbudget Marketing 500",
-    requiredFields: ["budgetName", "amount", "token"],
+    name: "balance",
+    aliases: ["/balance", "balance"],
+    title: "Xem unified balance",
+    sample: "/balance",
+    requiredFields: [],
     parse(input) {
       const raw = compact(input);
-      const amount = amountFrom(raw);
-      const token = tokenFrom(raw);
-      const budgetName = raw
-        .replace(/^\/?createbudget\s+/i, "")
-        .replace(/\b\d+(\.\d{1,6})?\b.*$/i, "")
-        .trim();
-      const safeAmount = amountSchema.safeParse(amount).success ? amount : "";
+      const chain = chainFrom(raw);
 
       return result(
-        "createbudget",
+        "balance",
         raw,
-        { budgetName, amount: safeAmount, token },
+        { chain },
         this.requiredFields,
         this.sample,
-        budgetName && safeAmount
-          ? `Tạo ngân sách ${budgetName} ${safeAmount} ${token}`
-          : "Tạo budget draft",
+        chain ? `Xem USDC balance trên ${chain}` : "Xem tổng unified USDC balance",
       );
     },
   },
   {
-    name: "schedule",
-    aliases: ["/schedule", "schedule", "recurring"],
-    title: "Thanh toán định kỳ",
-    sample: "/schedule 25 USDC monthly to Minh",
-    requiredFields: ["amount", "token", "frequency", "recipient"],
+    name: "deposit",
+    aliases: ["/deposit", "deposit"],
+    title: "Deposit vào Gateway",
+    sample: "/deposit 50 from arc",
+    requiredFields: ["amount", "sourceChain"],
     parse(input) {
       const raw = compact(input);
       const amount = amountFrom(raw);
       const token = tokenFrom(raw);
-      const frequency =
-        raw.match(/\b(daily|weekly|monthly|quarterly)\b/i)?.[1]?.toLowerCase() ??
-        "";
-      const recipient =
-        raw.match(/\bto\s+([a-zA-Z0-9_. -]+)$/i)?.[1]?.trim() ?? "";
+      const sourceChain = sourceChainFrom(raw) || chainFrom(raw);
       const safeAmount = amountSchema.safeParse(amount).success ? amount : "";
 
       return result(
-        "schedule",
+        "deposit",
         raw,
-        { amount: safeAmount, token, frequency, recipient },
+        { amount: safeAmount, token, sourceChain },
         this.requiredFields,
         this.sample,
-        recipient && safeAmount && frequency
-          ? `Lên lịch ${safeAmount} ${token} ${frequency} cho ${recipient}`
-          : "Tạo schedule draft",
+        sourceChain && safeAmount
+          ? `Deposit ${safeAmount} ${token} từ ${sourceChain} vào Circle Gateway`
+          : "Tạo Gateway deposit draft",
+      );
+    },
+  },
+  {
+    name: "transfer",
+    aliases: ["/transfer", "transfer"],
+    title: "Chuyển unified balance",
+    sample: "/transfer 10 from base to arc",
+    requiredFields: ["amount", "sourceChain", "destinationChain"],
+    parse(input) {
+      const raw = compact(input);
+      const amount = amountFrom(raw);
+      const token = tokenFrom(raw);
+      const sourceChain = sourceChainFrom(raw);
+      const destinationChain = destinationChainFrom(raw);
+      const safeAmount = amountSchema.safeParse(amount).success ? amount : "";
+
+      return result(
+        "transfer",
+        raw,
+        { amount: safeAmount, token, sourceChain, destinationChain },
+        this.requiredFields,
+        this.sample,
+        sourceChain && destinationChain && safeAmount
+          ? `Transfer ${safeAmount} ${token} từ ${sourceChain} sang ${destinationChain}`
+          : "Tạo Gateway transfer draft",
+      );
+    },
+  },
+  {
+    name: "gas",
+    aliases: ["/gas", "gas"],
+    title: "Kiểm tra gas",
+    sample: "/gas check arc",
+    requiredFields: ["action", "chain"],
+    parse(input) {
+      const raw = compact(input);
+      const action = raw.match(/\bcheck\b/i)?.[0]?.toLowerCase() ?? "";
+      const chain = chainFrom(raw);
+
+      return result(
+        "gas",
+        raw,
+        { action, chain },
+        this.requiredFields,
+        this.sample,
+        chain ? `Kiểm tra gas trên ${chain}` : "Kiểm tra gas wallet",
+      );
+    },
+  },
+  {
+    name: "gateway",
+    aliases: ["/gateway", "gateway"],
+    title: "Gateway info",
+    sample: "/gateway info",
+    requiredFields: ["action"],
+    parse(input) {
+      const raw = compact(input);
+      const action = raw.match(/\binfo\b/i)?.[0]?.toLowerCase() ?? "";
+
+      return result(
+        "gateway",
+        raw,
+        { action },
+        this.requiredFields,
+        this.sample,
+        "Xem Circle Gateway domains và contracts",
+      );
+    },
+  },
+  {
+    name: "history",
+    aliases: ["/history", "history"],
+    title: "Lịch sử giao dịch",
+    sample: "/history",
+    requiredFields: [],
+    parse(input) {
+      const raw = compact(input);
+      const filter = raw.match(/\b(deposit|transfer)\b/i)?.[1]?.toLowerCase() ?? "";
+
+      return result(
+        "history",
+        raw,
+        { filter },
+        this.requiredFields,
+        this.sample,
+        filter ? `Xem lịch sử ${filter}` : "Xem lịch sử giao dịch Gateway",
       );
     },
   },
@@ -164,11 +276,11 @@ export function parsePayCmd(input: string): ParsedCommand {
 
   if (!command) {
     return {
-      command: "pay",
+      command: "balance",
       raw: normalized,
       fields: {},
       missingFields: ["command"],
-      sample: "/pay 50 USDC to Minh",
+      sample: "/balance",
       summary: "Chưa nhận diện được command",
       status: "needs_input",
     };
@@ -195,4 +307,12 @@ export function createDemoExecution(parsed: ParsedCommand) {
       mode: "demo",
     },
   };
+}
+
+export function requiresConfirmation(command: ParsedCommand) {
+  return (
+    (command.command === "wallet" && command.fields.action === "create") ||
+    command.command === "deposit" ||
+    command.command === "transfer"
+  );
 }
