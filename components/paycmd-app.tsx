@@ -246,7 +246,7 @@ export function PayCmdApp() {
         <div
           ref={viewportRef}
           onScroll={handleViewportScroll}
-          className="min-h-0 flex-1 overflow-y-auto px-3 py-4 md:px-6"
+          className="paycmd-chat-scrollbar min-h-0 flex-1 overflow-y-scroll px-3 py-4 md:px-6"
         >
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
             {visibleMessages.map((message) => (

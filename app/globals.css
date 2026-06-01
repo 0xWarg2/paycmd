@@ -145,3 +145,51 @@
     @apply overflow-hidden bg-background text-foreground;
   }
 }
+
+@layer utilities {
+  .paycmd-chat-scrollbar {
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: oklch(0.62 0.08 164) oklch(0.94 0.012 84 / 70%);
+  }
+
+  .paycmd-chat-scrollbar::-webkit-scrollbar {
+    width: 10px;
+  }
+
+  .paycmd-chat-scrollbar::-webkit-scrollbar-track {
+    background: oklch(0.94 0.012 84 / 70%);
+    border-radius: 999px;
+  }
+
+  .paycmd-chat-scrollbar::-webkit-scrollbar-thumb {
+    background: oklch(0.62 0.08 164);
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
+  }
+
+  .paycmd-chat-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: oklch(0.52 0.12 164);
+    background-clip: content-box;
+  }
+
+  .dark .paycmd-chat-scrollbar {
+    scrollbar-color: oklch(0.62 0.09 164) oklch(0.22 0.02 250 / 90%);
+  }
+
+  .dark .paycmd-chat-scrollbar::-webkit-scrollbar-track {
+    background: oklch(0.22 0.02 250 / 90%);
+  }
+
+  .dark .paycmd-chat-scrollbar::-webkit-scrollbar-thumb {
+    background: oklch(0.62 0.09 164);
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  .dark .paycmd-chat-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: oklch(0.72 0.12 164);
+    background-clip: content-box;
+  }
+}
