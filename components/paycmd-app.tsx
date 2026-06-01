@@ -9,12 +9,13 @@ import {
   Send,
   Sparkles,
 } from "lucide-react";
-import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { PayCmdShell } from "@/components/paycmd-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { createClient } from "@/lib/supabase/client";
 import {
   commandRegistry,
   createDemoExecution,
@@ -29,6 +30,7 @@ type ChatMessage = {
   kind?: "text" | "preview" | "status";
   draft?: ParsedCommand;
   execution?: ExecutionItem;
+  createdAt?: string;
 };
 
 type NotificationItem = {
@@ -44,25 +46,18 @@ type ExecutionItem = ReturnType<typeof createDemoExecution> & {
   txHash?: string;
 };
 
+type ChatMessageRow = {
+  id: string;
+  thread_id: string;
+  user_id: string;
+  role: "assistant" | "user" | "system";
+  content: string;
+  kind: "text" | "preview" | "status";
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
 const MESSAGE_PAGE_SIZE = 10;
-
-const seedHistory: ChatMessage[] = Array.from({ length: 36 }, (_, index) => ({
-  id: `seed_${index}`,
-  role: index % 3 === 0 ? "user" : "assistant",
-  text:
-    index % 3 === 0
-      ? `/pay ${10 + index} USDC to Minh`
-      : `Command history #${index + 1} đã sẵn sàng để audit.`,
-}));
-
-const initialMessages: ChatMessage[] = [
-  ...seedHistory,
-  {
-    id: "welcome",
-    role: "assistant",
-    text: "PayCMD đã sẵn sàng. Gõ / để chọn command hoặc thử /pay 50 USDC to Minh.",
-  },
-];
 
 function missingFieldQuestion(field: string) {
   const labels: Record<string, string> = {
@@ -91,8 +86,12 @@ function statusLabel(status: ExecutionItem["status"]) {
 
 export function PayCmdApp() {
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
-  const [visibleCount, setVisibleCount] = useState(MESSAGE_PAGE_SIZE);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [threadId, setThreadId] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const [, setExecutions] = useState<ExecutionItem[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -101,10 +100,6 @@ export function PayCmdApp() {
   const previousScrollHeightRef = useRef<number | null>(null);
 
   const showPalette = input.trim() === "/" || input.startsWith("/");
-  const visibleMessages = useMemo(
-    () => messages.slice(Math.max(0, messages.length - visibleCount)),
-    [messages, visibleCount],
-  );
   const unreadCount = notifications.filter((item) => item.status === "unread").length;
   const scrollThumbHeight = Math.max(
     36,
@@ -116,6 +111,20 @@ export function PayCmdApp() {
       : (scrollMetrics.top / (scrollMetrics.height - scrollMetrics.client)) *
         (100 - scrollThumbHeight);
 
+  function mapRowToMessage(row: ChatMessageRow): ChatMessage {
+    const metadata = row.metadata ?? {};
+
+    return {
+      id: row.id,
+      role: row.role,
+      text: row.content,
+      kind: row.kind,
+      draft: metadata.draft as ParsedCommand | undefined,
+      execution: metadata.execution as ExecutionItem | undefined,
+      createdAt: row.created_at,
+    };
+  }
+
   function addMessage(message: Omit<ChatMessage, "id"> & { id?: string }) {
     setMessages((current) => [
       ...current,
@@ -123,16 +132,93 @@ export function PayCmdApp() {
     ]);
   }
 
-  function addSystemStatus(text: string, execution: ExecutionItem) {
-    addMessage({ role: "system", text, kind: "status", execution });
+  async function saveMessage(message: Omit<ChatMessage, "id">) {
+    if (!threadId || !userId) {
+      addMessage(message);
+      return null;
+    }
+
+    const supabase = createClient();
+    const metadata = {
+      draft: message.draft ?? null,
+      execution: message.execution ?? null,
+    };
+    const { data, error } = await supabase
+      .from("chat_messages")
+      .insert({
+        thread_id: threadId,
+        user_id: userId,
+        role: message.role,
+        content: message.text,
+        kind: message.kind ?? "text",
+        metadata,
+      })
+      .select("*")
+      .single();
+
+    if (error || !data) {
+      console.error("Failed to save chat message", error);
+      addMessage(message);
+      return null;
+    }
+
+    const savedMessage = mapRowToMessage(data as ChatMessageRow);
+    setMessages((current) => [...current, savedMessage]);
+    return savedMessage;
   }
 
-  function loadOlderMessages() {
+  async function addSystemStatus(text: string, execution: ExecutionItem) {
+    await saveMessage({ role: "system", text, kind: "status", execution });
+  }
+
+  async function loadOlderMessages() {
     const viewport = viewportRef.current;
-    if (!viewport || visibleCount >= messages.length) return;
+    if (!viewport || !threadId || isLoadingOlder || !hasOlderMessages || !messages.length) return;
 
     previousScrollHeightRef.current = viewport.scrollHeight;
-    setVisibleCount((current) => Math.min(messages.length, current + MESSAGE_PAGE_SIZE));
+    setIsLoadingOlder(true);
+
+    const oldestMessage = messages[0] as ChatMessage & { createdAt?: string };
+    const oldestCreatedAt = oldestMessage.createdAt;
+    if (!oldestCreatedAt) {
+      previousScrollHeightRef.current = null;
+      setIsLoadingOlder(false);
+      return;
+    }
+
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("chat_messages")
+      .select("*")
+      .eq("thread_id", threadId)
+      .lt("created_at", oldestCreatedAt)
+      .order("created_at", { ascending: false })
+      .limit(MESSAGE_PAGE_SIZE);
+
+    if (error) {
+      console.error("Failed to load older messages", error);
+      previousScrollHeightRef.current = null;
+      setIsLoadingOlder(false);
+      return;
+    }
+
+    const olderRows = ((data ?? []) as ChatMessageRow[]).reverse();
+    if (!olderRows.length) {
+      previousScrollHeightRef.current = null;
+      setHasOlderMessages(false);
+      setIsLoadingOlder(false);
+      return;
+    }
+
+    setHasOlderMessages(olderRows.length === MESSAGE_PAGE_SIZE);
+    setMessages((current) => [
+      ...olderRows.map((row) => ({
+        ...mapRowToMessage(row),
+        createdAt: row.created_at,
+      })),
+      ...current,
+    ]);
+    setIsLoadingOlder(false);
   }
 
   function handleViewportScroll() {
@@ -144,7 +230,7 @@ export function PayCmdApp() {
       client: viewport.clientHeight,
     });
     if (viewport.scrollTop < 48) {
-      loadOlderMessages();
+      void loadOlderMessages();
     }
   }
 
@@ -160,23 +246,21 @@ export function PayCmdApp() {
     if (!value) return;
 
     const parsed = parsePayCmd(value);
-    addMessage({ role: "user", text: value });
+    await saveMessage({ role: "user", text: value });
     setInput("");
 
     if (parsed.missingFields.length) {
-      addMessage({ role: "assistant", text: missingFieldQuestion(parsed.missingFields[0]) });
+      await saveMessage({ role: "assistant", text: missingFieldQuestion(parsed.missingFields[0]) });
       return;
     }
 
-    const previewId = `preview_${Date.now()}`;
-    setActiveDraftId(previewId);
-    addMessage({
-      id: previewId,
+    const previewMessage = await saveMessage({
       role: "assistant",
       text: parsed.summary,
       kind: "preview",
       draft: parsed,
     });
+    setActiveDraftId(previewMessage?.id ?? null);
   }
 
   function selectCommand(sample: string) {
@@ -189,14 +273,14 @@ export function PayCmdApp() {
     const execution = createDemoExecution(draft) as ExecutionItem;
     setActiveDraftId(null);
     setExecutions((current) => [execution, ...current]);
-    addSystemStatus(`${execution.title} đã được đưa vào hàng đợi.`, execution);
+    void addSystemStatus(`${execution.title} đã được đưa vào hàng đợi.`, execution);
 
     window.setTimeout(() => {
       const running = { ...execution, status: "running" as const };
       setExecutions((current) =>
         current.map((item) => (item.id === execution.id ? running : item)),
       );
-      addSystemStatus(`${execution.title} đang được xử lý.`, running);
+      void addSystemStatus(`${execution.title} đang được xử lý.`, running);
     }, 900);
 
     window.setTimeout(() => {
@@ -204,7 +288,7 @@ export function PayCmdApp() {
       setExecutions((current) =>
         current.map((item) => (item.id === execution.id ? waiting : item)),
       );
-      addSystemStatus(`${execution.title} đang chờ Circle Gateway.`, waiting);
+      void addSystemStatus(`${execution.title} đang chờ Circle Gateway.`, waiting);
     }, 2100);
 
     window.setTimeout(() => {
@@ -223,7 +307,7 @@ export function PayCmdApp() {
         },
         ...current,
       ]);
-      addSystemStatus(`${execution.title} đã hoàn tất.`, success);
+      void addSystemStatus(`${execution.title} đã hoàn tất.`, success);
     }, 4200);
   }
 
@@ -234,7 +318,7 @@ export function PayCmdApp() {
 
     viewport.scrollTop = viewport.scrollHeight - previousHeight;
     previousScrollHeightRef.current = null;
-  }, [visibleCount]);
+  }, [messages.length]);
 
   useEffect(() => {
     if (previousScrollHeightRef.current !== null) return;
@@ -250,7 +334,83 @@ export function PayCmdApp() {
       height: viewport.scrollHeight,
       client: viewport.clientHeight,
     });
-  }, [visibleCount, messages.length]);
+  }, [messages.length]);
+
+  useEffect(() => {
+    async function bootstrapChat() {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        window.location.href = "/auth/login";
+        return;
+      }
+
+      setUserId(user.id);
+
+      const { data: existingThread, error: threadError } = await supabase
+        .from("chat_threads")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("status", "active")
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (threadError) {
+        console.error("Failed to load chat thread", threadError);
+        setIsLoadingHistory(false);
+        return;
+      }
+
+      let activeThreadId = existingThread?.id as string | undefined;
+
+      if (!activeThreadId) {
+        const { data: createdThread, error: createThreadError } = await supabase
+          .from("chat_threads")
+          .insert({ user_id: user.id, title: "PayCMD main thread" })
+          .select("*")
+          .single();
+
+        if (createThreadError || !createdThread) {
+          console.error("Failed to create chat thread", createThreadError);
+          setIsLoadingHistory(false);
+          return;
+        }
+
+        activeThreadId = createdThread.id as string;
+      }
+
+      setThreadId(activeThreadId);
+
+      const { data: recentMessages, error: messagesError } = await supabase
+        .from("chat_messages")
+        .select("*")
+        .eq("thread_id", activeThreadId)
+        .order("created_at", { ascending: false })
+        .limit(MESSAGE_PAGE_SIZE);
+
+      if (messagesError) {
+        console.error("Failed to load chat messages", messagesError);
+        setIsLoadingHistory(false);
+        return;
+      }
+
+      const recentRows = ((recentMessages ?? []) as ChatMessageRow[]).reverse();
+      setHasOlderMessages(recentRows.length === MESSAGE_PAGE_SIZE);
+      setMessages(
+        recentRows.map((row) => ({
+          ...mapRowToMessage(row),
+          createdAt: row.created_at,
+        })),
+      );
+      setIsLoadingHistory(false);
+    }
+
+    void bootstrapChat();
+  }, []);
 
   return (
     <PayCmdShell>
@@ -276,14 +436,30 @@ export function PayCmdApp() {
             className="paycmd-chat-scrollbar h-full overflow-y-scroll px-3 py-4 pr-6 md:px-6 md:pr-9"
           >
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
-              {visibleMessages.map((message) => (
+              {isLoadingHistory ? (
+                <div className="mx-auto rounded-full border bg-card px-4 py-2 text-sm text-muted-foreground">
+                  Loading chat history...
+                </div>
+              ) : messages.length ? (
+                messages.map((message) => (
+                  <MessageBubble
+                    key={message.id}
+                    message={message}
+                    activeDraftId={activeDraftId}
+                    onConfirm={confirmDraft}
+                  />
+                ))
+              ) : (
                 <MessageBubble
-                  key={message.id}
-                  message={message}
+                  message={{
+                    id: "welcome",
+                    role: "assistant",
+                    text: "PayCMD đã sẵn sàng. Gõ / để chọn command hoặc thử /pay 50 USDC to Minh.",
+                  }}
                   activeDraftId={activeDraftId}
                   onConfirm={confirmDraft}
                 />
-              ))}
+              )}
             </div>
           </div>
 

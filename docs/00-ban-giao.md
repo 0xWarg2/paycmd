@@ -13,6 +13,8 @@ PayCMD giúp người dùng vận hành thanh toán stablecoin bằng chat và s
 V1 là demo DApp chatbox-first:
 
 - Nhập lệnh `/pay`, `/createbudget`, `/schedule`.
+- Login bằng Supabase Auth để gắn chat history với từng user.
+- Lịch sử chat lưu trong Supabase và reload vẫn giữ lại.
 - Assistant hỏi lại khi thiếu dữ liệu.
 - Luôn có preview trước khi execute.
 - Confirm xong command chạy bất đồng bộ.

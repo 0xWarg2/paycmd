@@ -62,30 +62,17 @@ export function SignUpForm({
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/dashboard`,
+          emailRedirectTo: `${window.location.origin}/`,
         },
       });
       if (error) throw error;
 
-      // If user is created, initialize wallets in the background
       if (data.user) {
-        try {
-          // Create wallet set with SCA wallets for each chain
-          await fetch("/api/wallet-set", {
-            method: "POST",
-          });
-
-          // Create EOA signer wallets for Gateway (hidden from UI)
-          await fetch("/api/gateway/init-eoa-wallets", {
-            method: "POST",
-          });
-        } catch (walletError) {
-          console.error("Error creating wallets during signup:", walletError);
-          // Continue with signup even if wallet creation fails
-        }
+        router.push("/");
+      } else {
+        router.push("/auth/login");
       }
-
-      router.push("/dashboard");
+      router.refresh();
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : "An error occurred");
     } finally {
@@ -97,8 +84,8 @@ export function SignUpForm({
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
         <CardHeader>
-          <CardTitle className="text-2xl">Sign up</CardTitle>
-          <CardDescription>Create a new account</CardDescription>
+          <CardTitle className="text-2xl">Create PayCMD account</CardTitle>
+          <CardDescription>Create an account to save command history.</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSignUp}>

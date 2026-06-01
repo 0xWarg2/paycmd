@@ -8,6 +8,7 @@ Migration chính:
 
 ```text
 supabase/migrations/20260601000000_create_paycmd_core_tables.sql
+supabase/migrations/20260601010000_create_chat_history_tables.sql
 ```
 
 Sau khi tạo project, áp migration bằng Supabase MCP hoặc Supabase CLI.

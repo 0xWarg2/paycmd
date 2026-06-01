@@ -11,6 +11,8 @@
 ## Success Criteria
 
 - Gõ `/` hiện command palette.
+- User phải login trước khi vào chat.
+- Chat history lưu theo user và reload không mất.
 - Command thiếu dữ liệu sẽ hỏi lại trường còn thiếu.
 - Command đủ dữ liệu tạo draft preview.
 - Người dùng confirm trước khi execute.

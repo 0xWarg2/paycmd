@@ -21,8 +21,8 @@ PayCMD là chatbox-first. Chat phải giống một app nhắn tin hơn dashboar
 
 ## Message Loading
 
-- Khi mở app chỉ render khoảng 10 message gần nhất.
-- Khi scroll lên đầu chat box, load thêm 10 message cũ.
+- Khi mở app, tải 10 message gần nhất từ Supabase theo user đang đăng nhập.
+- Khi scroll lên đầu chat box, query thêm 10 message cũ từ `chat_messages`.
 - Vị trí scroll được giữ lại để user không bị nhảy màn hình.
 - Khi gửi command mới, chat tự scroll xuống cuối.
 
@@ -32,6 +32,13 @@ PayCMD là chatbox-first. Chat phải giống một app nhắn tin hơn dashboar
 - Preview/confirm payment hiển thị như một card trong message bubble.
 - Execution status hiển thị trong chat: `Queued`, `Running`, `Gateway`, `Success`.
 - Notification chi tiết nằm ở `/notifications`.
+
+## Auth
+
+- User chưa đăng nhập bị chuyển về `/auth/login`.
+- User đã đăng nhập vào thẳng chat page `/`.
+- Sidebar hiển thị email và nút logout.
+- Logout không xóa lịch sử chat.
 
 ## Missing Field Flow
 

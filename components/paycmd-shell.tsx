@@ -1,17 +1,33 @@
 "use client";
 
-import { Command, ShieldCheck } from "lucide-react";
+import { Command, LogOut, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ReactNode } from "react";
+import { ReactNode, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ThemeSwitcher } from "@/components/theme-switcher";
+import { createClient } from "@/lib/supabase/client";
 import { availableBudget, demoNotifications, navigationItems } from "@/lib/paycmd/demo-data";
 
 export function PayCmdShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const [email, setEmail] = useState<string>("");
   const unreadCount = demoNotifications.filter((item) => item.status === "unread").length;
+
+  useEffect(() => {
+    const supabase = createClient();
+    void supabase.auth.getUser().then(({ data }) => {
+      setEmail(data.user?.email ?? "");
+    });
+  }, []);
+
+  async function logout() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    window.location.href = "/auth/login";
+  }
 
   return (
     <main className="h-dvh overflow-hidden bg-background text-foreground">
@@ -64,6 +80,10 @@ export function PayCmdShell({ children }: { children: ReactNode }) {
           </nav>
 
           <div className="border-t p-3">
+            <div className="mb-2 rounded-md border bg-background px-3 py-2">
+              <div className="text-sm font-medium">Account</div>
+              <div className="truncate text-xs text-muted-foreground">{email || "Signed in"}</div>
+            </div>
             <div className="flex items-center justify-between rounded-md border bg-background px-3 py-2">
               <div>
                 <div className="text-sm font-medium">Appearance</div>
@@ -71,6 +91,10 @@ export function PayCmdShell({ children }: { children: ReactNode }) {
               </div>
               <ThemeSwitcher />
             </div>
+            <Button className="mt-2 w-full justify-start" variant="outline" onClick={logout}>
+              <LogOut className="mr-2 h-4 w-4" />
+              Logout
+            </Button>
           </div>
         </aside>
 
@@ -81,6 +105,9 @@ export function PayCmdShell({ children }: { children: ReactNode }) {
           </Link>
           <div className="flex items-center gap-2">
             <ThemeSwitcher />
+            <Button variant="ghost" size="icon" onClick={logout} aria-label="Logout">
+              <LogOut className="h-4 w-4" />
+            </Button>
             <Badge variant="secondary">${availableBudget().toLocaleString()} USDC</Badge>
           </div>
         </header>
