@@ -20,6 +20,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { createSupabaseReqResClient } from "@/lib/supabase/server-client";
 
 export async function proxy(request: NextRequest) {
+  const pathname = request.nextUrl.pathname;
   const response = NextResponse.next({
     request: {
       headers: request.headers,
@@ -32,17 +33,16 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Skip redirect logic for API routes
-  if (request.nextUrl.pathname.startsWith("/api")) {
+  if (
+    pathname.startsWith("/api") ||
+    pathname.startsWith("/auth") ||
+    pathname === "/favicon.ico"
+  ) {
     return response;
   }
 
-  if (!user && request.nextUrl.pathname.startsWith("/dashboard")) {
-    return NextResponse.redirect(new URL("/", request.url));
-  }
-
-  if (user && !request.nextUrl.pathname.startsWith("/dashboard")) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+  if (!user) {
+    return NextResponse.redirect(new URL("/auth/login", request.url));
   }
 
   return response;

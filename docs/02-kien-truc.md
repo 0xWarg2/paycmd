@@ -31,6 +31,8 @@ Thiết kế này giúp thêm command mới mà không viết lại chat shell.
 
 Các bảng chính:
 
+- `chat_threads`
+- `chat_messages`
 - `contacts`
 - `budgets`
 - `payment_drafts`
@@ -39,3 +41,5 @@ Các bảng chính:
 - `notifications`
 
 RLS được bật cho từng bảng và dữ liệu thuộc về `auth.uid()`.
+
+Chat history được lưu theo user trong Supabase. Khi mở app, PayCMD tải 10 message mới nhất; khi scroll lên đầu chat box, app tải thêm 10 message cũ hơn.

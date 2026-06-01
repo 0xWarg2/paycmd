@@ -29,6 +29,10 @@ npm run dev
 
 Mở `http://localhost:3000`. App có demo mode nên vẫn chạy được khi chưa có Circle secrets.
 
+## Deploy
+
+Project deploy bằng Vercel Git Integration. Dùng `dev` để phát triển và preview, merge vào `main` để Vercel tự deploy production. GitHub Actions chỉ chạy lint/build.
+
 ## Biến Môi Trường
 
 Sao chép `.env.example` thành `.env.local` và điền các biến cần thiết.
