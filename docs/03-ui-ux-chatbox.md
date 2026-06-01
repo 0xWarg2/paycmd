@@ -21,8 +21,8 @@ PayCMD là chatbox-first. Chat phải giống một app nhắn tin hơn dashboar
 
 ## Message Loading
 
-- Khi mở app chỉ render khoảng 20 message gần nhất.
-- Khi scroll lên đầu chat box, load thêm 20 message cũ.
+- Khi mở app chỉ render khoảng 10 message gần nhất.
+- Khi scroll lên đầu chat box, load thêm 10 message cũ.
 - Vị trí scroll được giữ lại để user không bị nhảy màn hình.
 - Khi gửi command mới, chat tự scroll xuống cuối.
 

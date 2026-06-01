@@ -45,6 +45,8 @@ type ExecutionItem = ReturnType<typeof createDemoExecution> & {
   txHash?: string;
 };
 
+const MESSAGE_PAGE_SIZE = 10;
+
 const seedHistory: ChatMessage[] = Array.from({ length: 36 }, (_, index) => ({
   id: `seed_${index}`,
   role: index % 3 === 0 ? "user" : "assistant",
@@ -91,7 +93,7 @@ function statusLabel(status: ExecutionItem["status"]) {
 export function PayCmdApp() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
-  const [visibleCount, setVisibleCount] = useState(20);
+  const [visibleCount, setVisibleCount] = useState(MESSAGE_PAGE_SIZE);
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const [, setExecutions] = useState<ExecutionItem[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -120,7 +122,7 @@ export function PayCmdApp() {
     if (!viewport || visibleCount >= messages.length) return;
 
     const previousHeight = viewport.scrollHeight;
-    setVisibleCount((current) => Math.min(messages.length, current + 20));
+    setVisibleCount((current) => Math.min(messages.length, current + MESSAGE_PAGE_SIZE));
 
     window.requestAnimationFrame(() => {
       const nextHeight = viewport.scrollHeight;
@@ -139,7 +141,7 @@ export function PayCmdApp() {
   function scrollToLatest() {
     const viewport = viewportRef.current;
     if (!viewport) return;
-    viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
+    viewport.scrollTop = viewport.scrollHeight;
   }
 
   async function submitCommand(event: FormEvent) {
@@ -216,8 +218,8 @@ export function PayCmdApp() {
   }
 
   useEffect(() => {
-    scrollToLatest();
-  }, [messages.length]);
+    window.requestAnimationFrame(scrollToLatest);
+  }, [messages.length, visibleMessages.length]);
 
   return (
     <PayCmdShell>
