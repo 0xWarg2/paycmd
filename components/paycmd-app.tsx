@@ -96,6 +96,7 @@ export function PayCmdApp() {
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const [, setExecutions] = useState<ExecutionItem[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [scrollMetrics, setScrollMetrics] = useState({ top: 0, height: 1, client: 1 });
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const previousScrollHeightRef = useRef<number | null>(null);
 
@@ -105,6 +106,15 @@ export function PayCmdApp() {
     [messages, visibleCount],
   );
   const unreadCount = notifications.filter((item) => item.status === "unread").length;
+  const scrollThumbHeight = Math.max(
+    36,
+    Math.min(100, (scrollMetrics.client / scrollMetrics.height) * 100),
+  );
+  const scrollThumbTop =
+    scrollMetrics.height <= scrollMetrics.client
+      ? 0
+      : (scrollMetrics.top / (scrollMetrics.height - scrollMetrics.client)) *
+        (100 - scrollThumbHeight);
 
   function addMessage(message: Omit<ChatMessage, "id"> & { id?: string }) {
     setMessages((current) => [
@@ -128,6 +138,11 @@ export function PayCmdApp() {
   function handleViewportScroll() {
     const viewport = viewportRef.current;
     if (!viewport) return;
+    setScrollMetrics({
+      top: viewport.scrollTop,
+      height: viewport.scrollHeight,
+      client: viewport.clientHeight,
+    });
     if (viewport.scrollTop < 48) {
       loadOlderMessages();
     }
@@ -226,6 +241,17 @@ export function PayCmdApp() {
     window.requestAnimationFrame(scrollToLatest);
   }, [messages.length]);
 
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    setScrollMetrics({
+      top: viewport.scrollTop,
+      height: viewport.scrollHeight,
+      client: viewport.clientHeight,
+    });
+  }, [visibleCount, messages.length]);
+
   return (
     <PayCmdShell>
       <div className="flex h-full min-h-0 flex-col bg-[radial-gradient(circle_at_top_left,oklch(0.96_0.035_168),transparent_32%),linear-gradient(180deg,oklch(0.99_0.006_84),oklch(0.965_0.012_240))] dark:bg-[radial-gradient(circle_at_top_left,oklch(0.28_0.07_166),transparent_30%),linear-gradient(180deg,oklch(0.16_0.018_250),oklch(0.11_0.012_250))]">
@@ -243,20 +269,32 @@ export function PayCmdApp() {
           </div>
         </header>
 
-        <div
-          ref={viewportRef}
-          onScroll={handleViewportScroll}
-          className="paycmd-chat-scrollbar min-h-0 flex-1 overflow-y-scroll px-3 py-4 md:px-6"
-        >
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
-            {visibleMessages.map((message) => (
-              <MessageBubble
-                key={message.id}
-                message={message}
-                activeDraftId={activeDraftId}
-                onConfirm={confirmDraft}
-              />
-            ))}
+        <div className="relative min-h-0 flex-1">
+          <div
+            ref={viewportRef}
+            onScroll={handleViewportScroll}
+            className="paycmd-chat-scrollbar h-full overflow-y-scroll px-3 py-4 pr-6 md:px-6 md:pr-9"
+          >
+            <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+              {visibleMessages.map((message) => (
+                <MessageBubble
+                  key={message.id}
+                  message={message}
+                  activeDraftId={activeDraftId}
+                  onConfirm={confirmDraft}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="pointer-events-none absolute bottom-3 right-2 top-3 w-2 rounded-full bg-border/80 dark:bg-border/70">
+            <div
+              className="absolute left-0 w-2 rounded-full bg-primary shadow-sm transition-[top,height]"
+              style={{
+                height: `${scrollThumbHeight}%`,
+                top: `${scrollThumbTop}%`,
+              }}
+            />
           </div>
         </div>
 
