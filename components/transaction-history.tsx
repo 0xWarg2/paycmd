@@ -127,7 +127,7 @@ export function TransactionHistory() {
 
   // Filter and sort transactions
   const filteredAndSortedTransactions = useMemo(() => {
-    let filtered = transactions.filter((tx) => {
+    const filtered = transactions.filter((tx) => {
       // Search filter (tx hash, chain, or destination chain)
       const searchLower = searchTerm.toLowerCase();
       const matchesSearch =

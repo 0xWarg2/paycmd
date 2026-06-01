@@ -27,8 +27,9 @@ const defaultUrl = process.env.VERCEL_URL
 
 export const metadata: Metadata = {
   metadataBase: new URL(defaultUrl),
-  title: "Multichain Gateway Wallet",
-  description: "Demo for wallet with unified cross-chain USDC balances and transfers",
+  title: "PayCMD - Stablecoin payments by command",
+  description:
+    "Chatbox-first demo for agentic stablecoin payments on Arc and Circle Gateway.",
 };
 
 export default function RootLayout({
@@ -37,7 +38,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="vi" suppressHydrationWarning>
       <body className="font-sans antialiased">
         <ThemeProvider
           attribute="class"
