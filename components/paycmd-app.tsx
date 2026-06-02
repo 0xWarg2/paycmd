@@ -1,13 +1,18 @@
 "use client";
 
 import {
+  BadgeDollarSign,
   Check,
   ChevronRight,
   Clock3,
+  History,
   Loader2,
   Paperclip,
   Send,
   Sparkles,
+  Wallet,
+  WalletCards,
+  Waypoints,
 } from "lucide-react";
 import { FormEvent, useEffect, useLayoutEffect, useRef, useState, WheelEvent } from "react";
 
@@ -17,10 +22,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import {
-  commandRegistry,
-  createDemoExecution,
   parsePayCmd,
   ParsedCommand,
+  requiresConfirmation,
 } from "@/lib/paycmd/commands";
 
 type ChatMessage = {
@@ -41,9 +45,21 @@ type NotificationItem = {
   commandExecutionId: string;
 };
 
-type ExecutionItem = ReturnType<typeof createDemoExecution> & {
+type ExecutionItem = {
+  id: string;
+  draftId: string;
+  command: ParsedCommand["command"];
   status: "queued" | "running" | "waiting_gateway" | "success" | "failed";
+  title: string;
+  createdAt: string;
+  gateway: {
+    network: string;
+    rail: string;
+    mode: string;
+  };
   txHash?: string;
+  result?: unknown;
+  error?: string;
 };
 
 type ChatMessageRow = {
@@ -59,6 +75,120 @@ type ChatMessageRow = {
 
 const MESSAGE_PAGE_SIZE = 10;
 
+const commandTemplates = [
+  {
+    group: "Wallet",
+    items: [
+      {
+        sample: "/wallet create",
+        title: "Tạo Circle wallet",
+        description: "Khởi tạo wallet set và SCA wallet cho tài khoản.",
+        badge: "write",
+        icon: Wallet,
+      },
+      {
+        sample: "/wallet status",
+        title: "Xem trạng thái ví",
+        description: "Kiểm tra ví Circle và Gateway signer đã có chưa.",
+        badge: "read",
+        icon: WalletCards,
+      },
+    ],
+  },
+  {
+    group: "Balance",
+    items: [
+      {
+        sample: "/balance",
+        title: "Unified balance",
+        description: "Tổng USDC on-chain và Gateway trên mọi chain.",
+        badge: "read",
+        icon: BadgeDollarSign,
+      },
+      {
+        sample: "/balance arc",
+        title: "Balance Arc",
+        description: "Lọc USDC balance trên Arc Testnet.",
+        badge: "read",
+        icon: BadgeDollarSign,
+      },
+      {
+        sample: "/balance base",
+        title: "Balance Base",
+        description: "Lọc USDC balance trên Base Sepolia.",
+        badge: "read",
+        icon: BadgeDollarSign,
+      },
+      {
+        sample: "/balance avalanche",
+        title: "Balance Avalanche",
+        description: "Lọc USDC balance trên Avalanche Fuji.",
+        badge: "read",
+        icon: BadgeDollarSign,
+      },
+    ],
+  },
+  {
+    group: "Gateway Actions",
+    items: [
+      {
+        sample: "/deposit 50 from arc",
+        title: "Deposit vào Gateway",
+        description: "Approve và deposit USDC từ source chain.",
+        badge: "confirm",
+        icon: Waypoints,
+      },
+      {
+        sample: "/transfer 10 from base to arc",
+        title: "Cross-chain transfer",
+        description: "Burn intent, attestation, rồi mint ở destination.",
+        badge: "confirm",
+        icon: Waypoints,
+      },
+      {
+        sample: "/gas check arc",
+        title: "Kiểm tra gas",
+        description: "Kiểm tra native gas cho wallet mint transaction.",
+        badge: "read",
+        icon: Clock3,
+      },
+      {
+        sample: "/gateway info",
+        title: "Gateway info",
+        description: "Xem domains và contract data từ Circle Gateway.",
+        badge: "read",
+        icon: Sparkles,
+      },
+    ],
+  },
+  {
+    group: "History",
+    items: [
+      {
+        sample: "/history",
+        title: "Tất cả giao dịch",
+        description: "Xem các deposit và transfer mới nhất.",
+        badge: "read",
+        icon: History,
+      },
+      {
+        sample: "/history deposit",
+        title: "Deposit history",
+        description: "Lọc riêng các giao dịch deposit.",
+        badge: "read",
+        icon: History,
+      },
+      {
+        sample: "/history transfer",
+        title: "Transfer history",
+        description: "Lọc riêng các giao dịch transfer.",
+        badge: "read",
+        icon: History,
+      },
+    ],
+  },
+];
+
 function missingFieldQuestion(field: string) {
   const labels: Record<string, string> = {
     amount: "Bạn muốn dùng số tiền bao nhiêu?",
@@ -66,7 +196,11 @@ function missingFieldQuestion(field: string) {
     recipient: "Bạn muốn gửi cho ai?",
     budgetName: "Bạn muốn đặt tên ngân sách là gì?",
     frequency: "Bạn muốn lịch chạy daily, weekly hay monthly?",
-    command: "Bạn muốn dùng /pay, /createbudget hay /schedule?",
+    action: "Bạn muốn dùng action nào?",
+    sourceChain: "Bạn muốn dùng source chain nào? Ví dụ: arc, base, avalanche.",
+    destinationChain: "Bạn muốn chuyển sang chain nào? Ví dụ: arc, base, avalanche.",
+    chain: "Bạn muốn kiểm tra chain nào? Ví dụ: arc, base, avalanche.",
+    command: "Bạn muốn dùng /wallet, /balance, /deposit, /transfer, /gas, /gateway hay /history?",
   };
 
   return labels[field] ?? `Bạn cần bổ sung ${field}.`;
@@ -82,6 +216,78 @@ function statusLabel(status: ExecutionItem["status"]) {
   };
 
   return labels[status];
+}
+
+async function requestJson(path: string, init?: RequestInit) {
+  const response = await fetch(path, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+  });
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const message = data?.error ?? data?.message ?? `Request failed: ${response.status}`;
+    throw new Error(message);
+  }
+
+  return data;
+}
+
+async function executeCommand(draft: ParsedCommand) {
+  if (draft.command === "wallet") {
+    if (draft.fields.action === "create") {
+      return requestJson("/api/wallet-set", { method: "POST", body: JSON.stringify({}) });
+    }
+    return requestJson("/api/wallet/status");
+  }
+
+  if (draft.command === "balance") {
+    return requestJson("/api/gateway/balance", { method: "POST", body: JSON.stringify({}) });
+  }
+
+  if (draft.command === "deposit") {
+    return requestJson("/api/gateway/deposit", {
+      method: "POST",
+      body: JSON.stringify({
+        chain: draft.fields.sourceChain,
+        amount: draft.fields.amount,
+      }),
+    });
+  }
+
+  if (draft.command === "transfer") {
+    return requestJson("/api/gateway/transfer", {
+      method: "POST",
+      body: JSON.stringify({
+        sourceChain: draft.fields.sourceChain,
+        destinationChain: draft.fields.destinationChain,
+        amount: draft.fields.amount,
+        autoDeposit: true,
+      }),
+    });
+  }
+
+  if (draft.command === "gas") {
+    return requestJson("/api/gateway/gas-check", {
+      method: "POST",
+      body: JSON.stringify({ chain: draft.fields.chain }),
+    });
+  }
+
+  if (draft.command === "gateway") {
+    return requestJson("/api/gateway/info");
+  }
+
+  if (draft.command === "history") {
+    const filter = draft.fields.filter;
+    const suffix = filter ? `?type=${encodeURIComponent(filter)}` : "";
+    return requestJson(`/api/transactions${suffix}`);
+  }
+
+  throw new Error("Unsupported command");
 }
 
 export function PayCmdApp() {
@@ -171,6 +377,151 @@ export function PayCmdApp() {
 
   async function addSystemStatus(text: string, execution: ExecutionItem) {
     await saveMessage({ role: "system", text, kind: "status", execution });
+  }
+
+  function createExecution(draft: ParsedCommand): ExecutionItem {
+    const now = new Date();
+    return {
+      id: `cmd_${now.getTime()}`,
+      draftId: `draft_${now.getTime()}`,
+      command: draft.command,
+      status: "queued",
+      title: draft.summary,
+      createdAt: now.toISOString(),
+      gateway: {
+        network: "Arc Testnet, Base Sepolia, Avalanche Fuji",
+        rail: "Circle Gateway",
+        mode: "real",
+      },
+    };
+  }
+
+  function resultText(draft: ParsedCommand, result: any) {
+    if (draft.command === "wallet") {
+      if (draft.fields.action === "create") {
+        const wallet = result?.wallets?.[0];
+        return wallet?.address
+          ? `Wallet đã sẵn sàng: ${wallet.address}`
+          : result?.message ?? "Wallet đã sẵn sàng.";
+      }
+      return result?.hasWallet
+        ? `Wallet active: ${result.scaWallet?.address ?? result.scaWallet?.wallet_address}`
+        : "Chưa có Circle wallet. Dùng /wallet create để tạo.";
+    }
+
+    if (draft.command === "balance") {
+      const chain = draft.fields.chain;
+      const balances = result?.balances ?? [];
+      if (chain) {
+        const chainTotal = balances.reduce((sum: number, item: any) => {
+          const gateway = (item.gatewayBalances ?? [])
+            .filter((entry: any) => entry.chain === chain)
+            .reduce((inner: number, entry: any) => inner + Number(entry.balance || 0), 0);
+          const wallet = (item.chainBalances ?? [])
+            .filter((entry: any) => entry.chain === chain)
+            .reduce((inner: number, entry: any) => inner + Number(entry.balance || 0), 0);
+          return sum + gateway + wallet;
+        }, 0);
+        return `${chain}: ${chainTotal.toFixed(6)} USDC.`;
+      }
+      return `Unified balance: ${Number(result?.totalUnified ?? 0).toFixed(6)} USDC.`;
+    }
+
+    if (draft.command === "deposit") {
+      return `Deposit thành công: ${result.amount} USDC từ ${result.chain}.`;
+    }
+
+    if (draft.command === "transfer") {
+      const autoDeposit = result.autoDeposit
+        ? ` Đã auto-deposit ${result.autoDepositedAmount} USDC trước khi transfer.`
+        : "";
+      return `Transfer thành công: ${result.amount} USDC từ ${result.sourceChain} sang ${result.destinationChain}.${autoDeposit}`;
+    }
+
+    if (draft.command === "gas") {
+      return result?.hasGas
+        ? `${result.chain}: có gas. Balance native: ${result.balance}.`
+        : `${result.chain}: chưa có native gas cho wallet ${result.address}.`;
+    }
+
+    if (draft.command === "gateway") {
+      return `Gateway online. Domains: ${(result?.domains ?? []).length}.`;
+    }
+
+    if (draft.command === "history") {
+      const rows = Array.isArray(result) ? result : [];
+      if (!rows.length) return "Chưa có transaction history.";
+      return `Có ${rows.length} transaction. Gần nhất: ${rows[0].tx_type} ${rows[0].amount} trên ${rows[0].chain}.`;
+    }
+
+    return "Command đã hoàn tất.";
+  }
+
+  async function runCommand(draft: ParsedCommand) {
+    if (draft.missingFields.length) return;
+
+    const execution = createExecution(draft);
+    setActiveDraftId(null);
+    setExecutions((current) => [execution, ...current]);
+    await addSystemStatus(`${execution.title} đã được đưa vào hàng đợi.`, execution);
+
+    const running = { ...execution, status: "running" as const };
+    setExecutions((current) =>
+      current.map((item) => (item.id === execution.id ? running : item)),
+    );
+    await addSystemStatus(`${execution.title} đang được xử lý.`, running);
+
+    const waiting = { ...execution, status: "waiting_gateway" as const };
+    setExecutions((current) =>
+      current.map((item) => (item.id === execution.id ? waiting : item)),
+    );
+    await addSystemStatus(`${execution.title} đang gọi Circle Gateway.`, waiting);
+
+    try {
+      const result = await executeCommand(draft);
+      const txHash = result?.txHash ?? result?.mintTxHash;
+      const success = {
+        ...execution,
+        status: "success" as const,
+        txHash,
+        result,
+      };
+      setExecutions((current) =>
+        current.map((item) => (item.id === execution.id ? success : item)),
+      );
+      setNotifications((current) => [
+        {
+          id: `notif_${execution.id}`,
+          title: "Command completed",
+          body: resultText(draft, result),
+          status: "unread",
+          commandExecutionId: execution.id,
+        },
+        ...current,
+      ]);
+      await addSystemStatus(resultText(draft, result), success);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Command failed";
+      const failed = {
+        ...execution,
+        status: "failed" as const,
+        error: message,
+      };
+      setExecutions((current) =>
+        current.map((item) => (item.id === execution.id ? failed : item)),
+      );
+      setNotifications((current) => [
+        {
+          id: `notif_${execution.id}`,
+          title: "Command failed",
+          body: message,
+          status: "unread",
+          commandExecutionId: execution.id,
+        },
+        ...current,
+      ]);
+      await addSystemStatus(message, failed);
+    }
   }
 
   async function loadOlderMessages() {
@@ -282,6 +633,11 @@ export function PayCmdApp() {
       return;
     }
 
+    if (!requiresConfirmation(parsed)) {
+      await runCommand(parsed);
+      return;
+    }
+
     const previewMessage = await saveMessage({
       role: "assistant",
       text: parsed.summary,
@@ -296,47 +652,7 @@ export function PayCmdApp() {
   }
 
   function confirmDraft(draft: ParsedCommand) {
-    if (draft.missingFields.length) return;
-
-    const execution = createDemoExecution(draft) as ExecutionItem;
-    setActiveDraftId(null);
-    setExecutions((current) => [execution, ...current]);
-    void addSystemStatus(`${execution.title} đã được đưa vào hàng đợi.`, execution);
-
-    window.setTimeout(() => {
-      const running = { ...execution, status: "running" as const };
-      setExecutions((current) =>
-        current.map((item) => (item.id === execution.id ? running : item)),
-      );
-      void addSystemStatus(`${execution.title} đang được xử lý.`, running);
-    }, 900);
-
-    window.setTimeout(() => {
-      const waiting = { ...execution, status: "waiting_gateway" as const };
-      setExecutions((current) =>
-        current.map((item) => (item.id === execution.id ? waiting : item)),
-      );
-      void addSystemStatus(`${execution.title} đang chờ Circle Gateway.`, waiting);
-    }, 2100);
-
-    window.setTimeout(() => {
-      const txHash = `0x${execution.id.replace(/\D/g, "").padEnd(64, "0").slice(0, 64)}`;
-      const success = { ...execution, status: "success" as const, txHash };
-      setExecutions((current) =>
-        current.map((item) => (item.id === execution.id ? success : item)),
-      );
-      setNotifications((current) => [
-        {
-          id: `notif_${execution.id}`,
-          title: "Command completed",
-          body: `${execution.title} đã settlement trên demo rail.`,
-          status: "unread",
-          commandExecutionId: execution.id,
-        },
-        ...current,
-      ]);
-      void addSystemStatus(`${execution.title} đã hoàn tất.`, success);
-    }, 4200);
+    void runCommand(draft);
   }
 
   useLayoutEffect(() => {
@@ -487,7 +803,7 @@ export function PayCmdApp() {
                   message={{
                     id: "welcome",
                     role: "assistant",
-                    text: "PayCMD đã sẵn sàng. Gõ / để chọn command hoặc thử /pay 50 USDC to Minh.",
+                    text: "PayCMD đã sẵn sàng. Gõ / để chọn command hoặc thử /balance.",
                   }}
                   activeDraftId={activeDraftId}
                   onConfirm={confirmDraft}
@@ -509,23 +825,7 @@ export function PayCmdApp() {
 
         <div className="shrink-0 border-t bg-card/94 px-3 py-3 backdrop-blur md:px-6">
           <div className="mx-auto w-full max-w-3xl">
-            {showPalette ? (
-              <div className="mb-2 grid gap-2 rounded-xl border bg-background p-2 shadow-sm md:grid-cols-3">
-                {commandRegistry.map((command) => (
-                  <button
-                    key={command.name}
-                    className="rounded-lg border bg-card p-3 text-left transition hover:border-primary hover:bg-accent"
-                    onClick={() => selectCommand(command.sample)}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="font-medium">/{command.name}</div>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                    <div className="mt-1 text-xs text-muted-foreground">{command.sample}</div>
-                  </button>
-                ))}
-              </div>
-            ) : null}
+            {showPalette ? <CommandPalette query={input} onSelect={selectCommand} /> : null}
 
             <form
               className="flex items-center gap-2 rounded-2xl border bg-background p-2 shadow-sm"
@@ -548,6 +848,99 @@ export function PayCmdApp() {
         </div>
       </div>
     </PayCmdShell>
+  );
+}
+
+function normalizePaletteQuery(query: string) {
+  return query.trim().replace(/^\/+/, "").toLowerCase();
+}
+
+function CommandPalette({
+  query,
+  onSelect,
+}: {
+  query: string;
+  onSelect: (sample: string) => void;
+}) {
+  const normalizedQuery = normalizePaletteQuery(query);
+  const filteredSections = commandTemplates
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => {
+        if (!normalizedQuery) return true;
+
+        const sample = item.sample.replace(/^\/+/, "").toLowerCase();
+        const firstToken = sample.split(/\s+/)[0] ?? "";
+        const searchable = `${sample} ${item.title} ${item.description}`.toLowerCase();
+
+        return firstToken.startsWith(normalizedQuery) || searchable.includes(normalizedQuery);
+      }),
+    }))
+    .filter((section) => section.items.length > 0);
+
+  return (
+    <div className="mb-2 overflow-hidden rounded-xl border bg-background shadow-sm">
+      <div className="flex items-center justify-between border-b px-3 py-2">
+        <div className="text-sm font-medium">Commands</div>
+        <div className="text-xs text-muted-foreground">
+          {normalizedQuery ? `Filter: ${normalizedQuery}` : "Click để điền mẫu"}
+        </div>
+      </div>
+      <div className="paycmd-command-palette-scrollbar max-h-[42vh] overflow-y-auto p-2">
+        {filteredSections.length ? (
+          <div className="grid gap-3">
+            {filteredSections.map((section) => (
+            <section key={section.group} className="space-y-2">
+              <div className="px-1 text-xs font-semibold uppercase text-muted-foreground">
+                {section.group}
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                {section.items.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.sample}
+                      className="group min-w-0 rounded-lg border bg-card p-3 text-left transition hover:border-primary hover:bg-accent"
+                      onClick={() => onSelect(item.sample)}
+                      type="button"
+                    >
+                      <div className="flex min-w-0 items-start gap-3">
+                        <span className="mt-0.5 rounded-md border bg-background p-1.5 text-primary">
+                          <Icon className="h-4 w-4" />
+                        </span>
+                        <span className="min-w-0 flex-1 space-y-1">
+                          <span className="flex min-w-0 items-center justify-between gap-2">
+                            <span className="truncate font-medium">{item.title}</span>
+                            <Badge
+                              variant={item.badge === "confirm" ? "default" : "secondary"}
+                              className="shrink-0 text-[10px]"
+                            >
+                              {item.badge}
+                            </Badge>
+                          </span>
+                          <code className="block break-words rounded-md bg-muted px-2 py-1 text-xs text-foreground">
+                            {item.sample}
+                          </code>
+                          <span className="block text-xs leading-5 text-muted-foreground">
+                            {item.description}
+                          </span>
+                        </span>
+                        <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground transition group-hover:text-primary" />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
+            Không có command khớp với “{normalizedQuery}”.
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -612,7 +1005,8 @@ function CommandPreviewCard({
         )}
       </div>
       <div className="rounded-lg border bg-background p-2 text-xs text-muted-foreground">
-        Rail: Circle Gateway · Network: Arc Testnet · Mode: demo
+        Rail: Circle Gateway · Mode: real
+        {draft.command === "transfer" ? " · Auto-deposit nếu Gateway balance thiếu" : ""}
       </div>
       <Button className="w-full" disabled={disabled} onClick={onConfirm}>
         <Check className="mr-2 h-4 w-4" />
@@ -624,12 +1018,15 @@ function CommandPreviewCard({
 
 function ExecutionStatus({ execution, text }: { execution: ExecutionItem; text: string }) {
   const done = execution.status === "success";
+  const failed = execution.status === "failed";
 
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 font-medium">
         {done ? (
           <Check className="h-4 w-4 text-primary" />
+        ) : failed ? (
+          <Clock3 className="h-4 w-4 text-destructive" />
         ) : (
           <Loader2 className="h-4 w-4 animate-spin text-primary" />
         )}
