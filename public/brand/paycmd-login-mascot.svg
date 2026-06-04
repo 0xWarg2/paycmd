@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="PayCMD AI payment copilot mascot">
+  <defs>
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#63f4c8" stop-opacity=".2"/>
+      <stop offset=".64" stop-color="#11161a" stop-opacity=".25"/>
+      <stop offset="1" stop-color="#07090d" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" fill="#07090d"/>
+  <rect width="1024" height="1024" fill="url(#halo)"/>
+  <g fill="none" stroke="#f4f7f8" stroke-opacity=".22">
+    <circle cx="512" cy="512" r="410" stroke-width="2"/>
+    <circle cx="512" cy="512" r="316" stroke-width="3"/>
+    <circle cx="512" cy="512" r="214" stroke-width="5"/>
+    <path d="M74 512h78M872 512h78M512 74v78M512 872v78" stroke-width="2"/>
+  </g>
+  <g filter="url(#glow)">
+    <path d="M302 524c-58-3-98-48-98-108 0-56 38-104 94-109 12-92 83-162 174-174 118-16 228 70 244 190 52 10 88 54 88 106 0 59-42 104-100 107" fill="#f4f7f8"/>
+    <path d="M316 524c18 94 90 154 196 154s178-60 196-154c-64 26-122 20-170-18-26-20-52-20-78 0-48 38-106 44-144 18Z" fill="#f4f7f8"/>
+    <circle cx="394" cy="486" r="22" fill="#07090d"/>
+    <circle cx="624" cy="486" r="22" fill="#07090d"/>
+    <path d="M462 564c8 34 28 50 58 50s50-16 58-50" fill="#07090d"/>
+    <circle cx="512" cy="250" r="42" fill="#f4f7f8"/>
+    <circle cx="512" cy="250" r="20" fill="#07090d"/>
+    <path d="M298 326c18-98 98-172 196-184 138-18 262 84 276 224" fill="none" stroke="#f4f7f8" stroke-width="18" stroke-linecap="round"/>
+    <path d="M282 412c-34 0-62 34-62 76s28 76 62 76" fill="#f4f7f8"/>
+    <path d="M742 412c34 0 62 34 62 76s-28 76-62 76" fill="#f4f7f8"/>
+  </g>
+  <g stroke="#63f4c8" stroke-linecap="round" filter="url(#glow)">
+    <path d="M164 276h56M192 248v56" stroke-width="5"/>
+    <path d="M818 708h58M847 679v58" stroke-width="5"/>
+    <circle cx="790" cy="250" r="6" fill="#63f4c8" stroke="none"/>
+    <circle cx="242" cy="746" r="5" fill="#5debff" stroke="none"/>
+  </g>
+</svg>

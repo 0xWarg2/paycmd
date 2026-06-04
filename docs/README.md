@@ -11,5 +11,6 @@ Thư mục này là handoff documentation cho dự án PayCMD. Tài liệu ưu t
 5. `04-kich-ban-demo.md`
 6. `05-moi-truong-va-trien-khai.md`
 7. `06-bai-hoc-rut-ra.md`
+8. `07-payment-copilot-mvp.md`
 
 Các quyết định kiến trúc nằm trong `quyet-dinh/`.
