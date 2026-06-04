@@ -18,6 +18,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { circleDeveloperSdk } from "@/lib/circle/sdk";
+import { ensureUserCircleWallet } from "@/lib/circle/ensure-user-wallet";
 import { createClient } from "@/lib/supabase/server";
 
 export async function PUT(req: NextRequest) {
@@ -63,70 +64,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Check if wallet set already exists for this user
-    const { data: existingWallets } = await supabase
-      .from("wallets")
-      .select("wallet_set_id")
-      .eq("user_id", user.id)
-      .limit(1);
-
-    if (existingWallets && existingWallets.length > 0) {
-      return NextResponse.json({
-        success: true,
-        message: "Wallet set already exists for this user",
-      });
-    }
-
-    // Create wallet set
-    const walletSetResponse = await circleDeveloperSdk.createWalletSet({
-      name: `User ${user.id.substring(0, 8)} - Wallet Set`,
-    });
-
-    if (!walletSetResponse.data?.walletSet) {
-      throw new Error("Failed to create wallet set");
-    }
-
-    const walletSetId = walletSetResponse.data.walletSet.id;
-
-    // Create multichain SCA wallet on ALL supported chains
-    // This ensures Circle SDK recognizes the wallet on each chain for transactions
-    const walletsResponse = await circleDeveloperSdk.createWallets({
-      accountType: "SCA",
-      blockchains: ["ARC-TESTNET", "BASE-SEPOLIA", "AVAX-FUJI"], // Create on all chains
-      count: 1,
-      walletSetId,
-    });
-
-    if (!walletsResponse.data?.wallets || walletsResponse.data.wallets.length === 0) {
-      throw new Error("Failed to create wallet");
-    }
-
-    // Store ONE multichain wallet in database
-    const wallet = walletsResponse.data.wallets[0];
-    const walletRecords = [{
-      user_id: user.id,
-      circle_wallet_id: wallet.id,
-      wallet_set_id: walletSetId,
-      wallet_address: wallet.address,
-      address: wallet.address,
-      blockchain: "MULTICHAIN", // Indicates it works across all chains
-      type: "sca",
-      name: "Multichain Wallet",
-    }];
-
-    const { error: insertError } = await supabase
-      .from("wallets")
-      .insert(walletRecords);
-
-    if (insertError) {
-      console.error("Error storing wallets in database:", insertError);
-      throw insertError;
-    }
+    const { wallet, created } = await ensureUserCircleWallet(supabase, user.id);
 
     return NextResponse.json({
       success: true,
-      walletSetId,
-      wallets: walletRecords,
+      message: created ? "Wallet set created" : "Wallet set already exists for this user",
+      walletSetId: wallet.wallet_set_id,
+      wallets: [wallet],
     });
   } catch (error: any) {
     console.error("Wallet set creation failed:", error);

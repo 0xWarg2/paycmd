@@ -36,13 +36,18 @@ export async function proxy(request: NextRequest) {
   if (
     pathname.startsWith("/api") ||
     pathname.startsWith("/auth") ||
+    pathname === "/" ||
     pathname === "/favicon.ico"
   ) {
     return response;
   }
 
   if (!user) {
-    return NextResponse.redirect(new URL("/auth/login", request.url));
+    const url = request.nextUrl.clone();
+    url.pathname = "/auth/login";
+    url.search = "";
+    url.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
+    return NextResponse.redirect(url);
   }
 
   return response;

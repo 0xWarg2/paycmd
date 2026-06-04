@@ -62,15 +62,15 @@ export function SignUpForm({
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/`,
+          emailRedirectTo: `${window.location.origin}/app`,
         },
       });
       if (error) throw error;
 
       if (data.user) {
-        router.push("/");
+        router.push("/app");
       } else {
-        router.push("/auth/login");
+        router.push("/auth/login?next=/app");
       }
       router.refresh();
     } catch (error: unknown) {
@@ -132,7 +132,7 @@ export function SignUpForm({
             </div>
             <div className="mt-4 text-center text-sm">
               Already have an account?{" "}
-              <Link href="/auth/login" className="underline underline-offset-4">
+              <Link href="/auth/login?next=/app" className="underline underline-offset-4">
                 Login
               </Link>
             </div>

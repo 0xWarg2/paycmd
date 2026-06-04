@@ -25,7 +25,7 @@ export default async function HistoryPage() {
 
   const { data, error } = await supabase.auth.getClaims();
   if (error || !data?.claims) {
-    redirect("/auth/login");
+    redirect("/auth/login?next=/dashboard/history");
   }
 
   return (

@@ -5,16 +5,21 @@ import {
   Check,
   ChevronRight,
   Clock3,
+  Link2,
   History,
   Loader2,
   Paperclip,
+  ReceiptText,
   Send,
   Sparkles,
+  UserPlus,
+  Users,
   Wallet,
   WalletCards,
   Waypoints,
 } from "lucide-react";
 import { FormEvent, useEffect, useLayoutEffect, useRef, useState, WheelEvent } from "react";
+import { encodeFunctionData, erc20Abi, parseUnits } from "viem";
 
 import { PayCmdShell } from "@/components/paycmd-shell";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +31,19 @@ import {
   ParsedCommand,
   requiresConfirmation,
 } from "@/lib/paycmd/commands";
+import { web3Chains } from "@/lib/paycmd/web3-chains";
+
+declare global {
+  interface Window {
+    ethereum?: {
+      request?: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+    };
+  }
+}
+
+type EthereumProvider = {
+  request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+};
 
 type ChatMessage = {
   id: string;
@@ -79,6 +97,20 @@ const commandTemplates = [
   {
     group: "Wallet",
     items: [
+      {
+        sample: "/link metamask",
+        title: "Link MetaMask",
+        description: "Gắn MetaMask vào tài khoản PayCMD hiện tại.",
+        badge: "write",
+        icon: Link2,
+      },
+      {
+        sample: "/fund 50 from metamask on base",
+        title: "Fund Circle wallet",
+        description: "Chuyển USDC từ MetaMask vào Circle wallet.",
+        badge: "confirm",
+        icon: Wallet,
+      },
       {
         sample: "/wallet create",
         title: "Tạo Circle wallet",
@@ -162,6 +194,39 @@ const commandTemplates = [
     ],
   },
   {
+    group: "Payments",
+    items: [
+      {
+        sample: "/pay 25 to Minh on arc from base",
+        title: "Pay contact",
+        description: "Chuyển USDC cho PayCMD contact hoặc địa chỉ ngoài.",
+        badge: "confirm",
+        icon: Send,
+      },
+      {
+        sample: "/request 25 from Minh on arc",
+        title: "Request payment",
+        description: "Tạo payment request link/QR để người trả confirm.",
+        badge: "write",
+        icon: ReceiptText,
+      },
+      {
+        sample: "/payroll run team 25 from base",
+        title: "Run payroll",
+        description: "Tạo batch trả cùng amount cho contacts active.",
+        badge: "confirm",
+        icon: Users,
+      },
+      {
+        sample: "/contacts add Minh 0x0000000000000000000000000000000000000000 on arc",
+        title: "Add contact",
+        description: "Lưu người nhận để /pay và payroll resolve tên.",
+        badge: "write",
+        icon: UserPlus,
+      },
+    ],
+  },
+  {
     group: "History",
     items: [
       {
@@ -194,13 +259,19 @@ function missingFieldQuestion(field: string) {
     amount: "Bạn muốn dùng số tiền bao nhiêu?",
     token: "Bạn muốn dùng token nào?",
     recipient: "Bạn muốn gửi cho ai?",
+    payer: "Bạn muốn yêu cầu ai thanh toán?",
+    name: "Bạn muốn đặt tên contact là gì?",
+    address: "Bạn cần nhập địa chỉ ví 0x... của contact.",
+    batchName: "Bạn muốn đặt tên payroll batch là gì?",
     budgetName: "Bạn muốn đặt tên ngân sách là gì?",
     frequency: "Bạn muốn lịch chạy daily, weekly hay monthly?",
     action: "Bạn muốn dùng action nào?",
+    walletType: "Bạn muốn link ví nào? Ví dụ: /link metamask.",
+    sourceWallet: "Bạn muốn nạp từ ví nào? Ví dụ: /fund 50 from metamask on base.",
     sourceChain: "Bạn muốn dùng source chain nào? Ví dụ: arc, base, avalanche.",
     destinationChain: "Bạn muốn chuyển sang chain nào? Ví dụ: arc, base, avalanche.",
     chain: "Bạn muốn kiểm tra chain nào? Ví dụ: arc, base, avalanche.",
-    command: "Bạn muốn dùng /wallet, /balance, /deposit, /transfer, /gas, /gateway hay /history?",
+    command: "Bạn muốn dùng command nào? Gõ / để xem danh sách.",
   };
 
   return labels[field] ?? `Bạn cần bổ sung ${field}.`;
@@ -236,7 +307,177 @@ async function requestJson(path: string, init?: RequestInit) {
   return data;
 }
 
+function getEthereumProvider(): EthereumProvider {
+  const provider = window.ethereum;
+
+  if (!provider?.request) {
+    throw new Error("MetaMask is not available. Install MetaMask and try again.");
+  }
+
+  return provider as EthereumProvider;
+}
+
+function normalizeAddress(address: string) {
+  return address.toLowerCase();
+}
+
+async function requestMetaMaskAccount() {
+  const provider = getEthereumProvider();
+  const accounts = await provider.request({ method: "eth_requestAccounts" });
+  const address = Array.isArray(accounts) ? String(accounts[0] ?? "") : "";
+
+  if (!address) {
+    throw new Error("No MetaMask account selected.");
+  }
+
+  return normalizeAddress(address);
+}
+
+async function linkMetaMaskWallet() {
+  const provider = getEthereumProvider();
+  const address = await requestMetaMaskAccount();
+  const message = [
+    "Link this MetaMask wallet to PayCMD.",
+    `Address: ${address}`,
+    `Timestamp: ${new Date().toISOString()}`,
+  ].join("\n");
+  const signature = await provider.request({
+    method: "personal_sign",
+    params: [message, address],
+  });
+
+  if (typeof signature !== "string") {
+    throw new Error("MetaMask did not return a signature.");
+  }
+
+  return requestJson("/api/user/link-metamask", {
+    method: "POST",
+    body: JSON.stringify({
+      walletAddress: address,
+      message,
+      signature,
+    }),
+  });
+}
+
+async function switchMetaMaskChain(chainKey: keyof typeof web3Chains) {
+  const provider = getEthereumProvider();
+  const chain = web3Chains[chainKey];
+
+  try {
+    await provider.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: chain.hexChainId }],
+    });
+  } catch (error: any) {
+    if (error?.code !== 4902) {
+      throw error;
+    }
+
+    await provider.request({
+      method: "wallet_addEthereumChain",
+      params: [
+        {
+          chainId: chain.hexChainId,
+          chainName: chain.name,
+          nativeCurrency: chain.nativeCurrency,
+          rpcUrls: [chain.rpcUrl],
+          blockExplorerUrls: [chain.blockExplorerUrl],
+        },
+      ],
+    });
+  }
+}
+
+async function waitForMetaMaskReceipt(txHash: string) {
+  const provider = getEthereumProvider();
+
+  for (let index = 0; index < 30; index += 1) {
+    const receipt = await provider.request({
+      method: "eth_getTransactionReceipt",
+      params: [txHash],
+    });
+
+    if (receipt && typeof receipt === "object") {
+      return receipt as { status?: string };
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+
+  return null;
+}
+
+async function fundCircleWalletFromMetaMask(draft: ParsedCommand) {
+  const chainKey = draft.fields.chain as keyof typeof web3Chains;
+  const chain = web3Chains[chainKey];
+
+  if (!chain) {
+    throw new Error("Unsupported fund chain.");
+  }
+
+  const context = await requestJson(`/api/user/fund?chain=${encodeURIComponent(chainKey)}`);
+  const account = await requestMetaMaskAccount();
+  const sourceWallet = normalizeAddress(context.sourceWallet);
+  const destinationWallet = normalizeAddress(context.destinationWallet);
+
+  if (account !== sourceWallet) {
+    throw new Error(`Connected MetaMask ${account} does not match linked wallet ${sourceWallet}.`);
+  }
+
+  await switchMetaMaskChain(chainKey);
+
+  const amount = parseUnits(draft.fields.amount, 6);
+  const data = encodeFunctionData({
+    abi: erc20Abi,
+    functionName: "transfer",
+    args: [destinationWallet as `0x${string}`, amount],
+  });
+  const provider = getEthereumProvider();
+  const txHash = await provider.request({
+    method: "eth_sendTransaction",
+    params: [
+      {
+        from: account,
+        to: chain.usdcAddress,
+        value: "0x0",
+        data,
+      },
+    ],
+  });
+
+  if (typeof txHash !== "string") {
+    throw new Error("MetaMask did not return a transaction hash.");
+  }
+
+  const receipt = await waitForMetaMaskReceipt(txHash);
+  const status = receipt?.status === "0x1" ? "success" : receipt?.status === "0x0" ? "failed" : "pending";
+
+  return requestJson("/api/user/fund", {
+    method: "POST",
+    body: JSON.stringify({
+      chain: chainKey,
+      amount: draft.fields.amount,
+      txHash,
+      status,
+      fromAddress: account,
+      toAddress: destinationWallet,
+    }),
+  });
+}
+
 async function executeCommand(draft: ParsedCommand) {
+  if (draft.command === "link") {
+    if (draft.fields.walletType === "metamask") {
+      return linkMetaMaskWallet();
+    }
+    throw new Error("Unsupported wallet type");
+  }
+
+  if (draft.command === "fund") {
+    return fundCircleWalletFromMetaMask(draft);
+  }
+
   if (draft.command === "wallet") {
     if (draft.fields.action === "create") {
       return requestJson("/api/wallet-set", { method: "POST", body: JSON.stringify({}) });
@@ -266,6 +507,63 @@ async function executeCommand(draft: ParsedCommand) {
         destinationChain: draft.fields.destinationChain,
         amount: draft.fields.amount,
         autoDeposit: true,
+      }),
+    });
+  }
+
+  if (draft.command === "pay") {
+    return requestJson("/api/payments/pay", {
+      method: "POST",
+      body: JSON.stringify({
+        amount: draft.fields.amount,
+        recipient: draft.fields.recipient,
+        sourceChain: draft.fields.sourceChain,
+        destinationChain: draft.fields.destinationChain,
+      }),
+    });
+  }
+
+  if (draft.command === "request") {
+    return requestJson("/api/payment-requests", {
+      method: "POST",
+      body: JSON.stringify({
+        amount: draft.fields.amount,
+        payer: draft.fields.payer,
+        destinationChain: draft.fields.destinationChain,
+      }),
+    });
+  }
+
+  if (draft.command === "payroll") {
+    const created = await requestJson("/api/payroll/batches", {
+      method: "POST",
+      body: JSON.stringify({
+        name: draft.fields.batchName,
+        amount: draft.fields.amount,
+        sourceChain: draft.fields.sourceChain,
+      }),
+    });
+
+    if (draft.fields.action === "run") {
+      const batchId = created?.batch?.id;
+      if (!batchId) throw new Error("Payroll batch was not created");
+      return requestJson(`/api/payroll/batches/${batchId}/confirm`, { method: "POST" });
+    }
+
+    return created;
+  }
+
+  if (draft.command === "contacts") {
+    if (draft.fields.action === "list") {
+      return requestJson("/api/contacts");
+    }
+
+    return requestJson("/api/contacts", {
+      method: "POST",
+      body: JSON.stringify({
+        displayName: draft.fields.name,
+        walletAddress: draft.fields.address,
+        preferredChain: draft.fields.chain,
       }),
     });
   }
@@ -397,6 +695,15 @@ export function PayCmdApp() {
   }
 
   function resultText(draft: ParsedCommand, result: any) {
+    if (draft.command === "link") {
+      const address = result?.externalWallet?.wallet_address;
+      return address ? `Đã link MetaMask ${address}.` : "Đã link MetaMask.";
+    }
+
+    if (draft.command === "fund") {
+      return `Fund ${result.amount} USDC từ MetaMask vào Circle wallet trên ${result.chain}. Tx: ${result.txHash} (${result.status}).`;
+    }
+
     if (draft.command === "wallet") {
       if (draft.fields.action === "create") {
         const wallet = result?.wallets?.[0];
@@ -436,6 +743,30 @@ export function PayCmdApp() {
         ? ` Đã auto-deposit ${result.autoDepositedAmount} USDC trước khi transfer.`
         : "";
       return `Transfer thành công: ${result.amount} USDC từ ${result.sourceChain} sang ${result.destinationChain}.${autoDeposit}`;
+    }
+
+    if (draft.command === "pay") {
+      const payment = result.payment;
+      const recipient = payment?.recipient?.label ?? draft.fields.recipient;
+      const txHash = result.transfer?.mintTxHash ?? result.transfer?.txHash;
+      return `Đã pay ${payment?.amount ?? draft.fields.amount} USDC cho ${recipient} trên ${payment?.destinationChain}. ${txHash ? `Tx: ${txHash}` : ""}`;
+    }
+
+    if (draft.command === "request") {
+      return `Payment request đã tạo: ${result.paymentUrl}${result.qrImageUrl ? ` · QR: ${result.qrImageUrl}` : ""}`;
+    }
+
+    if (draft.command === "payroll") {
+      const results = result.results ?? [];
+      const successCount = results.filter((item: any) => item.status === "success").length;
+      return `Payroll ${result.status}: ${successCount}/${results.length} payment thành công.`;
+    }
+
+    if (draft.command === "contacts") {
+      if (draft.fields.action === "list") {
+        return `Có ${(result.contacts ?? []).length} contact.`;
+      }
+      return `Đã thêm contact ${result.contact?.display_name ?? draft.fields.name}.`;
     }
 
     if (draft.command === "gas") {
@@ -692,7 +1023,7 @@ export function PayCmdApp() {
       } = await supabase.auth.getUser();
 
       if (!user) {
-        window.location.href = "/auth/login";
+        window.location.href = "/auth/login?next=/app";
         return;
       }
 
@@ -1007,6 +1338,7 @@ function CommandPreviewCard({
       <div className="rounded-lg border bg-background p-2 text-xs text-muted-foreground">
         Rail: Circle Gateway · Mode: real
         {draft.command === "transfer" ? " · Auto-deposit nếu Gateway balance thiếu" : ""}
+        {draft.command === "fund" ? " · MetaMask sẽ mở popup ký USDC transfer" : ""}
       </div>
       <Button className="w-full" disabled={disabled} onClick={onConfirm}>
         <Check className="mr-2 h-4 w-4" />

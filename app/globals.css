@@ -147,6 +147,402 @@
 }
 
 @layer utilities {
+  @keyframes paycmd-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes paycmd-grid-shift {
+    to {
+      background-position: 118px 118px;
+    }
+  }
+
+  @keyframes paycmd-star-flight {
+    from {
+      background-position: 0 0, 0 0, 0 0;
+    }
+
+    to {
+      background-position: 420px 720px, -380px 520px, 240px -460px;
+    }
+  }
+
+  @keyframes paycmd-nebula-flow {
+    0%,
+    100% {
+      transform: translate3d(0, 0, 0) scale(1);
+      filter: hue-rotate(0deg);
+    }
+
+    50% {
+      transform: translate3d(2%, -2%, 0) scale(1.06);
+      filter: hue-rotate(16deg);
+    }
+  }
+
+  @keyframes paycmd-drift {
+    0%,
+    100% {
+      transform: translate3d(0, 0, 0);
+      opacity: 0.42;
+    }
+
+    50% {
+      transform: translate3d(0, -14px, 0);
+      opacity: 0.78;
+    }
+  }
+
+  @keyframes paycmd-preview-float {
+    0%,
+    100% {
+      transform: translate3d(0, 0, 0) rotate(0.001deg);
+    }
+
+    50% {
+      transform: translate3d(0, -16px, 0) rotate(0.001deg);
+    }
+  }
+
+  @keyframes paycmd-logo-breathe {
+    0%,
+    100% {
+      transform: translate3d(0, 0, 0) scale(1) rotate(-1deg);
+      filter: drop-shadow(0 24px 54px rgba(0, 0, 0, 0.55)) drop-shadow(0 0 28px rgba(99, 244, 200, 0.1));
+    }
+
+    50% {
+      transform: translate3d(0, -18px, 0) scale(1.035) rotate(1deg);
+      filter: drop-shadow(0 34px 72px rgba(0, 0, 0, 0.62)) drop-shadow(0 0 44px rgba(99, 244, 200, 0.22));
+    }
+  }
+
+  @keyframes paycmd-orbit-dot {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes paycmd-globe-spin {
+    from {
+      transform: rotateX(58deg) rotateZ(0deg);
+    }
+
+    to {
+      transform: rotateX(58deg) rotateZ(360deg);
+    }
+  }
+
+  @keyframes paycmd-globe-glow {
+    0%,
+    100% {
+      opacity: 0.46;
+      transform: scale(0.94);
+    }
+
+    50% {
+      opacity: 0.78;
+      transform: scale(1.04);
+    }
+  }
+
+  @keyframes paycmd-deep-orbit {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes paycmd-reveal-up {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 18px, 0);
+    }
+
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0);
+    }
+  }
+
+  @keyframes paycmd-shimmer {
+    from {
+      transform: translateX(-140%) skewX(-18deg);
+    }
+
+    to {
+      transform: translateX(220%) skewX(-18deg);
+    }
+  }
+
+  @keyframes paycmd-signal {
+    0% {
+      transform: translate3d(-24%, 0, 0);
+      opacity: 0;
+    }
+
+    12% {
+      opacity: 0.82;
+    }
+
+    86% {
+      opacity: 0.82;
+    }
+
+    100% {
+      transform: translate3d(124%, 0, 0);
+      opacity: 0;
+    }
+  }
+
+  @keyframes paycmd-pulse-ring {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 rgba(99, 244, 200, 0.16), 0 0 40px rgba(99, 244, 200, 0.18);
+    }
+
+    50% {
+      box-shadow: 0 0 0 10px rgba(99, 244, 200, 0), 0 0 60px rgba(99, 244, 200, 0.28);
+    }
+  }
+
+  @keyframes paycmd-scan {
+    from {
+      background-position: 0 -160px;
+    }
+
+    to {
+      background-position: 0 160px;
+    }
+  }
+
+  .paycmd-hero-grid {
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.055) 1px, transparent 1px);
+    background-size: 118px 118px;
+    animation: paycmd-grid-shift 18s linear infinite;
+    mask-image: radial-gradient(circle at 50% 45%, black 0 38%, transparent 74%);
+  }
+
+  .paycmd-stars {
+    background-image:
+      radial-gradient(circle, rgba(255, 255, 255, 0.85) 0 1px, transparent 1.7px),
+      radial-gradient(circle, rgba(99, 244, 200, 0.65) 0 1px, transparent 1.8px),
+      radial-gradient(circle, rgba(255, 77, 94, 0.5) 0 1px, transparent 1.7px);
+    background-size: 120px 120px, 190px 190px, 280px 280px;
+    animation: paycmd-star-flight 26s linear infinite;
+    mask-image: linear-gradient(90deg, transparent, black 18%, black 92%, transparent);
+  }
+
+  .paycmd-stars-far {
+    background-size: 180px 180px, 260px 260px, 360px 360px;
+    animation-duration: 48s;
+    animation-direction: reverse;
+    filter: blur(0.5px);
+  }
+
+  .paycmd-nebula {
+    background:
+      radial-gradient(ellipse at 82% 18%, rgba(99, 244, 200, 0.16), transparent 36%),
+      radial-gradient(ellipse at 52% 72%, rgba(255, 77, 94, 0.12), transparent 42%),
+      radial-gradient(ellipse at 18% 24%, rgba(120, 170, 255, 0.1), transparent 38%);
+    animation: paycmd-nebula-flow 18s ease-in-out infinite;
+    filter: blur(8px);
+  }
+
+  .paycmd-cosmic-globe {
+    border-radius: 999px;
+    border: 1px solid rgba(231, 253, 247, 0.2);
+    background:
+      radial-gradient(circle at 35% 28%, rgba(255, 255, 255, 0.2), transparent 18%),
+      radial-gradient(circle at 48% 52%, rgba(99, 244, 200, 0.12), transparent 42%),
+      repeating-linear-gradient(90deg, transparent 0 17px, rgba(231, 253, 247, 0.16) 18px 19px, transparent 20px 38px),
+      repeating-linear-gradient(0deg, transparent 0 21px, rgba(231, 253, 247, 0.12) 22px 23px, transparent 24px 44px);
+    box-shadow: inset 0 0 38px rgba(99, 244, 200, 0.16), 0 0 70px rgba(99, 244, 200, 0.12);
+    animation: paycmd-globe-glow 5.2s ease-in-out infinite;
+  }
+
+  .paycmd-cosmic-globe::before {
+    content: "";
+    position: absolute;
+    inset: 12%;
+    border-radius: 999px;
+    border: 1px solid rgba(231, 253, 247, 0.18);
+    background:
+      repeating-conic-gradient(from 16deg, rgba(231, 253, 247, 0.28) 0deg 1deg, transparent 2deg 18deg);
+    animation: paycmd-globe-spin 9s linear infinite;
+  }
+
+  .paycmd-cosmic-globe::after {
+    content: "";
+    position: absolute;
+    inset: 45%;
+    border-radius: 999px;
+    background: rgba(255, 77, 94, 0.92);
+    box-shadow: 0 0 18px rgba(255, 77, 94, 0.82);
+    transform: translate(86px, -44px);
+  }
+
+  .paycmd-deep-orbit {
+    border-radius: 999px;
+    border: 1px solid rgba(231, 253, 247, 0.12);
+    border-left-color: rgba(99, 244, 200, 0.5);
+    border-bottom-color: rgba(255, 77, 94, 0.34);
+    animation: paycmd-deep-orbit 32s linear infinite;
+    transform-origin: 50% 50%;
+  }
+
+  .paycmd-deep-orbit::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: -4px;
+    height: 8px;
+    width: 8px;
+    border-radius: 999px;
+    background: #63f4c8;
+    box-shadow: 0 0 18px rgba(99, 244, 200, 0.8);
+  }
+
+  .paycmd-deep-orbit-reverse {
+    animation-duration: 46s;
+    animation-direction: reverse;
+    opacity: 0.72;
+  }
+
+  .paycmd-orbit {
+    animation: paycmd-spin 38s linear infinite;
+    box-shadow: inset 0 0 80px rgba(99, 244, 200, 0.04);
+  }
+
+  .paycmd-orbit-slow {
+    animation-duration: 62s;
+    animation-direction: reverse;
+  }
+
+  .paycmd-float {
+    animation: paycmd-drift 8s ease-in-out infinite;
+  }
+
+  .paycmd-login-scan {
+    background-image: linear-gradient(180deg, transparent, rgba(99, 244, 200, 0.06), transparent);
+    background-size: 100% 160px;
+    animation: paycmd-scan 6s linear infinite;
+    mix-blend-mode: screen;
+    opacity: 0.65;
+  }
+
+  .paycmd-reveal {
+    animation: paycmd-reveal-up 720ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .paycmd-reveal-delay-1 {
+    animation-delay: 90ms;
+  }
+
+  .paycmd-reveal-delay-2 {
+    animation-delay: 180ms;
+  }
+
+  .paycmd-reveal-delay-3 {
+    animation-delay: 270ms;
+  }
+
+  .paycmd-preview-float {
+    animation: paycmd-preview-float 8s ease-in-out infinite;
+    transform-style: preserve-3d;
+  }
+
+  .paycmd-button-shine {
+    position: relative;
+    overflow: hidden;
+    transition: transform 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
+  }
+
+  .paycmd-button-shine:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 18px 52px rgba(99, 244, 200, 0.24);
+  }
+
+  .paycmd-button-shine::after {
+    content: "";
+    position: absolute;
+    inset: -20% auto -20% 0;
+    width: 42%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.42), transparent);
+    animation: paycmd-shimmer 3.8s ease-in-out infinite;
+    pointer-events: none;
+  }
+
+  .paycmd-signal-line {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .paycmd-signal-line::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 34%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(99, 244, 200, 0.8), transparent);
+    animation: paycmd-signal 4.8s ease-in-out infinite;
+  }
+
+  .paycmd-pulse-ring {
+    animation: paycmd-pulse-ring 2.8s ease-in-out infinite;
+  }
+
+  .paycmd-logo-breathe {
+    animation: paycmd-logo-breathe 6.5s ease-in-out infinite;
+  }
+
+  .paycmd-logo-orbit {
+    animation: paycmd-logo-breathe 6.5s ease-in-out infinite;
+  }
+
+  .paycmd-logo-orbit::after {
+    content: "";
+    position: absolute;
+    inset: -12px;
+    border-radius: 999px;
+    border: 1px solid rgba(99, 244, 200, 0.26);
+    animation: paycmd-orbit-dot 5.2s linear infinite;
+    background:
+      radial-gradient(circle at 50% 0%, rgba(99, 244, 200, 0.95) 0 5px, transparent 6px),
+      radial-gradient(circle at 50% 100%, rgba(255, 77, 94, 0.9) 0 4px, transparent 5px);
+    pointer-events: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .paycmd-hero-grid,
+    .paycmd-orbit,
+    .paycmd-float,
+    .paycmd-login-scan,
+    .paycmd-reveal,
+    .paycmd-preview-float,
+    .paycmd-button-shine::after,
+    .paycmd-signal-line::before,
+    .paycmd-pulse-ring,
+    .paycmd-logo-breathe,
+    .paycmd-logo-orbit,
+    .paycmd-logo-orbit::after,
+    .paycmd-stars,
+    .paycmd-nebula,
+    .paycmd-cosmic-globe,
+    .paycmd-cosmic-globe::before,
+    .paycmd-deep-orbit {
+      animation: none;
+    }
+
+    .paycmd-button-shine:hover {
+      transform: none;
+    }
+  }
+
   .paycmd-chat-scrollbar {
     scrollbar-gutter: stable;
     scrollbar-width: none;

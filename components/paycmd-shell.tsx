@@ -26,7 +26,7 @@ export function PayCmdShell({ children }: { children: ReactNode }) {
   async function logout() {
     const supabase = createClient();
     await supabase.auth.signOut();
-    window.location.href = "/auth/login";
+    window.location.href = "/auth/login?next=/app";
   }
 
   return (
@@ -34,7 +34,7 @@ export function PayCmdShell({ children }: { children: ReactNode }) {
       <div className="grid h-full grid-rows-[auto_minmax(0,1fr)_auto] lg:grid-cols-[260px_minmax(0,1fr)] lg:grid-rows-1">
         <aside className="hidden border-r bg-card lg:flex lg:flex-col">
           <div className="border-b p-4">
-            <Link href="/" className="flex items-center gap-3">
+            <Link href="/app" className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
                 <Command className="h-5 w-5" />
               </div>
@@ -99,7 +99,7 @@ export function PayCmdShell({ children }: { children: ReactNode }) {
         </aside>
 
         <header className="flex items-center justify-between border-b bg-card px-4 py-3 lg:hidden">
-          <Link href="/" className="flex items-center gap-2 font-semibold">
+          <Link href="/app" className="flex items-center gap-2 font-semibold">
             <Command className="h-5 w-5 text-primary" />
             PayCMD
           </Link>

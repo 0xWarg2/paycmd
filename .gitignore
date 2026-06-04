@@ -23,6 +23,7 @@
 # misc
 .DS_Store
 *.pem
+recovery_file_*.dat
 
 # debug
 npm-debug.log*
