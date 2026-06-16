@@ -58,6 +58,29 @@ CIRCLE_ENTITY_SECRET
 CIRCLE_WALLET_SET_ID
 ```
 
+Biến môi trường AI:
+
+```text
+OPENAI_API_KEY
+OPENAI_BASE_URL
+PAYCMD_DEFAULT_AI_MODEL_PROFILE
+
+SURF_API_KEY
+SURF_API_BASE_URL=https://api.asksurf.ai/gateway/v1
+SURF_TIMEOUT_MS=600000
+```
+
+OpenAI dùng để route câu tự nhiên trong mode `PayCMD` thành command hoặc intent `crypto_research`. Khi user chọn mode `AskSurf`, câu hỏi không bắt đầu bằng `/` đi thẳng tới `/api/ai/crypto` để tránh route nhầm. Slash command luôn chạy PayCMD.
+
+AskSurf public docs hiện liệt kê model Chat Completions chính thức trong family `surf-1.5`, không dùng public model tên `surf-2.0`. UI vẫn gọi gói research là `Research 2.0`, nhưng request thật map như sau:
+
+- `Instant`: `surf-1.5-instant`, timeout 120 giây.
+- `Research 2.0 / Standard`: `surf-1.5`, `reasoning_effort=medium`, timeout theo `SURF_TIMEOUT_MS` mặc định 600 giây.
+- `Research 2.0 / Extended`: `surf-1.5`, `reasoning_effort=high`, timeout theo `SURF_TIMEOUT_MS` mặc định 600 giây.
+- `Research 2.0 / Maximum`: `surf-1.5-thinking`, `reasoning_effort=high`, timeout theo `SURF_TIMEOUT_MS` mặc định 600 giây.
+
+Route `/api/ai/crypto` export `maxDuration = 600` để dùng đủ 10 phút khi Vercel plan cho phép. Trên Vercel Hobby có thể vẫn bị giới hạn khoảng 300 giây; muốn production chờ đủ 10 phút cần plan hỗ trợ/Fluid Compute hoặc chuyển AskSurf sang background job.
+
 `vercel.json` đang ép Vercel dùng `npm install --legacy-peer-deps` để khớp cách cài local của project.
 
 ## GitHub Actions

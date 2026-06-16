@@ -114,7 +114,8 @@ export async function POST(req: NextRequest) {
       eoaAddress as `0x${string}`
     );
 
-    // Store transaction in database
+    // Store transaction in database. The on-chain deposit transaction is confirmed here,
+    // but Circle Gateway still needs finality/indexing before the balance can be burned.
     await supabase.from("transaction_history").insert([
       {
         user_id: user.id,
@@ -124,16 +125,19 @@ export async function POST(req: NextRequest) {
         tx_hash: txHash,
         // This should probably be dynamic if you support multiple gateways
         gateway_wallet_address: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9",
-        status: "success",
+        status: "pending_gateway_finality",
+        reason: "Deposit transaction confirmed; waiting for Circle Gateway finality/indexing.",
         created_at: new Date().toISOString(),
       },
     ]);
 
     return NextResponse.json({
       success: true,
+      status: "pending_gateway_finality",
       txHash,
       chain,
       amount: parseFloat(amount),
+      message: `Đã gửi deposit ${parseFloat(amount)} USDC vào Gateway trên ${chain}. Đang chờ Circle Gateway finality/indexing trước khi có thể dùng để transfer.`,
     });
   } catch (error: any) {
     console.error("Error in deposit:", error);

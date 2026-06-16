@@ -18,6 +18,8 @@
 
 import type { Metadata } from "next";
 import { ThemeProvider } from "next-themes";
+import { PayCmdRuntimeProvider } from "@/components/paycmd-runtime";
+import { Toaster } from "@/components/ui/sonner";
 import { WagmiProvider } from "@/components/wagmi-provider";
 import "./globals.css";
 
@@ -47,7 +49,10 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <WagmiProvider>
-            {children}
+            <PayCmdRuntimeProvider>
+              {children}
+              <Toaster toastOptions={{ style: { width: "450px", maxWidth: "90vw" } }} />
+            </PayCmdRuntimeProvider>
           </WagmiProvider>
         </ThemeProvider>
       </body>

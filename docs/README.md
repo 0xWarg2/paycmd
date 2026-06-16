@@ -12,5 +12,7 @@ Thư mục này là handoff documentation cho dự án PayCMD. Tài liệu ưu t
 6. `05-moi-truong-va-trien-khai.md`
 7. `06-bai-hoc-rut-ra.md`
 8. `07-payment-copilot-mvp.md`
+9. `08-paycmd-v1-tinh-nang-va-test-plan.md`
+10. `09-gateway-vs-cctp-v2-phi-va-gas.md`
 
 Các quyết định kiến trúc nằm trong `quyet-dinh/`.

@@ -7,20 +7,82 @@ import { ReactNode, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ThemeSwitcher } from "@/components/theme-switcher";
+import { usePayCmdRuntime } from "@/components/paycmd-runtime";
 import { createClient } from "@/lib/supabase/client";
-import { availableBudget, demoNotifications, navigationItems } from "@/lib/paycmd/demo-data";
+import { navigationItems } from "@/lib/paycmd/demo-data";
+
+function formatUsdcBalance(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 6,
+  }).format(value);
+}
 
 export function PayCmdShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [email, setEmail] = useState<string>("");
-  const unreadCount = demoNotifications.filter((item) => item.status === "unread").length;
+  const [unifiedBalance, setUnifiedBalance] = useState<number | null>(null);
+  const [isBalanceLoading, setIsBalanceLoading] = useState(true);
+  const { activeCommandCount, unreadCount } = usePayCmdRuntime();
+  const unifiedBalanceLabel =
+    unifiedBalance === null ? "-- USDC" : `${formatUsdcBalance(unifiedBalance)} USDC`;
 
   useEffect(() => {
     const supabase = createClient();
     void supabase.auth.getUser().then(({ data }) => {
       setEmail(data.user?.email ?? "");
     });
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadBalance() {
+      try {
+        const response = await fetch("/api/gateway/balance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          if (response.status === 404) {
+            if (isMounted) {
+              setUnifiedBalance(0);
+            }
+            return;
+          }
+
+          throw new Error(data?.error ?? data?.message ?? "Failed to load unified balance");
+        }
+
+        const total = Number(data?.totalUnified ?? 0);
+
+        if (isMounted) {
+          setUnifiedBalance(Number.isFinite(total) ? total : 0);
+        }
+      } catch (error) {
+        console.error("Failed to load unified balance", error);
+        if (isMounted) {
+          setUnifiedBalance(null);
+        }
+      } finally {
+        if (isMounted) {
+          setIsBalanceLoading(false);
+        }
+      }
+    }
+
+    void loadBalance();
+    const interval = window.setInterval(loadBalance, 30_000);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(interval);
+    };
   }, []);
 
   async function logout() {
@@ -46,8 +108,12 @@ export function PayCmdShell({ children }: { children: ReactNode }) {
           </div>
 
           <div className="m-4 rounded-md border bg-background p-3">
-            <div className="text-xs text-muted-foreground">Gateway balance</div>
-            <div className="mt-1 text-xl font-semibold">${availableBudget().toLocaleString()} USDC</div>
+            <div className="text-xs text-muted-foreground">Unified balance</div>
+            {isBalanceLoading ? (
+              <Skeleton className="mt-2 h-7 w-36" />
+            ) : (
+              <div className="mt-1 text-xl font-semibold">{unifiedBalanceLabel}</div>
+            )}
             <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
               <ShieldCheck className="h-4 w-4 text-primary" />
               Arc Testnet · Circle Gateway
@@ -73,6 +139,8 @@ export function PayCmdShell({ children }: { children: ReactNode }) {
                   <span>{item.label}</span>
                   {item.label === "Notifications" && unreadCount > 0 ? (
                     <Badge className="ml-auto">{unreadCount}</Badge>
+                  ) : item.label === "Chat" && activeCommandCount > 0 ? (
+                    <Badge className="ml-auto">{activeCommandCount}</Badge>
                   ) : null}
                 </Link>
               );
@@ -108,13 +176,19 @@ export function PayCmdShell({ children }: { children: ReactNode }) {
             <Button variant="ghost" size="icon" onClick={logout} aria-label="Logout">
               <LogOut className="h-4 w-4" />
             </Button>
-            <Badge variant="secondary">${availableBudget().toLocaleString()} USDC</Badge>
+            <Badge variant="secondary" className="max-w-[50vw] gap-1 truncate text-[11px]">
+              <span className="shrink-0">Unified balance:</span>
+              <span className="truncate">{isBalanceLoading ? "..." : unifiedBalanceLabel}</span>
+            </Badge>
           </div>
         </header>
 
         <section className="min-h-0 overflow-hidden">{children}</section>
 
-        <nav className="grid grid-cols-5 border-t bg-card lg:hidden">
+        <nav
+          className="grid border-t bg-card lg:hidden"
+          style={{ gridTemplateColumns: `repeat(${navigationItems.length}, minmax(0, 1fr))` }}
+        >
           {navigationItems.map((item) => {
             const isActive = pathname === item.href;
             const Icon = item.icon;
@@ -123,12 +197,17 @@ export function PayCmdShell({ children }: { children: ReactNode }) {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`flex flex-col items-center justify-center gap-1 px-1 py-2 text-[11px] ${
+                className={`relative flex flex-col items-center justify-center gap-1 px-1 py-2 text-[11px] ${
                   isActive ? "text-primary" : "text-muted-foreground"
                 }`}
               >
                 <Icon className="h-4 w-4" />
                 <span className="truncate">{item.label}</span>
+                {item.label === "Notifications" && unreadCount > 0 ? (
+                  <span className="absolute mt-[-28px] ml-7 rounded-full bg-primary px-1.5 text-[10px] text-primary-foreground">
+                    {unreadCount}
+                  </span>
+                ) : null}
               </Link>
             );
           })}

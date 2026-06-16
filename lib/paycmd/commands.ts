@@ -6,6 +6,7 @@ export const commandNames = [
   "fund",
   "balance",
   "deposit",
+  "withdraw",
   "transfer",
   "pay",
   "request",
@@ -69,6 +70,12 @@ function amountFrom(input: string) {
   return input.match(/\b\d+(\.\d{1,6})?\b/)?.[0] ?? "";
 }
 
+function mintGasModeFrom(input: string) {
+  return /\b(manual(?:\s+gas)?|no\s+forwarding|without\s+forwarding)\b/i.test(input)
+    ? "manual"
+    : "auto_forwarding";
+}
+
 function chainFrom(input: string) {
   const token = input
     .match(/\b(arc(?:-?testnet)?|base(?:-?sepolia)?|avalanche(?:-?fuji)?|avax|fuji)\b/i)?.[1]
@@ -101,7 +108,17 @@ function payerFrom(input: string) {
 }
 
 function contactFieldsFrom(input: string) {
-  const match = input.match(/^\/?contacts\s+add\s+(.+?)\s+(0x[a-fA-F0-9]{40})(?:\s+on\s+(.+))?$/i);
+  const addressOnlyMatch = input.match(/^\/?contacts\s+add\s+@?(0x[a-fA-F0-9]{40})(?:\s+on\s+(.+))?$/i);
+  if (addressOnlyMatch) {
+    const address = addressOnlyMatch[1]?.trim() ?? "";
+    const chain = addressOnlyMatch[2]
+      ? chainAliases[addressOnlyMatch[2].trim().toLowerCase() as keyof typeof chainAliases] ?? ""
+      : "";
+
+    return { name: "", address, chain };
+  }
+
+  const match = input.match(/^\/?contacts\s+add\s+(.+?)\s+@?(0x[a-fA-F0-9]{40})(?:\s+on\s+(.+))?$/i);
   const name = match?.[1]?.trim() ?? "";
   const address = match?.[2]?.trim() ?? "";
   const chain = match?.[3] ? chainAliases[match[3].trim().toLowerCase() as keyof typeof chainAliases] ?? "" : "";
@@ -143,18 +160,23 @@ export const commandRegistry: PayCmdCommand[] = [
     requiredFields: ["action"],
     parse(input) {
       const raw = compact(input);
-      const action = raw.match(/\b(create|status)\b/i)?.[1]?.toLowerCase() ?? "";
+      const action = raw.match(/\b(create|status|balance)\b/i)?.[1]?.toLowerCase() ?? "";
+      const chain = chainFrom(raw);
 
       return result(
         "wallet",
         raw,
-        { action },
+        { action, chain },
         this.requiredFields,
         this.sample,
         action === "create"
           ? "Tạo Circle wallet cho tài khoản này"
           : action === "status"
             ? "Kiểm tra trạng thái Circle wallet"
+            : action === "balance"
+              ? chain
+                ? `Xem USDC trong Circle SCA wallet trên ${chain}`
+                : "Xem USDC trong Circle SCA wallet"
             : "Chọn wallet action",
       );
     },
@@ -253,6 +275,31 @@ export const commandRegistry: PayCmdCommand[] = [
     },
   },
   {
+    name: "withdraw",
+    aliases: ["/withdraw", "withdraw"],
+    title: "Withdraw khỏi Gateway",
+    sample: "/withdraw 5 from base",
+    requiredFields: ["amount", "sourceChain"],
+    parse(input) {
+      const raw = compact(input);
+      const amount = amountFrom(raw);
+      const token = tokenFrom(raw);
+      const sourceChain = sourceChainFrom(raw) || chainFrom(raw);
+      const safeAmount = amountSchema.safeParse(amount).success ? amount : "";
+
+      return result(
+        "withdraw",
+        raw,
+        { amount: safeAmount, token, sourceChain },
+        this.requiredFields,
+        this.sample,
+        sourceChain && safeAmount
+          ? `Withdraw ${safeAmount} ${token} từ Gateway ${sourceChain} về Circle SCA wallet`
+          : "Tạo Gateway withdraw draft",
+      );
+    },
+  },
+  {
     name: "transfer",
     aliases: ["/transfer", "transfer"],
     title: "Chuyển unified balance",
@@ -269,7 +316,7 @@ export const commandRegistry: PayCmdCommand[] = [
       return result(
         "transfer",
         raw,
-        { amount: safeAmount, token, sourceChain, destinationChain },
+        { amount: safeAmount, token, sourceChain, destinationChain, mintGasMode: mintGasModeFrom(raw) },
         this.requiredFields,
         this.sample,
         sourceChain && destinationChain && safeAmount
@@ -296,7 +343,7 @@ export const commandRegistry: PayCmdCommand[] = [
       return result(
         "pay",
         raw,
-        { amount: safeAmount, token, recipient, destinationChain, sourceChain },
+        { amount: safeAmount, token, recipient, destinationChain, sourceChain, mintGasMode: mintGasModeFrom(raw) },
         this.requiredFields,
         this.sample,
         recipient && safeAmount
@@ -367,17 +414,21 @@ export const commandRegistry: PayCmdCommand[] = [
       const raw = compact(input);
       const action = raw.match(/\b(add|list)\b/i)?.[1]?.toLowerCase() ?? "";
       const contact = contactFieldsFrom(raw);
+      const requiredFields =
+        action === "list" ? ["action"] : action === "add" ? ["action", "address"] : this.requiredFields;
 
       return result(
         "contacts",
         raw,
         { action, ...contact },
-        action === "list" ? ["action"] : this.requiredFields,
+        requiredFields,
         this.sample,
         action === "list"
           ? "List contacts"
           : contact.name && contact.address
             ? `Add contact ${contact.name}`
+            : contact.address
+              ? "Add internal contact from wallet address"
             : "Thêm contact nhận tiền",
       );
     },
@@ -411,15 +462,20 @@ export const commandRegistry: PayCmdCommand[] = [
     requiredFields: ["action"],
     parse(input) {
       const raw = compact(input);
-      const action = raw.match(/\binfo\b/i)?.[0]?.toLowerCase() ?? "";
+      const action = raw.match(/\b(info|balance)\b/i)?.[0]?.toLowerCase() ?? "";
+      const chain = chainFrom(raw);
 
       return result(
         "gateway",
         raw,
-        { action },
+        { action, chain },
         this.requiredFields,
         this.sample,
-        "Xem Circle Gateway domains và contracts",
+        action === "balance"
+          ? chain
+            ? `Xem Gateway balance trên ${chain}`
+            : "Xem Gateway balance"
+          : "Xem Circle Gateway domains và contracts",
       );
     },
   },
@@ -431,7 +487,7 @@ export const commandRegistry: PayCmdCommand[] = [
     requiredFields: [],
     parse(input) {
       const raw = compact(input);
-      const filter = raw.match(/\b(fund|deposit|transfer)\b/i)?.[1]?.toLowerCase() ?? "";
+      const filter = raw.match(/\b(fund|deposit|withdraw|transfer|unify)\b/i)?.[1]?.toLowerCase() ?? "";
 
       return result(
         "history",
@@ -494,6 +550,7 @@ export function requiresConfirmation(command: ParsedCommand) {
     (command.command === "wallet" && command.fields.action === "create") ||
     command.command === "deposit" ||
     command.command === "fund" ||
+    command.command === "withdraw" ||
     command.command === "transfer" ||
     command.command === "pay" ||
     command.command === "payroll"
