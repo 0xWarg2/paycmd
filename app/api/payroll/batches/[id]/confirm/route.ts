@@ -79,8 +79,9 @@ export async function POST(
         amount: String(item.amount),
         recipientAddress: item.recipient_address,
         autoDeposit: true,
+        mintGasMode: "auto_forwarding",
       });
-      const txHash = transfer.mintTxHash ?? transfer.txHash ?? null;
+      const txHash = transfer.mintTxHash ?? transfer.txHash ?? transfer.transferId ?? null;
 
       await supabase
         .from("payroll_items")

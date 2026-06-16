@@ -186,6 +186,17 @@ const gatewayWalletAbi = [
   },
   {
     type: "function",
+    name: "isAuthorizedForBalance",
+    inputs: [
+      { name: "token", type: "address", internalType: "address" },
+      { name: "depositor", type: "address", internalType: "address" },
+      { name: "addr", type: "address", internalType: "address" },
+    ],
+    outputs: [{ name: "", type: "bool", internalType: "bool" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     name: "removeDelegate",
     inputs: [
       { name: "token", type: "address", internalType: "address" },
@@ -241,6 +252,13 @@ function addressToBytes32(address: Address): `0x${string}` {
   return pad(address.toLowerCase() as Address, { size: 32 });
 }
 
+function usdcDecimalToAtomic(value: string | number): bigint {
+  const [wholeRaw, fractionRaw = ""] = String(value).split(".");
+  const whole = wholeRaw.replace(/[^\d]/g, "") || "0";
+  const fraction = fractionRaw.replace(/[^\d]/g, "").padEnd(6, "0").slice(0, 6);
+  return BigInt(whole) * 1_000_000n + BigInt(fraction || "0");
+}
+
 interface BurnIntentSpec {
   version: number;
   sourceDomain: number;
@@ -294,8 +312,18 @@ interface ChallengeResponse {
   id: string;
 }
 
+const DEFAULT_CIRCLE_TX_TIMEOUT_MS = 180_000;
+
 async function waitForTransactionConfirmation(challengeId: string): Promise<string> {
+  const startedAt = Date.now();
+
   while (true) {
+    if (Date.now() - startedAt > DEFAULT_CIRCLE_TX_TIMEOUT_MS) {
+      throw new Error(
+        `Circle transaction ${challengeId} has not confirmed after ${DEFAULT_CIRCLE_TX_TIMEOUT_MS / 1000}s. Check it again later.`,
+      );
+    }
+
     const response = await circleDeveloperSdk.getTransaction({ id: challengeId });
     const tx = response.data?.transaction;
 
@@ -307,7 +335,16 @@ async function waitForTransactionConfirmation(challengeId: string): Promise<stri
       return tx.txHash;
     } else if (tx?.state === "FAILED") {
       console.error("Circle API Error:", tx);
-      throw new Error(`Transaction ${challengeId} failed with reason: ${tx.errorReason}`);
+      throw new Error(
+        [
+          `Transaction ${challengeId} failed with reason: ${tx.errorReason}`,
+          tx.errorDetails ? `details: ${tx.errorDetails}` : "",
+          tx.blockchain ? `blockchain: ${tx.blockchain}` : "",
+          tx.abiFunctionSignature ? `function: ${tx.abiFunctionSignature}` : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      );
     }
 
     console.log(`Transaction ${challengeId} state: ${tx?.state}. Polling again in 2s...`);
@@ -323,7 +360,6 @@ async function initiateContractInteraction(
   blockchain?: Blockchain
 ): Promise<string> {
   const txParams: any = {
-    walletId,
     contractAddress,
     abiFunctionSignature,
     abiParameters: args,
@@ -335,9 +371,18 @@ async function initiateContractInteraction(
     }
   };
 
-  // Add blockchain parameter if provided
   if (blockchain) {
+    const walletResponse = await circleDeveloperSdk.getWallet({ id: walletId });
+    const walletAddress = walletResponse.data?.wallet?.address;
+
+    if (!walletAddress) {
+      throw new Error(`Could not find address for wallet ID: ${walletId}`);
+    }
+
+    txParams.walletAddress = walletAddress;
     txParams.blockchain = blockchain;
+  } else {
+    txParams.walletId = walletId;
   }
 
   const response = await circleDeveloperSdk.createContractExecutionTransaction(txParams);
@@ -456,10 +501,11 @@ export async function withdrawFromCustodialWallet(
 
 export async function submitBurnIntent(
   burnIntent: any,
-  signature: `0x${string}`
+  signature: `0x${string}`,
+  options?: { enableForwarder?: boolean }
 ): Promise<{
-  attestation: `0x${string}`;
-  attestationSignature: `0x${string}`;
+  attestation?: `0x${string}`;
+  attestationSignature?: `0x${string}`;
   transferId: string;
   fees: any;
 }> {
@@ -477,7 +523,12 @@ export async function submitBurnIntent(
     },
   ];
 
-  const response = await fetch("https://gateway-api-testnet.circle.com/v1/transfer", {
+  const transferUrl = new URL("https://gateway-api-testnet.circle.com/v1/transfer");
+  if (options?.enableForwarder) {
+    transferUrl.searchParams.set("enableForwarder", "true");
+  }
+
+  const response = await fetch(transferUrl.toString(), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -498,6 +549,43 @@ export async function submitBurnIntent(
     transferId: result.transferId,
     fees: result.fees,
   };
+}
+
+async function pollForwardedGatewayTransfer(transferId: string): Promise<any> {
+  let attempts = 0;
+  const maxAttempts = 60;
+
+  while (attempts < maxAttempts) {
+    await new Promise((r) => setTimeout(r, 3000));
+
+    const pollResponse = await fetch(`https://gateway-api-testnet.circle.com/v1/transfer/${transferId}`);
+    if (!pollResponse.ok) {
+      console.warn(`Forwarded transfer poll failed: ${pollResponse.status}`);
+      attempts++;
+      continue;
+    }
+
+    const details = await pollResponse.json();
+    const status = String(details.status ?? details.state ?? "").toLowerCase();
+    console.log(`Forwarded transfer status: ${status || "unknown"} (attempt ${attempts + 1}/${maxAttempts})`);
+
+    if (status === "confirmed" || status === "finalized") {
+      return details;
+    }
+
+    if (status === "failed") {
+      const reason = details.forwardingDetails?.failureReason ?? "unknown";
+      throw new Error(`Forwarded transfer failed: ${reason}`);
+    }
+
+    if (status === "expired") {
+      throw new Error("Forwarded transfer attestation expired before minting.");
+    }
+
+    attempts++;
+  }
+
+  throw new Error(`Forwarded transfer did not complete after ${maxAttempts} attempts. Transfer ID: ${transferId}`);
 }
 
 export async function getCircleWalletAddress(walletId: string): Promise<Address> {
@@ -662,6 +750,65 @@ export async function checkWalletGasBalance(
   };
 }
 
+export async function estimateGatewayTransferFeeAtomic(
+  burnIntentData: BurnIntentData,
+  options?: { enableForwarder?: boolean }
+): Promise<bigint> {
+  const typedData = burnIntentTypedData(burnIntentData);
+
+  const payload = [
+    {
+      maxBlockHeight: typedData.message.maxBlockHeight.toString(),
+      maxFee: typedData.message.maxFee.toString(),
+      spec: {
+        ...typedData.message.spec,
+        value: typedData.message.spec.value.toString(),
+      },
+    },
+  ];
+
+  const estimateUrl = new URL("https://gateway-api-testnet.circle.com/v1/estimate");
+  if (options?.enableForwarder) {
+    estimateUrl.searchParams.set("enableForwarder", "true");
+  }
+
+  const response = await fetch(estimateUrl.toString(), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gateway API error: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  const result = Array.isArray(data) ? data[0] : data?.body?.[0] ?? data;
+  const totalFee = result?.fees?.total ?? data?.fees?.total ?? "0";
+  return usdcDecimalToAtomic(totalFee);
+}
+
+export async function isGatewaySignerAuthorized(
+  depositorAddress: Address,
+  signerAddress: Address,
+  chain: SupportedChain,
+): Promise<boolean> {
+  const publicClient = createPublicClient({
+    chain: getChainConfig(chain),
+    transport: http(),
+  });
+
+  return await publicClient.readContract({
+    address: GATEWAY_WALLET_ADDRESS as Address,
+    abi: gatewayWalletAbi,
+    functionName: "isAuthorizedForBalance",
+    args: [USDC_ADDRESSES[chain] as Address, depositorAddress, signerAddress],
+  });
+}
+
 async function signBurnIntentWithEOA(
   burnIntentData: BurnIntentData,
   sourceChain: SupportedChain,
@@ -714,11 +861,14 @@ export async function transferGatewayBalanceWithEOA(
   sourceChain: SupportedChain,
   destinationChain: SupportedChain,
   recipientAddress: Address,
-  depositorAddress: Address
+  depositorAddress: Address,
+  options?: { enableForwarder?: boolean }
 ): Promise<{
   transferId: string;
-  attestation: `0x${string}`;
-  attestationSignature: `0x${string}`;
+  attestation?: `0x${string}`;
+  attestationSignature?: `0x${string}`;
+  fees?: any;
+  forwardingDetails?: any;
 }> {
   // 1. Get EOA signer for source chain (used for signing only)
   const { address } = await getSignerWalletIdForUser(userId, sourceChain);
@@ -740,9 +890,12 @@ export async function transferGatewayBalanceWithEOA(
   // maxFee is the maximum fee Gateway can charge (deducted from transfer amount)
   // It should be reasonable but less than the transfer amount
   // Gateway typically charges ~0.1% to 0.2% of the transfer
-  const maxFee = amount > BigInt(10_000_000) // If > 10 USDC
+  let maxFee = amount > BigInt(10_000_000) // If > 10 USDC
     ? BigInt(2_010_000) // Allow up to 2.01 USDC fee
     : amount / BigInt(10); // Otherwise allow 10% of amount as max fee
+  if (options?.enableForwarder && maxFee < BigInt(1_000_000)) {
+    maxFee = BigInt(1_000_000);
+  }
 
   const burnIntentData: BurnIntentData = {
     maxBlockHeight: maxUint256,
@@ -765,18 +918,37 @@ export async function transferGatewayBalanceWithEOA(
     },
   };
 
+  const estimatedFee = await estimateGatewayTransferFeeAtomic(burnIntentData, {
+    enableForwarder: options?.enableForwarder,
+  });
+  if (estimatedFee > burnIntentData.maxFee) {
+    burnIntentData.maxFee = estimatedFee + (estimatedFee / 10n);
+  }
+
   // 4. Sign Intent with EOA
   const signature = await signBurnIntentWithEOA(burnIntentData, sourceChain, userId);
 
   // 5. Submit to Gateway
   const typedData = burnIntentTypedData(burnIntentData);
 
-  const { attestation, attestationSignature, transferId } = await submitBurnIntent(
+  const { attestation, attestationSignature, transferId, fees } = await submitBurnIntent(
     typedData.message,
-    signature
+    signature,
+    { enableForwarder: options?.enableForwarder }
   );
 
   console.log(`Gateway transfer submitted. ID: ${transferId}`);
+
+  if (options?.enableForwarder) {
+    const forwardingDetails = await pollForwardedGatewayTransfer(transferId);
+    return {
+      transferId,
+      attestation,
+      attestationSignature,
+      fees,
+      forwardingDetails,
+    };
+  }
 
   // 6. Poll for attestation if not immediately available
   let finalAttestation = attestation;
@@ -818,6 +990,7 @@ export async function transferGatewayBalanceWithEOA(
     transferId,
     attestation: finalAttestation as `0x${string}`,
     attestationSignature: finalSignature as `0x${string}`,
+    fees,
   };
 }
 export async function transferUnifiedBalanceCircle(
@@ -863,6 +1036,11 @@ export async function transferUnifiedBalanceCircle(
     },
   };
 
+  const estimatedFee = await estimateGatewayTransferFeeAtomic(burnIntentData);
+  if (estimatedFee > burnIntentData.maxFee) {
+    burnIntentData.maxFee = estimatedFee + (estimatedFee / 10n);
+  }
+
   // 3. Sign Intent (Custodial)
   const signature = await signBurnIntentCircle(walletId, burnIntentData);
 
@@ -899,6 +1077,10 @@ export async function transferUnifiedBalanceCircle(
         throw new Error(`Transfer failed on Gateway: ${JSON.stringify(pollJson)}`);
       }
     }
+  }
+
+  if (!finalAttestation || !finalSignature) {
+    throw new Error(`Attestation not received for transfer ID: ${transferId}`);
   }
 
   // 6. Execute Mint on Destination (Custodial)

@@ -18,7 +18,17 @@
 
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+
+import {
+  ChainRoute,
+  ExplorerTxLink,
+  RailBadge,
+  getChainMeta,
+  getTransactionExplorerChain,
+  inferRailFromTransactionType,
+} from "@/components/chain-identity";
 import {
   Card,
   CardContent,
@@ -26,6 +36,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -34,18 +49,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
-import { ArrowUpDown, ArrowUp, ArrowDown, ExternalLink } from "lucide-react";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Tooltip,
   TooltipContent,
@@ -53,15 +56,15 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-type TransactionType = "deposit" | "transfer" | "unify";
-type TransactionStatus = "pending" | "success" | "failed";
+type TransactionType = "fund" | "deposit" | "withdraw" | "transfer" | "unify";
+type TransactionStatus = "pending" | "pending_gateway_finality" | "success" | "failed";
 
 interface Transaction {
   id: string;
   user_id: string;
   chain: string;
   tx_type: TransactionType;
-  amount: number;
+  amount: number | string;
   tx_hash: string | null;
   gateway_wallet_address: string | null;
   destination_chain: string | null;
@@ -70,27 +73,65 @@ interface Transaction {
   created_at: string;
 }
 
-// Chain configuration for explorer links
-const CHAIN_EXPLORERS: Record<string, string> = {
-  arcTestnet: "https://testnet.arcscan.app/",
-  baseSepolia: "https://sepolia.basescan.org/",
-  avalancheFuji: "https://testnet.snowtrace.io/",
+const transactionTypeLabels: Record<TransactionType, string> = {
+  fund: "Fund",
+  deposit: "Deposit",
+  withdraw: "Withdraw",
+  transfer: "Transfer",
+  unify: "Unify",
 };
 
-const CHAIN_NAMES: Record<string, string> = {
-  arcTestnet: "Arc Testnet",
-  baseSepolia: "Base Sepolia",
-  avalancheFuji: "Avalanche Fuji",
-};
+function formatAmount(value: number | string) {
+  const amount = Number(value ?? 0);
+
+  if (!Number.isFinite(amount)) {
+    return "0 USDC";
+  }
+
+  return `${new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 6,
+  }).format(amount)} USDC`;
+}
+
+function formatDate(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleString();
+}
+
+function formatTxType(type: Transaction["tx_type"]) {
+  return transactionTypeLabels[type] ?? type;
+}
+
+function getStatusBadge(status: TransactionStatus) {
+  switch (status) {
+    case "success":
+      return <Badge className="bg-green-600 hover:bg-green-700">Success</Badge>;
+    case "failed":
+      return <Badge variant="destructive">Failed</Badge>;
+    case "pending_gateway_finality":
+      return (
+        <Badge variant="secondary" className="border-amber-400/40 bg-amber-500/10 text-amber-700 dark:text-amber-300">
+          Gateway finality
+        </Badge>
+      );
+    case "pending":
+      return <Badge variant="secondary">Pending</Badge>;
+    default:
+      return <Badge variant="outline">{status}</Badge>;
+  }
+}
 
 export function TransactionHistory() {
   const [isMounted, setIsMounted] = useState(false);
-
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Filter and sort state
   const [searchTerm, setSearchTerm] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -105,48 +146,57 @@ export function TransactionHistory() {
   useEffect(() => {
     async function fetchTransactions() {
       setLoading(true);
+      setError(null);
+
       try {
         const response = await fetch("/api/transactions");
+        const data = await response.json().catch(() => null);
+
         if (!response.ok) {
-          throw new Error(`Error: ${response.statusText}`);
+          throw new Error(data?.message ?? data?.error ?? `Error: ${response.statusText}`);
         }
-        const data = await response.json();
-        setTransactions(data);
-      } catch (err: any) {
-        setError(err.message);
+
+        setTransactions(Array.isArray(data) ? data : []);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not load transaction history");
       } finally {
         setLoading(false);
       }
     }
 
-    // Only fetch if we are mounted and connected
     if (isMounted) {
-      fetchTransactions();
+      void fetchTransactions();
     }
   }, [isMounted]);
 
-  // Filter and sort transactions
   const filteredAndSortedTransactions = useMemo(() => {
+    const searchLower = searchTerm.trim().toLowerCase();
     const filtered = transactions.filter((tx) => {
-      // Search filter (tx hash, chain, or destination chain)
-      const searchLower = searchTerm.toLowerCase();
-      const matchesSearch =
-        !searchTerm ||
-        tx.tx_hash?.toLowerCase().includes(searchLower) ||
-        tx.chain.toLowerCase().includes(searchLower) ||
-        tx.destination_chain?.toLowerCase().includes(searchLower);
+      const sourceMeta = getChainMeta(tx.chain);
+      const destinationMeta = getChainMeta(tx.destination_chain);
+      const searchable = [
+        tx.tx_hash,
+        tx.chain,
+        tx.destination_chain,
+        sourceMeta?.label,
+        sourceMeta?.shortLabel,
+        destinationMeta?.label,
+        destinationMeta?.shortLabel,
+        tx.tx_type,
+        tx.status,
+        tx.reason,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
 
-      // Type filter
+      const matchesSearch = !searchLower || searchable.includes(searchLower);
       const matchesType = typeFilter === "all" || tx.tx_type === typeFilter;
-
-      // Status filter
-      const matchesStatus =
-        statusFilter === "all" || tx.status === statusFilter;
+      const matchesStatus = statusFilter === "all" || tx.status === statusFilter;
 
       return matchesSearch && matchesType && matchesStatus;
     });
 
-    // Sort by date
     if (sortOrder !== "none") {
       filtered.sort((a, b) => {
         const dateA = new Date(a.created_at).getTime();
@@ -158,12 +208,10 @@ export function TransactionHistory() {
     return filtered;
   }, [transactions, searchTerm, typeFilter, statusFilter, sortOrder]);
 
-  const totalPages = Math.ceil(
-    filteredAndSortedTransactions.length / rowsPerPage
-  );
+  const totalPages = Math.ceil(filteredAndSortedTransactions.length / rowsPerPage);
   const paginatedTransactions = filteredAndSortedTransactions.slice(
     (currentPage - 1) * rowsPerPage,
-    currentPage * rowsPerPage
+    currentPage * rowsPerPage,
   );
 
   const handleSort = () => {
@@ -173,65 +221,21 @@ export function TransactionHistory() {
   };
 
   const SortIcon = () => {
-    if (sortOrder === "asc")
-      return <ArrowUp className="ml-2 h-4 w-4 inline" />;
-    if (sortOrder === "desc")
-      return <ArrowDown className="ml-2 h-4 w-4 inline" />;
-    return <ArrowUpDown className="ml-2 h-4 w-4 inline" />;
-  };
-
-  const getStatusBadge = (status: TransactionStatus) => {
-    switch (status) {
-      case "success":
-        return (
-          <Badge variant="default" className="bg-green-600 hover:bg-green-700">
-            Success
-          </Badge>
-        );
-      case "failed":
-        return (
-          <Badge variant="destructive" className="cursor-help">
-            Failed
-          </Badge>
-        );
-      case "pending":
-        return (
-          <Badge variant="secondary">
-            Pending
-          </Badge>
-        );
-      default:
-        return <Badge variant="outline">{status}</Badge>;
+    if (sortOrder === "asc") {
+      return <ArrowUp className="ml-2 inline h-4 w-4" />;
     }
+
+    if (sortOrder === "desc") {
+      return <ArrowDown className="ml-2 inline h-4 w-4" />;
+    }
+
+    return <ArrowUpDown className="ml-2 inline h-4 w-4" />;
   };
 
-  const getExplorerLink = (tx: Transaction) => {
-    // For transfers, the tx_hash is the mint transaction on the destination chain
-    // For deposits, the tx_hash is on the source chain
-    const chain = tx.tx_type === "transfer" && tx.destination_chain 
-      ? tx.destination_chain 
-      : tx.chain;
-    
-    const explorerBase = CHAIN_EXPLORERS[chain];
-    if (!explorerBase || !tx.tx_hash) return null;
-    return `${explorerBase}tx/${tx.tx_hash}`;
-  };
-
-  const formatChainName = (chain: string) => {
-    return CHAIN_NAMES[chain] || chain;
-  };
-
-  const truncateHash = (hash: string) => {
-    if (!hash) return "N/A";
-    return `${hash.slice(0, 6)}...${hash.slice(-4)}`;
-  };
-
-  // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, typeFilter, statusFilter]);
 
-  // This ensures the initial client render matches the server render (which is always disconnected state).
   if (!isMounted) {
     return (
       <Card>
@@ -244,182 +248,160 @@ export function TransactionHistory() {
   }
 
   return (
-    <Card>
-      
-      <CardContent>
-        <div className="space-y-4 mt-7">
-          {/* Filters */}
-          <div className="flex flex-col sm:flex-row gap-4">
-            <Input
-              placeholder="Search by transaction hash"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="sm:max-w-xs"
-            />
-            <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger className="sm:w-[180px]">
-                <SelectValue placeholder="Filter by type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Types</SelectItem>
-                <SelectItem value="deposit">Deposit</SelectItem>
-                <SelectItem value="transfer">Transfer</SelectItem>
-                <SelectItem value="unify">Unify</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="sm:w-[180px]">
-                <SelectValue placeholder="Filter by status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="success">Success</SelectItem>
-                <SelectItem value="failed">Failed</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Table */}
-          <div className="rounded-md border overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Chain(s)</TableHead>
-                  <TableHead>Amount</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Transaction Hash</TableHead>
-                  <TableHead>
-                    <Button variant="ghost" onClick={handleSort} className="h-8 p-0">
-                      Date
-                      <SortIcon />
-                    </Button>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loading ? (
-                  Array.from({ length: 5 }).map((_, i) => (
-                    <TableRow key={i}>
-                      <TableCell colSpan={6}>
-                        <Skeleton className="h-8 w-full" />
-                      </TableCell>
-                    </TableRow>
-                  ))
-                ) : error ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center text-red-500">
-                      Error: {error}
-                    </TableCell>
-                  </TableRow>
-                ) : paginatedTransactions.length > 0 ? (
-                  paginatedTransactions.map((tx) => (
-                    <TableRow key={tx.id}>
-                      <TableCell className="capitalize font-medium">
-                        {tx.tx_type}
-                      </TableCell>
-                      <TableCell>
-                        <div className="text-sm">
-                          <div>{formatChainName(tx.chain)}</div>
-                          {tx.destination_chain && (
-                            <div className="text-muted-foreground text-xs">
-                              → {formatChainName(tx.destination_chain)}
-                            </div>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="font-mono">
-                        {tx.amount ? `${tx.amount.toFixed(2)} USDC` : "N/A"}
-                      </TableCell>
-                      <TableCell>
-                        {/* 2. Updated Status Cell with Tooltip Logic */}
-                        {tx.status === "failed" && tx.reason ? (
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                {getStatusBadge(tx.status)}
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p className="max-w-[300px] text-xs break-words">
-                                  {tx.reason}
-                                </p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        ) : (
-                          getStatusBadge(tx.status)
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {tx.tx_hash ? (
-                          <a
-                            href={getExplorerLink(tx) || "#"}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-1 text-blue-600 hover:text-blue-800 font-mono text-xs"
-                          >
-                            {truncateHash(tx.tx_hash)}
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
-                        ) : (
-                          <span className="text-muted-foreground text-xs">N/A</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {new Date(tx.created_at).toLocaleString()}
-                      </TableCell>
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground">
-                      No transactions found.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-
-          {/* Pagination */}
-          {totalPages > 0 && (
-            <div className="flex items-center justify-between">
-              <div className="text-sm text-muted-foreground">
-                Showing {(currentPage - 1) * rowsPerPage + 1} to{" "}
-                {Math.min(
-                  currentPage * rowsPerPage,
-                  filteredAndSortedTransactions.length
-                )}{" "}
-                of {filteredAndSortedTransactions.length} transactions
-              </div>
-              <div className="flex items-center space-x-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                  disabled={currentPage === 1}
-                >
-                  Previous
-                </Button>
-                <span className="text-sm">
-                  Page {currentPage} of {totalPages}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    setCurrentPage((prev) => Math.min(prev + 1, totalPages))
-                  }
-                  disabled={currentPage === totalPages}
-                >
-                  Next
-                </Button>
-              </div>
+    <TooltipProvider>
+      <Card>
+        <CardContent>
+          <div className="mt-7 space-y-4">
+            <div className="flex flex-col gap-4 sm:flex-row">
+              <Input
+                placeholder="Search hash, chain, status, reason"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                className="sm:max-w-xs"
+              />
+              <Select value={typeFilter} onValueChange={setTypeFilter}>
+                <SelectTrigger className="sm:w-[180px]">
+                  <SelectValue placeholder="Filter by type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All types</SelectItem>
+                  <SelectItem value="fund">Fund</SelectItem>
+                  <SelectItem value="deposit">Deposit</SelectItem>
+                  <SelectItem value="withdraw">Withdraw</SelectItem>
+                  <SelectItem value="transfer">Transfer</SelectItem>
+                  <SelectItem value="unify">Unify</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="sm:w-[210px]">
+                  <SelectValue placeholder="Filter by status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All status</SelectItem>
+                  <SelectItem value="success">Success</SelectItem>
+                  <SelectItem value="failed">Failed</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="pending_gateway_finality">Gateway finality</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+
+            <div className="overflow-x-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Action</TableHead>
+                    <TableHead>Route</TableHead>
+                    <TableHead>Amount</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Explorer</TableHead>
+                    <TableHead>
+                      <Button variant="ghost" onClick={handleSort} className="h-8 p-0">
+                        Date
+                        <SortIcon />
+                      </Button>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {loading ? (
+                    Array.from({ length: 5 }).map((_, index) => (
+                      <TableRow key={index}>
+                        <TableCell colSpan={6}>
+                          <Skeleton className="h-8 w-full" />
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : error ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center text-red-500">
+                        Error: {error}
+                      </TableCell>
+                    </TableRow>
+                  ) : paginatedTransactions.length > 0 ? (
+                    paginatedTransactions.map((tx) => {
+                      const explorerChain = getTransactionExplorerChain(tx);
+                      const statusBadge = getStatusBadge(tx.status);
+
+                      return (
+                        <TableRow key={tx.id}>
+                          <TableCell>
+                            <div className="space-y-1.5">
+                              <div className="font-medium">{formatTxType(tx.tx_type)}</div>
+                              <RailBadge rail={inferRailFromTransactionType(tx.tx_type)} />
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <ChainRoute sourceChain={tx.chain} destinationChain={tx.destination_chain} />
+                          </TableCell>
+                          <TableCell className="font-mono">{formatAmount(tx.amount)}</TableCell>
+                          <TableCell>
+                            {tx.reason ? (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  {statusBadge}
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p className="max-w-[300px] text-xs break-words">{tx.reason}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            ) : (
+                              statusBadge
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <ExplorerTxLink chain={explorerChain} txHash={tx.tx_hash} compact />
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {formatDate(tx.created_at)}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center text-muted-foreground">
+                        No transactions found.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            {totalPages > 0 ? (
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-sm text-muted-foreground">
+                  Showing {(currentPage - 1) * rowsPerPage + 1} to{" "}
+                  {Math.min(currentPage * rowsPerPage, filteredAndSortedTransactions.length)} of{" "}
+                  {filteredAndSortedTransactions.length} transactions
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                    disabled={currentPage === 1}
+                  >
+                    Previous
+                  </Button>
+                  <span className="text-sm">
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                    disabled={currentPage === totalPages}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </CardContent>
+      </Card>
+    </TooltipProvider>
   );
 }

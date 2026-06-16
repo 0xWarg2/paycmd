@@ -37,7 +37,13 @@ export async function GET(req: NextRequest) {
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
-    if (txType === "fund" || txType === "deposit" || txType === "transfer") {
+    if (
+      txType === "fund" ||
+      txType === "deposit" ||
+      txType === "withdraw" ||
+      txType === "transfer" ||
+      txType === "unify"
+    ) {
       query = query.eq("tx_type", txType);
     }
 

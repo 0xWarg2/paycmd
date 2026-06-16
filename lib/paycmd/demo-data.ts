@@ -1,4 +1,4 @@
-import { CalendarClock, Contact, Gauge, MessageCircle, Bell } from "lucide-react";
+import { CalendarClock, Contact, Gauge, MessageCircle, Bell, UserCircle } from "lucide-react";
 
 export const contacts = [
   { name: "Minh", role: "Contributor", wallet: "0x92...4A1c", status: "Ready" },
@@ -36,11 +36,12 @@ export const demoNotifications = [
 ];
 
 export const navigationItems = [
-  { label: "Chat", href: "/", icon: MessageCircle },
+  { label: "Chat", href: "/app", icon: MessageCircle },
   { label: "Budgets", href: "/budgets", icon: Gauge },
   { label: "Contacts", href: "/contacts", icon: Contact },
   { label: "Schedules", href: "/schedules", icon: CalendarClock },
   { label: "Notifications", href: "/notifications", icon: Bell },
+  { label: "Profile", href: "/profile", icon: UserCircle },
 ];
 
 export function availableBudget() {

@@ -62,6 +62,7 @@ export async function POST(
       amount: String(paymentRequest.amount),
       recipientAddress: paymentRequest.recipient_address,
       autoDeposit: true,
+      mintGasMode: body.mintGasMode ?? "auto_forwarding",
     });
 
     await supabase
@@ -69,7 +70,7 @@ export async function POST(
       .update({
         status: "paid",
         payer_user_id: user.id,
-        paid_tx_hash: transfer.mintTxHash ?? transfer.txHash ?? null,
+        paid_tx_hash: transfer.mintTxHash ?? transfer.txHash ?? transfer.transferId ?? null,
         paid_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
