@@ -19,6 +19,7 @@ import {
   CHAIN_BY_DOMAIN,
   CIRCLE_CHAIN_NAMES,
   DOMAIN_IDS,
+  GATEWAY_CHAIN_CONFIGS,
   GATEWAY_MINTER_ADDRESS,
   GATEWAY_WALLET_ADDRESS,
   USDC_ADDRESSES,
@@ -29,14 +30,16 @@ import {
   getCircleWalletAddress,
   initiateDepositFromCustodialWallet,
   isGatewaySignerAuthorized,
+  supportedGatewayChains,
   transferGatewayBalanceWithEOA,
   type SupportedChain,
 } from "@/lib/circle/gateway-sdk";
 import { circleDeveloperSdk } from "@/lib/circle/sdk";
+import { requestLocale, tr, type PayCmdLocale } from "@/lib/i18n/server";
 import { createClient } from "@/lib/supabase/server";
 import { maxUint256, zeroAddress, type Address } from "viem";
 
-const validChains: SupportedChain[] = ["arcTestnet", "baseSepolia", "avalancheFuji"];
+const validChains = supportedGatewayChains;
 const amountSchema = /^\d+(\.\d{1,6})?$/;
 
 function decimalUsdcToAtomic(value: string | number) {
@@ -100,12 +103,12 @@ function chainCommandAlias(chain: SupportedChain) {
       : "avalanche";
 }
 
-function finalityHint(chain: SupportedChain) {
+function finalityHint(chain: SupportedChain, locale: PayCmdLocale) {
   if (chain === "baseSepolia") {
-    return "Base Sepolia cần chờ Circle Gateway nhận finality, thường khoảng 13-19 phút.";
+    return tr(locale, "gateway.finality.base");
   }
 
-  return "Đợi Gateway index xong authorize signer rồi chạy lại command.";
+  return tr(locale, "gateway.finality.generic");
 }
 
 function isSignerNotAuthorizedError(error: unknown) {
@@ -118,17 +121,18 @@ function gatewayWithdrawPendingResponse(params: {
   chain: SupportedChain;
   txHash?: string;
   stage: "delegate" | "burn_intent";
+  locale: PayCmdLocale;
 }) {
   const retryCommand = `/withdraw ${params.amount} from ${chainCommandAlias(params.chain)}`;
   const actionText =
     params.stage === "delegate"
-      ? `Đã gửi giao dịch authorize Gateway signer trên ${params.chain}.`
-      : `Gateway signer trên ${params.chain} chưa được Gateway API ghi nhận.`;
+      ? tr(params.locale, "gateway.finality.delegate", { chain: params.chain })
+      : tr(params.locale, "gateway.finality.burnIntent", { chain: params.chain });
 
   return NextResponse.json(
     {
       error: "GATEWAY_FINALITY_PENDING",
-      message: `${actionText} ${finalityHint(params.chain)} Sau đó chạy lại: ${retryCommand}.`,
+      message: `${actionText} ${finalityHint(params.chain, params.locale)} ${tr(params.locale, "gateway.finality.retry", { command: retryCommand })}`,
       status: "pending_gateway_finality",
       chain: params.chain,
       txHash: params.txHash,
@@ -139,6 +143,7 @@ function gatewayWithdrawPendingResponse(params: {
 }
 
 export async function POST(req: NextRequest) {
+  const locale = requestLocale(req);
   let requestBody: { chain?: SupportedChain; amount?: string | number } = {};
   const supabase = await createClient();
   const {
@@ -237,7 +242,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error: "INSUFFICIENT_GATEWAY_BALANCE",
-          message: `Gateway balance trên ${chain} không đủ để withdraw. Cần ${formatAtomicUsdc(requiredGatewayBalance)} USDC gồm amount ${formatAtomicUsdc(amountInAtomicUnits)} USDC và fee ${formatAtomicUsdc(estimatedGatewayFee)} USDC, hiện có ${formatAtomicUsdc(gatewayBalance)} USDC.`,
+          message: tr(locale, "gateway.withdrawInsufficient", {
+            chain,
+            required: formatAtomicUsdc(requiredGatewayBalance),
+            amount: formatAtomicUsdc(amountInAtomicUnits),
+            fee: formatAtomicUsdc(estimatedGatewayFee),
+            current: formatAtomicUsdc(gatewayBalance),
+          }),
           chain,
           gatewayBalance: Number(gatewayBalance) / 1_000_000,
           requiredGatewayBalance: Number(requiredGatewayBalance) / 1_000_000,
@@ -255,10 +266,10 @@ export async function POST(req: NextRequest) {
           error: "INSUFFICIENT_GAS",
           walletId,
           walletAddress: gasCheck.address,
-          blockchain: CIRCLE_CHAIN_NAMES[chain],
+          blockchain: CIRCLE_CHAIN_NAMES[chain] ?? GATEWAY_CHAIN_CONFIGS[chain].label,
           chain,
           stage: "withdraw_mint",
-          message: `Withdraw cần native gas trên ${chain} để mint USDC từ Gateway về Circle SCA wallet.`,
+          message: tr(locale, "gateway.withdrawGasRequired", { chain }),
         },
         { status: 400 },
       );
@@ -284,6 +295,7 @@ export async function POST(req: NextRequest) {
         chain,
         txHash: delegateTxHash,
         stage: "delegate",
+        locale,
       });
     }
 
@@ -338,6 +350,7 @@ export async function POST(req: NextRequest) {
         amount: requestBody.amount ?? "",
         chain: requestBody.chain as SupportedChain,
         stage: "burn_intent",
+        locale,
       });
     }
 

@@ -21,6 +21,7 @@ type SurfResearchOptions = {
   recentMessages?: { role: string; text: string }[];
   surfMode?: SurfMode;
   effort?: SurfEffort;
+  locale?: "vi" | "en";
 };
 
 function surfBaseUrl() {
@@ -168,6 +169,7 @@ export async function askSurfResearch({
   recentMessages = [],
   surfMode,
   effort,
+  locale,
 }: SurfResearchOptions) {
   if (!process.env.SURF_API_KEY) {
     throw Object.assign(new Error("SURF_API_KEY is not configured"), { status: 500 });
@@ -175,6 +177,14 @@ export async function askSurfResearch({
 
   const resolvedSurfMode = normalizeSurfMode(surfMode);
   const resolvedEffort = normalizeSurfEffort(effort);
+  const resolvedLocale = locale === "en" ? "en" : "vi";
+  const summaryHeading = resolvedLocale === "en" ? "Quick Summary" : "Tóm tắt nhanh";
+  const sourcesHeading = resolvedLocale === "en" ? "Sources" : "Nguồn";
+  const relatedHeading = resolvedLocale === "en" ? "Related Questions" : "Câu hỏi liên quan";
+  const languageInstruction =
+    resolvedLocale === "en"
+      ? "Write the entire answer in English. Use English headings only."
+      : "Write the entire answer in Vietnamese. Use Vietnamese headings only.";
   const requestProfile = surfRequestProfile(resolvedSurfMode, resolvedEffort);
   const startedAt = Date.now();
   const compactMessages = compactRecentMessages(recentMessages);
@@ -182,27 +192,27 @@ export async function askSurfResearch({
     resolvedSurfMode === "instant"
       ? [
           "Output contract for Instant mode:",
-          "Prefer the user's language.",
+          languageInstruction,
           "Use Markdown with one # title and sections that fit the question.",
-          "Include at least ## Tóm tắt nhanh (or ## Quick Summary if answering in English), ## Sources, and ## Related Questions.",
+          `Include at least ## ${summaryHeading}, ## ${sourcesHeading}, and ## ${relatedHeading}.`,
           "Link important entities inline to authoritative sources when available, for example [Circle Gateway](https://developers.circle.com/...).",
           "Keep it concise but still include enough detail to answer the user's actual question; avoid one-paragraph answers.",
         ].join("\n")
       : [
           "Output contract for Research mode:",
-          "Prefer the user's language.",
+          languageInstruction,
           "Do not return a short generic answer. Produce a research page, not a chat blurb.",
           "Choose section headings that match the user's question and your findings; do not force a generic template when a more specific outline is better.",
           "Use this minimum Markdown shape, adding or renaming middle sections as needed:",
           "# <clear research title>",
-          "## Tóm tắt nhanh",
+          `## ${summaryHeading}`,
           "5-8 bullets with the thesis, why it matters, the strongest evidence, and the main caveat. Do not use the acronym TL;DR.",
           "3-7 question-specific research sections with clear headings that reflect the actual topic, for example technology, ecosystem, risks, comparison, adoption, or next catalysts only when those sections are relevant.",
           "Use paragraphs, bullets, and Markdown tables. Include at least one table for comparisons, metrics, timelines, tradeoffs, or source synthesis when the question supports structured data. If live numeric data is unavailable, say so clearly.",
           "Include inline source links on important entity names and claims, not only in the Sources section.",
-          "## Sources",
+          `## ${sourcesHeading}`,
           "Markdown links to authoritative sources when available. Prefer official docs, docs pages, reputable data providers, project blogs, explorers, or established research/media sources.",
-          "## Related Questions",
+          `## ${relatedHeading}`,
           "3-5 short follow-up questions as Markdown bullets.",
           "Link important entities inline to authoritative sources when available, for example [Circle Gateway](https://developers.circle.com/...). These inline links power client-side entity previews.",
           resolvedEffort === "maximum"
@@ -212,13 +222,13 @@ export async function askSurfResearch({
               : "Target depth: 1000-1700 words when enough source data exists.",
         ].join("\n");
   const systemPrompt = [
-    "You are AskSurf Research inside PayCMD, a USDC payment and Circle Gateway app.",
+    "You are AskSurf Research inside Payna, a USDC payment and Circle Gateway app.",
     "Answer crypto, stablecoin, chain, protocol, market, and on-chain research questions.",
-    "Do not create, sign, or execute transactions. If the user wants to act in PayCMD, suggest a slash command instead.",
+    "Do not create, sign, or execute transactions. If the user wants to act in Payna, suggest a slash command instead.",
     outputContract,
     "When chart citations or chart links are available, include them as Markdown image/link blocks so the client can render them.",
     "Keep answers practical, and add a short note when content is market/investment related.",
-    "PayCMD context: supported test chains are Arc Testnet, Base Sepolia, and Avalanche Fuji; PayCMD transactions are handled by PayCMD backend, not by you.",
+    "Payna context: Gateway actions use Circle Gateway testnets, CCTP bridge actions use Circle BridgeKit-supported testnets, and swaps are Arc Testnet only; Payna transactions are handled by Payna backend, not by you.",
   ]
     .filter(Boolean)
     .join("\n\n");

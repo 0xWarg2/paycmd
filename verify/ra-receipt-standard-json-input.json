@@ -1,0 +1,29 @@
+{
+  "language": "Solidity",
+  "sources": {
+    "contracts/RaReceiptRegistry.sol": {
+      "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.28;\n\ncontract RaReceiptRegistry {\n    address public owner;\n    mapping(address recorder => bool allowed) public recorders;\n\n    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);\n    event RecorderUpdated(address indexed recorder, bool allowed);\n    event ReceiptRecorded(\n        bytes32 indexed commandId,\n        uint8 indexed actionType,\n        address indexed user,\n        address recipient,\n        uint256 amountAtomic,\n        uint256 sourceChainId,\n        uint256 destinationChainId,\n        bytes32 sourceTxHash,\n        bytes32 destinationTxHash,\n        bytes32 metadataHash\n    );\n\n    error NotOwner();\n    error NotRecorder();\n    error ZeroAddress();\n    error InvalidActionType();\n\n    modifier onlyOwner() {\n        if (msg.sender != owner) revert NotOwner();\n        _;\n    }\n\n    modifier onlyRecorder() {\n        if (!recorders[msg.sender]) revert NotRecorder();\n        _;\n    }\n\n    constructor(address initialRecorder) {\n        owner = msg.sender;\n        recorders[msg.sender] = true;\n        emit OwnershipTransferred(address(0), msg.sender);\n        emit RecorderUpdated(msg.sender, true);\n\n        if (initialRecorder != address(0) && initialRecorder != msg.sender) {\n            recorders[initialRecorder] = true;\n            emit RecorderUpdated(initialRecorder, true);\n        }\n    }\n\n    function transferOwnership(address newOwner) external onlyOwner {\n        if (newOwner == address(0)) revert ZeroAddress();\n        address previousOwner = owner;\n        owner = newOwner;\n        emit OwnershipTransferred(previousOwner, newOwner);\n    }\n\n    function setRecorder(address recorder, bool allowed) external onlyOwner {\n        if (recorder == address(0)) revert ZeroAddress();\n        recorders[recorder] = allowed;\n        emit RecorderUpdated(recorder, allowed);\n    }\n\n    function recordReceipt(\n        bytes32 commandId,\n        uint8 actionType,\n        address user,\n        address recipient,\n        uint256 amountAtomic,\n        uint256 sourceChainId,\n        uint256 destinationChainId,\n        bytes32 sourceTxHash,\n        bytes32 destinationTxHash,\n        bytes32 metadataHash\n    ) external onlyRecorder {\n        if (actionType == 0 || actionType > 3) revert InvalidActionType();\n\n        emit ReceiptRecorded(\n            commandId,\n            actionType,\n            user,\n            recipient,\n            amountAtomic,\n            sourceChainId,\n            destinationChainId,\n            sourceTxHash,\n            destinationTxHash,\n            metadataHash\n        );\n    }\n}\n"
+    }
+  },
+  "settings": {
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "evmVersion": "paris",
+    "outputSelection": {
+      "*": {
+        "*": [
+          "abi",
+          "evm.bytecode",
+          "evm.deployedBytecode",
+          "evm.methodIdentifiers",
+          "metadata"
+        ],
+        "": [
+          "ast"
+        ]
+      }
+    }
+  }
+}

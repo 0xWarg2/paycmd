@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { requestLocale, tr, type PayCmdLocale } from "@/lib/i18n/server";
 import { createClient } from "@/lib/supabase/server";
 
 const handlePattern = /^[a-z0-9][a-z0-9_-]{2,31}$/;
@@ -20,7 +21,7 @@ function normalizeNullableText(value: unknown, maxLength: number) {
   return text.slice(0, maxLength);
 }
 
-function normalizeUrl(value: unknown) {
+function normalizeUrl(value: unknown, locale: PayCmdLocale) {
   const text = normalizeNullableText(value, 180);
   if (!text) return null;
 
@@ -31,11 +32,11 @@ function normalizeUrl(value: unknown) {
     }
     return url.toString();
   } catch {
-    throw new Error("Website URL phải bắt đầu bằng http:// hoặc https://.");
+    throw new Error(tr(locale, "profile.websiteUrl"));
   }
 }
 
-function normalizeAvatarUrl(value: unknown) {
+function normalizeAvatarUrl(value: unknown, locale: PayCmdLocale) {
   const text = normalizeNullableText(value, 500);
   if (!text) return null;
 
@@ -46,7 +47,7 @@ function normalizeAvatarUrl(value: unknown) {
     }
     return url.toString();
   } catch {
-    throw new Error("Avatar URL không hợp lệ.");
+    throw new Error(tr(locale, "profile.avatarUrl"));
   }
 }
 
@@ -74,6 +75,7 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
+  const locale = requestLocale(req);
   try {
     const supabase = await createClient();
     const {
@@ -88,25 +90,22 @@ export async function PATCH(req: NextRequest) {
     const displayName = normalizeNullableText(body.displayName, 60);
     const handle = normalizeNullableText(body.handle, 32)?.toLowerCase() ?? null;
     const bio = normalizeNullableText(body.bio, 180);
-    const websiteUrl = normalizeUrl(body.websiteUrl);
-    const avatarUrl = normalizeAvatarUrl(body.avatarUrl);
+    const websiteUrl = normalizeUrl(body.websiteUrl, locale);
+    const avatarUrl = normalizeAvatarUrl(body.avatarUrl, locale);
     const defaultChain = validChains.includes(body.defaultChain as any)
       ? body.defaultChain
       : "arcTestnet";
 
     if (!displayName || displayName.length < 2) {
       return NextResponse.json(
-        { error: "Display name phải có ít nhất 2 ký tự." },
+        { error: tr(locale, "profile.displayName") },
         { status: 400 },
       );
     }
 
     if (!handle || !handlePattern.test(handle)) {
       return NextResponse.json(
-        {
-          error:
-            "Handle phải dài 3-32 ký tự, bắt đầu bằng chữ/số và chỉ gồm chữ thường, số, dấu gạch ngang hoặc gạch dưới.",
-        },
+        { error: tr(locale, "profile.handle") },
         { status: 400 },
       );
     }
@@ -131,7 +130,7 @@ export async function PATCH(req: NextRequest) {
     if (error) {
       if (error.code === "23505") {
         return NextResponse.json(
-          { error: "Handle này đã có người dùng. Chọn handle khác." },
+          { error: tr(locale, "profile.handleTaken") },
           { status: 409 },
         );
       }

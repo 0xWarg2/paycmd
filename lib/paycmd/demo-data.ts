@@ -36,12 +36,12 @@ export const demoNotifications = [
 ];
 
 export const navigationItems = [
-  { label: "Chat", href: "/app", icon: MessageCircle },
-  { label: "Budgets", href: "/budgets", icon: Gauge },
-  { label: "Contacts", href: "/contacts", icon: Contact },
-  { label: "Schedules", href: "/schedules", icon: CalendarClock },
-  { label: "Notifications", href: "/notifications", icon: Bell },
-  { label: "Profile", href: "/profile", icon: UserCircle },
+  { key: "chat", label: "Chat", href: "/app", icon: MessageCircle },
+  { key: "budgets", label: "Budgets", href: "/budgets", icon: Gauge },
+  { key: "contacts", label: "Contacts", href: "/contacts", icon: Contact },
+  { key: "schedules", label: "Schedules", href: "/schedules", icon: CalendarClock },
+  { key: "notifications", label: "Notifications", href: "/notifications", icon: Bell },
+  { key: "profile", label: "Profile", href: "/profile", icon: UserCircle },
 ];
 
 export function availableBudget() {

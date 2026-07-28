@@ -1,16 +1,19 @@
 import { NextResponse } from "next/server";
 
+import { requestLocale, tr } from "@/lib/i18n/server";
+
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const locale = requestLocale(request);
   const { id } = await params;
 
   return NextResponse.json({
     execution: {
       id,
       status: "success",
-      title: "Command đã settlement trên demo rail",
+      title: tr(locale, "commandExecution.demoTitle"),
       gateway: {
         network: "Arc Testnet",
         rail: "Circle Gateway",

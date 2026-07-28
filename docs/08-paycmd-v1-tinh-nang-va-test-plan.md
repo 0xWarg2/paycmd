@@ -1,6 +1,6 @@
-# PayCMD V1 - Tính Năng Và Test Plan
+# Ra V1 - Tính Năng Và Test Plan
 
-Tài liệu này liệt kê các tính năng đang có trong PayCMD V1 và cách test từng tính năng. Mặc định test qua UI tại `/app` sau khi user đã đăng nhập, trừ khi mục test nói rõ route khác.
+Tài liệu này liệt kê các tính năng đang có trong Ra V1 và cách test từng tính năng. Mặc định test qua UI tại `/app` sau khi user đã đăng nhập, trừ khi mục test nói rõ route khác.
 
 ## Điều Kiện Test Chung
 
@@ -41,9 +41,9 @@ Tính năng:
 - Command có đủ field tạo preview nếu là command cần confirm.
 - Các command payment/gateway có execution status `queued`, `running`, `waiting_gateway`, `success` hoặc `failed`.
 - Chat history lưu theo user và có load older messages.
-- Empty state có PayCMD mascot và các lệnh cơ bản cho user mới.
+- Empty state có Ra mascot và các lệnh cơ bản cho user mới.
 - UI chặn double-submit khi user nhấn Enter nhiều lần quá nhanh.
-- Assistant bubble hiển thị provider badge: `OpenAI Router`, `AskSurf Research` hoặc `PayCMD`.
+- Assistant bubble hiển thị provider badge: `OpenAI Router`, `AskSurf Research` hoặc `Ra`.
 
 Cách test:
 1. Vào `/app`, gõ `/`.
@@ -56,7 +56,7 @@ Cách test:
 8. Kỳ vọng hiện preview/confirm, sau confirm có status gateway pipeline.
 9. Refresh trang.
 10. Kỳ vọng các message vừa test vẫn xuất hiện.
-11. Với thread mới, kỳ vọng thấy PayCMD mascot và các shortcut hướng dẫn lệnh cơ bản.
+11. Với thread mới, kỳ vọng thấy Ra mascot và các shortcut hướng dẫn lệnh cơ bản.
 12. Nhập một command rồi nhấn Enter liên tiếp thật nhanh.
 13. Kỳ vọng chỉ có một user message và một execution/preview tương ứng.
 
@@ -65,29 +65,29 @@ Cách test:
 Tính năng:
 - User có thể nhập natural language không bắt đầu bằng `/`.
 - `/api/ai/command` dùng app context hiện tại để convert thành slash command.
-- Composer có mode switch `PayCMD` / `AskSurf`.
-- Mode `PayCMD` có model selector: `GPT-5.5`, `GPT-5.4`, `GPT-5.4 Mini`, `Codex Auto Review`.
+- Composer có mode switch `Ra` / `AskSurf`.
+- Mode `Ra` có model selector: `GPT-5.5`, `GPT-5.4`, `GPT-5.4 Mini`, `Codex Auto Review`.
 - Mode `AskSurf` có selector `Instant` / `Research 2.0` và effort `Standard` / `Extended` / `Maximum`.
 - AI trả suggestions để user bấm lại nhanh.
-- OpenAI là router cấp 1: nếu câu là hành động PayCMD thì tạo command/clarify; nếu là research crypto thì trả intent `crypto_research`.
+- OpenAI là router cấp 1: nếu câu là hành động Ra thì tạo command/clarify; nếu là research crypto thì trả intent `crypto_research`.
 - Khi đang ở mode `AskSurf`, câu hỏi không bắt đầu bằng `/` bỏ qua OpenAI router và gọi thẳng `/api/ai/crypto`.
-- Slash command luôn chạy PayCMD dù composer đang ở mode nào.
+- Slash command luôn chạy Ra dù composer đang ở mode nào.
 - `/api/ai/crypto` gọi AskSurf server-side để trả lời crypto, market, stablecoin, chain, protocol, news hoặc conceptual questions.
 - Khi OpenAI chạy, UI hiện loading `OpenAI đang phân tích lệnh...`; khi AskSurf chạy, UI đổi sang `AskSurf đang tìm thông tin crypto...`.
 - AskSurf không được ký, submit hoặc execute transaction. Nó chỉ trả lời research hoặc gợi ý slash command nếu user muốn hành động.
 - UI label `Research 2.0` map tới model public chính thức của AskSurf: `Standard` dùng `surf-1.5` + `reasoning_effort=medium`, `Extended` dùng `surf-1.5` + `high`, `Maximum` dùng `surf-1.5-thinking` + `high`. `Instant` dùng `surf-1.5-instant`.
-- AskSurf research có thể mất vài chục giây. PayCMD local dùng timeout 120 giây cho `Instant` và 10 phút cho `Research 2.0`. Route export `maxDuration = 600`, nhưng trên Vercel Hobby có thể vẫn bị giới hạn khoảng 300 giây. Sau khoảng 12 giây, UI hiện thanh báo nhỏ có nút tắt để user biết request vẫn đang chạy nhưng không bị che màn hình.
+- AskSurf research có thể mất vài chục giây. Ra local dùng timeout 120 giây cho `Instant` và 10 phút cho `Research 2.0`. Route export `maxDuration = 600`, nhưng trên Vercel Hobby có thể vẫn bị giới hạn khoảng 300 giây. Sau khoảng 12 giây, UI hiện thanh báo nhỏ có nút tắt để user biết request vẫn đang chạy nhưng không bị che màn hình.
 - AskSurf answer render dạng research bubble rộng hơn, có `Sections of Research`, table controls, footer actions và `Related Questions` nếu model trả về.
 
 Cách test:
 1. Đảm bảo `OPENAI_API_KEY` đã set.
-2. Vào `/app`, chọn mode `PayCMD` và model cần test.
+2. Vào `/app`, chọn mode `Ra` và model cần test.
 3. Nhập `pay 2 USDC to Minh on arc from base`.
 4. Kỳ vọng AI trả preview command `/pay 2 to Minh on arc from base` hoặc hỏi thêm nếu thiếu contact.
 5. Nhập câu thiếu thông tin, ví dụ `pay Minh`.
 6. Kỳ vọng AI hỏi một câu ngắn về thông tin còn thiếu, không execute.
 7. Đảm bảo `SURF_API_KEY` đã set.
-8. Trong mode `PayCMD`, nhập `USDC Gateway khác bridge thường ở điểm nào?`.
+8. Trong mode `Ra`, nhập `USDC Gateway khác bridge thường ở điểm nào?`.
 9. Kỳ vọng UI hiện OpenAI Router trước, sau đó AskSurf Research, cuối cùng trả answer research và không hiện transaction preview.
 10. Chọn mode `AskSurf`, `Research 2.0`, effort `Standard`, nhập `Monad là gì?`.
 11. Kỳ vọng câu hỏi gọi thẳng AskSurf, trả research bubble có `Sections of Research`, footer copy/download/print, và `Related Questions` nếu AskSurf trả về.
@@ -95,7 +95,7 @@ Cách test:
 13. Bấm một nút `Related Questions`.
 14. Kỳ vọng câu hỏi mới được submit tiếp bằng mode `AskSurf`.
 15. Gõ `/balance` khi composer vẫn ở mode `AskSurf`.
-16. Kỳ vọng slash command vẫn chạy PayCMD, không gọi AskSurf.
+16. Kỳ vọng slash command vẫn chạy Ra, không gọi AskSurf.
 17. Tắt hoặc bỏ `SURF_API_KEY`, hỏi lại câu research.
 18. Kỳ vọng lỗi rõ `SURF_API_KEY is not configured`; các slash command khác vẫn hoạt động.
 
@@ -116,7 +116,7 @@ Cách test:
 ## 5. Profile Identity
 
 Tính năng:
-- `/profile`: trang chỉnh sửa identity của user trong PayCMD.
+- `/profile`: trang chỉnh sửa identity của user trong Ra.
 - User có thể edit avatar, display name, handle, bio, website và default receiving chain.
 - Avatar upload vào Supabase Storage bucket `profile-avatars`; app chỉ lưu `avatar_url` trong `user_profiles`.
 - Profile dùng cho contact discovery sau này qua display name/handle.
@@ -253,8 +253,8 @@ trong [`09-gateway-vs-cctp-v2-phi-va-gas.md`](./09-gateway-vs-cctp-v2-phi-va-gas
 
 Tính năng:
 - `/contacts add Minh 0x... on arc`: lưu contact theo `display_name`, `wallet_address`, `preferred_chain`.
-- Nếu wallet address thuộc `wallets` của PayCMD user khác, contact được gán `contact_user_id` và resolution là `internal`.
-- Nếu address không thuộc PayCMD user, contact là `external`.
+- Nếu wallet address thuộc `wallets` của Ra user khác, contact được gán `contact_user_id` và resolution là `internal`.
+- Nếu address không thuộc Ra user, contact là `external`.
 - Add lại cùng tên sẽ update contact cũ, không tạo duplicate.
 - `/contacts list` và trang `/contacts` hiện danh bạ hiện tại.
 
@@ -269,7 +269,7 @@ Cách test internal contact:
 1. Login account B, chạy `/wallet status`, copy Circle SCA wallet address của B.
 2. Logout B, login account A.
 3. Chạy `/contacts add Minh <địa-chỉ-wallet-B> on arc`.
-4. Kỳ vọng response `Đã lưu contact Minh (internal PayCMD user).`
+4. Kỳ vọng response `Đã lưu contact Minh (internal Ra user).`
 5. Trong Supabase, row contact của A có `contact_user_id` bằng user id của B.
 
 Cách test update contact:
@@ -281,7 +281,7 @@ Cách test update contact:
 
 Tính năng:
 - `/pay 25 to Minh on arc from base`: resolve recipient theo contact của current user.
-- Nếu contact là internal PayCMD user, backend lấy Circle SCA wallet mới nhất của user đó lúc pay.
+- Nếu contact là internal Ra user, backend lấy Circle SCA wallet mới nhất của user đó lúc pay.
 - Nếu contact là external, backend dùng `contacts.wallet_address`.
 - Direct `0x...` recipient vẫn được hỗ trợ.
 - Missing contact trả lời rõ cách add contact.
@@ -416,7 +416,7 @@ Tính năng:
 - `/contacts`: đọc contacts của user hiện tại từ Supabase.
 - `/budgets`: static demo.
 - `/schedules`: static demo.
-- Các page dùng chung `PayCmdSectionPage` trong shell PayCMD.
+- Các page dùng chung `PayCmdSectionPage` trong shell Ra.
 
 Cách test:
 1. Tạo contact qua `/contacts add`.

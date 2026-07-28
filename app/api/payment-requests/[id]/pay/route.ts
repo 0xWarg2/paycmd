@@ -21,6 +21,19 @@ async function callGatewayTransfer(req: NextRequest, payload: Record<string, unk
   return data;
 }
 
+async function getSenderLabel(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  user: { id: string; email?: string | null },
+) {
+  const { data: profile } = await supabase
+    .from("user_profiles")
+    .select("display_name, handle")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  return profile?.display_name?.trim() || profile?.handle?.trim() || user.email || "Payna user";
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -62,7 +75,7 @@ export async function POST(
       amount: String(paymentRequest.amount),
       recipientAddress: paymentRequest.recipient_address,
       autoDeposit: true,
-      mintGasMode: body.mintGasMode ?? "auto_forwarding",
+      mintGasMode: body.mintGasMode ?? "manual",
     });
 
     await supabase
@@ -84,6 +97,21 @@ export async function POST(
       status: "unread",
       metadata: { requestId: id, transfer },
     });
+
+    const { error: recipientNotificationError } = await supabase.rpc(
+      "create_payment_received_notification",
+      {
+        p_recipient_user_id: paymentRequest.requester_user_id,
+        p_sender_label: await getSenderLabel(supabase, user),
+        p_amount: String(paymentRequest.amount),
+        p_chain: paymentRequest.destination_chain,
+        p_metadata: { requestId: id, transfer },
+      },
+    );
+
+    if (recipientNotificationError) {
+      console.warn("Could not notify payment request recipient.", recipientNotificationError.message);
+    }
 
     return NextResponse.json({
       success: true,

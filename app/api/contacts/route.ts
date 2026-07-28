@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { requestLocale, tr } from "@/lib/i18n/server";
 import { normalizeChain } from "@/lib/paycmd/chains";
 import {
   isEvmAddress,
@@ -54,6 +55,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const locale = requestLocale(req);
   const supabase = await createClient();
   const {
     data: { user },
@@ -96,8 +98,7 @@ export async function POST(req: NextRequest) {
       {
         error: "INTERNAL_WALLET_NOT_FOUND",
         code: "INTERNAL_WALLET_NOT_FOUND",
-        message:
-          "Không tìm thấy tài khoản PayCMD nào dùng địa chỉ ví này. Kiểm tra lại địa chỉ hoặc lưu contact như ví ngoài.",
+        message: tr(locale, "contacts.internalNotFound"),
         walletAddress,
       },
       { status: 404 },
@@ -108,7 +109,7 @@ export async function POST(req: NextRequest) {
   const internalDisplayName =
     internalProfile?.display_name?.trim() ||
     internalProfile?.handle?.trim() ||
-    (contactUserId ? `PayCMD ${shortAddress(walletAddress)}` : "");
+    (contactUserId ? `Payna ${shortAddress(walletAddress)}` : "");
   const displayName = requestedDisplayName || internalDisplayName;
   const preferredChain =
     normalizeChain(body.preferredChain ?? body.chain) ||
@@ -118,8 +119,7 @@ export async function POST(req: NextRequest) {
   if (!displayName) {
     return NextResponse.json(
       {
-        error:
-          "displayName is required for external wallet contacts. Try `/contacts add Minh 0x... on arc`.",
+        error: tr(locale, "contacts.externalNameRequired"),
       },
       { status: 400 },
     );
@@ -187,8 +187,7 @@ export async function POST(req: NextRequest) {
         ? null
         : {
             code: "INTERNAL_WALLET_NOT_FOUND",
-            message:
-              "Không tìm thấy tài khoản PayCMD khớp địa chỉ này, nên contact được lưu như ví ngoài.",
+            message: tr(locale, "contacts.externalSavedWarning"),
           },
     },
     { status: existingContactId ? 200 : 201 },

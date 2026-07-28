@@ -3,7 +3,7 @@
 Tài liệu này giải thích tiền nằm ở đâu, phí bị trừ ở đâu và ví nào cần native
 token trong các luồng Circle Gateway và CCTP V2.
 
-> CCTP V2 `/bridge` là hướng phát triển tiếp theo. PayCMD hiện tại đang chạy
+> CCTP V2 `/bridge` là hướng phát triển tiếp theo. Ra hiện tại đang chạy
 > Circle Gateway. Gateway cross-chain transfer mặc định dùng Forwarding Service
 > để Circle/relayer mint hộ ở destination. Manual mint gas vẫn là option kỹ
 > thuật để debug hoặc tiết kiệm forwarding fee.
@@ -18,7 +18,7 @@ token trong các luồng Circle Gateway và CCTP V2.
 | MetaMask | Ví external do user kiểm soát | Không liên quan Gateway balance | Approve, burn và mint trong CCTP V2 trực tiếp |
 
 Gateway signer không sở hữu Gateway balance. Gateway balance thuộc depositor,
-thường là địa chỉ Circle SCA. Trong PayCMD hiện tại, Gateway signer được lưu là
+thường là địa chỉ Circle SCA. Trong Ra hiện tại, Gateway signer được lưu là
 một ví EOA `MULTICHAIN`: cùng một địa chỉ `0x...` dùng được trên Arc Testnet,
 Base Sepolia và Avalanche Fuji. Tuy cùng địa chỉ, native token balance vẫn tách
 theo network. Ví dụ `0xSIGNER...2222` có thể có `0 ETH` trên Base nhưng có
@@ -65,7 +65,7 @@ Cross-chain fee: 100 x 0.005% =         0.005 USDC
 Gateway balance nguồn cần tối thiểu:  100.015 USDC
 ```
 
-Con số trên chỉ dùng để minh họa công thức. PayCMD phải lấy fee estimate ngay
+Con số trên chỉ dùng để minh họa công thức. Ra phải lấy fee estimate ngay
 trước khi confirm vì phí có thể thay đổi. `maxFee` trong burn intent chỉ là mức
 phí tối đa user chấp nhận, không phải phí thực tế chắc chắn bị thu.
 
@@ -138,7 +138,7 @@ trên Arc thì phải nạp native `USDC` vào `0xSIGNER...2222` trên Arc.
 ## 3. Gateway Với Forwarding Service Mặc Định
 
 Circle Gateway Forwarding Service submit mint ở destination thay cho ví của
-PayCMD. Đây là mặc định cho Gateway cross-chain transfer/pay trong PayCMD. User
+Ra. Đây là mặc định cho Gateway cross-chain transfer/pay trong Ra. User
 trả các chi phí bằng USDC tại source và không cần giữ native token ở
 destination.
 
@@ -155,11 +155,11 @@ Khi dùng Forwarding Service:
 
 - Gateway balance nguồn cần ít nhất `1,000.27 USDC`.
 - Circle/relayer trả native gas để mint ở destination.
-- Gateway signer của PayCMD không cần giữ native gas ở destination.
+- Gateway signer của Ra không cần giữ native gas ở destination.
 - Phần gas destination đã được quy đổi thành forwarding fee bằng USDC.
 
 Trong mode này, lỗi thiếu native gas của Gateway signer/SCA ở destination không
-còn chặn bước mint. Source chain vẫn có thể cần native gas nếu PayCMD phải
+còn chặn bước mint. Source chain vẫn có thể cần native gas nếu Ra phải
 auto-deposit hoặc authorize signer trước khi burn.
 
 ## 4. CCTP V2 Trực Tiếp Bằng MetaMask
@@ -229,7 +229,7 @@ Nếu bật CCTP Forwarding Service:
 | CCTP V2 trực tiếp | USDC trong MetaMask | Fast fee; Standard protocol fee bằng `0` | MetaMask | MetaMask hoặc ví submit mint |
 | CCTP V2 + Forwarding | USDC trong MetaMask | Fast fee + forwarding fee | MetaMask | Circle/relayer |
 
-## 6. Quy Tắc Hiển Thị Trong PayCMD
+## 6. Quy Tắc Hiển Thị Trong Ra
 
 Preview trước khi confirm phải hiển thị:
 
@@ -254,7 +254,7 @@ Mọi con số phí trong UI phải lấy từ Gateway fee estimate hoặc
 `BridgeKit.estimate()` ngay trước khi user confirm. Không hardcode bảng phí vào
 logic giao dịch.
 
-PayCMD mặc định dùng Auto forwarding cho `/transfer` và `/pay`. Nếu user muốn
+Ra mặc định dùng Auto forwarding cho `/transfer` và `/pay`. Nếu user muốn
 giữ luồng manual để tiết kiệm forwarding fee, thêm `manual`, `manual gas` hoặc
 `no forwarding` vào command:
 

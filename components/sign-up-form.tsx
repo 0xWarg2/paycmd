@@ -84,7 +84,7 @@ export function SignUpForm({
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
         <CardHeader>
-          <CardTitle className="text-2xl">Create PayCMD account</CardTitle>
+          <CardTitle className="text-2xl">Create Payna account</CardTitle>
           <CardDescription>Create an account to save command history.</CardDescription>
         </CardHeader>
         <CardContent>

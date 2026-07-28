@@ -1,6 +1,6 @@
-# PayCMD
+# Ra
 
-**PayCMD** là DApp chatbox-first cho agentic stablecoin payments. V1 dùng Arc Testnet, Circle Gateway và USDC để demo các lệnh tài chính như thanh toán, tạo ngân sách và lên lịch trả tiền cho contributor.
+**Ra** là DApp chatbox-first cho agentic stablecoin payments. V1 dùng Arc Testnet, Circle Gateway và USDC để demo các lệnh tài chính như thanh toán, tạo ngân sách và lên lịch trả tiền cho contributor.
 
 ## Lệnh MVP
 
@@ -43,4 +43,4 @@ Tài liệu bàn giao tiếng Việt nằm trong `docs/`.
 
 ## Nguồn Gốc
 
-PayCMD được khởi tạo từ sample [`circlefin/arc-multichain-wallet`](https://github.com/circlefin/arc-multichain-wallet) và giữ lại nền Circle/Supabase để mở rộng Gateway flow.
+Ra được khởi tạo từ sample [`circlefin/arc-multichain-wallet`](https://github.com/circlefin/arc-multichain-wallet) và giữ lại nền Circle/Supabase để mở rộng Gateway flow.

@@ -2,7 +2,7 @@
 
 ## Vì Sao Không Dùng USDCMD
 
-`USDCMD` rất rõ cho demo USDC, nhưng dễ làm người dùng hiểu sản phẩm chỉ hỗ trợ USDC. PayCMD rộng hơn và phù hợp nếu sau này mở sang EURC, USYC, invoice, payroll và treasury.
+`USDCMD` rất rõ cho demo USDC, nhưng dễ làm người dùng hiểu sản phẩm chỉ hỗ trợ USDC. Ra rộng hơn và phù hợp nếu sau này mở sang EURC, USYC, invoice, payroll và treasury.
 
 ## Vì Sao Chatbox-First
 
@@ -55,7 +55,7 @@ Lesson:
 
 `/deposit ... from base` hoặc auto-deposit trong `/transfer` mới chuyển USDC từ Circle SCA wallet vào Gateway Wallet contract, làm tăng Gateway balance.
 
-`/balance` trong PayCMD là unified view, bằng:
+`/balance` trong Ra là unified view, bằng:
 
 ```text
 Circle SCA wallet USDC trên các chain
@@ -86,7 +86,7 @@ Circle gọi đây là unified/crosschain balance vì app có thể dùng tổng
 - Muốn chuyển 40 USDC từ Base sang Arc, chỉ cần burn từ sourceDomain Base nếu Base Gateway balance đủ `amount + fee`.
 - Muốn chuyển từ Arc sang Base, cần Gateway balance ở Arc, hoặc app phải chọn source domain khác nếu UX cho phép dùng unified total từ source khác.
 
-Trong PayCMD V1, command `/transfer 10 from base to arc` đang cố tình chọn **source chain cụ thể** là Base. Vì vậy nó chỉ dùng Gateway balance trên Base, không tự rút từ Avalanche trừ khi sau này thêm lệnh kiểu `/transfer 10 to arc using unified`.
+Trong Ra V1, command `/transfer 10 from base to arc` đang cố tình chọn **source chain cụ thể** là Base. Vì vậy nó chỉ dùng Gateway balance trên Base, không tự rút từ Avalanche trừ khi sau này thêm lệnh kiểu `/transfer 10 to arc using unified`.
 
 Docs Circle cũng nhấn mạnh:
 
@@ -110,7 +110,7 @@ Nếu user deposit dư vào Gateway balance, V1 nên rút về Circle SCA wallet
 /withdraw 5 from base
 ```
 
-Luồng này không phải trustless withdrawal `initiateWithdrawal` rồi chờ `withdrawalDelay`. Với UX thường dùng, PayCMD rút bằng Gateway transfer cùng chain:
+Luồng này không phải trustless withdrawal `initiateWithdrawal` rồi chờ `withdrawalDelay`. Với UX thường dùng, Ra rút bằng Gateway transfer cùng chain:
 
 ```text
 Gateway balance trên Base

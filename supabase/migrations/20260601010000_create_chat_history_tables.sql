@@ -1,7 +1,7 @@
 create table if not exists public.chat_threads (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
-  title text not null default 'PayCMD main thread',
+  title text not null default 'Payna chat',
   status text not null default 'active',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),

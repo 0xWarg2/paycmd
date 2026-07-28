@@ -57,7 +57,7 @@ export function LoginForm({
     const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-      throw new Error(data?.error ?? "Failed to bootstrap PayCMD account");
+      throw new Error(data?.error ?? "Failed to bootstrap Payna account");
     }
 
     router.push(nextPath());
@@ -79,7 +79,7 @@ export function LoginForm({
 
       const { error } = await supabase.auth.signInWithWeb3({
         chain: "ethereum",
-        statement: "I authorize PayCMD to authenticate this wallet for stablecoin payment commands.",
+        statement: "I authorize Payna to authenticate this wallet for stablecoin payment commands.",
       });
 
       if (error) throw error;
@@ -112,22 +112,22 @@ export function LoginForm({
   }
 
   return (
-    <div className={cn("grid min-h-dvh bg-[#07090d] text-[#f4f7f8] lg:grid-cols-[minmax(0,1fr)_minmax(420px,640px)]", className)} {...props}>
-      <section className="relative hidden overflow-hidden border-r border-white/10 bg-[#111419] lg:block">
+    <div className={cn("payna-shell-bg grid min-h-dvh bg-[#07090d] text-[#f4f7f8] lg:grid-cols-[minmax(0,1fr)_minmax(420px,640px)]", className)} {...props}>
+      <section className="relative hidden overflow-hidden border-r border-white/10 bg-[#0d1117] lg:block">
         <Image
-          src="/brand/paycmd-ai-logo-vietnam.png"
-          alt="PayCMD AI payment copilot"
+          src="/brand/antlers_transparent.png"
+          alt="Payna AI payment copilot"
           fill
           priority
-          className="paycmd-logo-breathe object-contain p-20 opacity-95"
+          className="paycmd-logo-breathe object-contain p-24 opacity-90 drop-shadow-[0_30px_80px_rgba(99,244,200,.16)]"
         />
         <div className="paycmd-hero-grid absolute inset-0 opacity-20" />
         <div className="paycmd-login-scan absolute inset-0" />
         <div className="paycmd-signal-line absolute left-0 top-1/4 h-px w-full opacity-45" />
         <div className="paycmd-signal-line absolute left-0 top-2/3 h-px w-full opacity-30 [animation-delay:1.6s]" />
         <div className="absolute bottom-10 left-10 max-w-xl">
-          <div className="paycmd-reveal mb-5 inline-flex rounded-md border border-white/60 px-4 py-3 text-sm font-semibold">
-            PayCMD: AI Stablecoin Copilot
+          <div className="paycmd-reveal mb-5 inline-flex rounded-2xl border border-white/35 bg-white/[0.035] px-4 py-3 text-sm font-semibold backdrop-blur">
+            Payna: AI Stablecoin Copilot
           </div>
           <h1 className="paycmd-reveal paycmd-reveal-delay-1 text-4xl font-semibold leading-tight tracking-normal">
             Command your USDC rails with one secure sign-in
@@ -142,10 +142,10 @@ export function LoginForm({
       <section className="flex min-h-dvh items-center justify-center px-5 py-10">
         <div className="paycmd-reveal w-full max-w-[430px]">
           <Link href="/" className="mb-10 inline-flex items-center gap-3 text-white/80 transition hover:text-white">
-            <span className="paycmd-pulse-ring relative h-11 w-11 overflow-hidden rounded-full border border-white/15 bg-white/5">
-              <Image src="/brand/paycmd-ai-logo-vietnam.png" alt="PayCMD" fill className="object-cover" />
+            <span className="paycmd-pulse-ring payna-logo-frame relative h-11 w-11 overflow-hidden rounded-full border border-white/15">
+              <Image src="/brand/antlers_transparent.png" alt="Payna" fill className="object-contain p-1" />
             </span>
-            <span className="font-semibold">PayCMD</span>
+            <span className="font-semibold">Payna</span>
           </Link>
 
           <div className="mb-8 text-center">
@@ -155,7 +155,7 @@ export function LoginForm({
 
           <Button
             type="button"
-            className="paycmd-button-shine h-12 w-full rounded-md border border-white/12 bg-white text-[#07090d] hover:bg-[#dffdf5]"
+            className="paycmd-button-shine h-12 w-full rounded-2xl border border-white/12 bg-white text-[#07090d] shadow-[0_18px_55px_rgba(99,244,200,.16)] hover:bg-[#dffdf5]"
             disabled={isWalletLoading}
             onClick={handleMetaMaskLogin}
           >
@@ -207,7 +207,7 @@ export function LoginForm({
 
           <div className="mt-8 flex items-center justify-center gap-2 text-xs leading-5 text-white/48">
             <ShieldCheck className="h-4 w-4 text-[#63f4c8]" />
-            By continuing, you agree to use PayCMD for demo stablecoin commands.
+            By continuing, you agree to use Payna for demo stablecoin commands.
           </div>
 
           <p className="mt-5 text-center text-sm text-white/48">

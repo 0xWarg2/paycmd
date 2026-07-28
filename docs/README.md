@@ -1,6 +1,6 @@
-# Tài Liệu PayCMD
+# Tài Liệu Ra
 
-Thư mục này là handoff documentation cho dự án PayCMD. Tài liệu ưu tiên ngắn, rõ, dùng được cho engineer hoặc agent tiếp tục triển khai.
+Thư mục này là handoff documentation cho dự án Ra. Tài liệu ưu tiên ngắn, rõ, dùng được cho engineer hoặc agent tiếp tục triển khai.
 
 ## Thứ Tự Đọc
 
@@ -14,5 +14,6 @@ Thư mục này là handoff documentation cho dự án PayCMD. Tài liệu ưu t
 8. `07-payment-copilot-mvp.md`
 9. `08-paycmd-v1-tinh-nang-va-test-plan.md`
 10. `09-gateway-vs-cctp-v2-phi-va-gas.md`
+11. `10-ra-onchain-proof-contract.md`
 
 Các quyết định kiến trúc nằm trong `quyet-dinh/`.

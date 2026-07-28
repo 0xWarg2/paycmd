@@ -1,5 +1,7 @@
 "use client";
 
+import { createAdapterFromProvider } from "@circle-fin/adapter-viem-v2";
+import { BridgeKit } from "@circle-fin/bridge-kit";
 import {
   BadgeDollarSign,
   Bot,
@@ -8,13 +10,17 @@ import {
   Copy,
   ChevronRight,
   Clock3,
+  Info,
+  ArrowRightLeft,
   Download,
   FileDown,
   Link2,
   History,
   Loader2,
   Maximize2,
+  MessageCircle,
   Paperclip,
+  Plus,
   Printer,
   ReceiptText,
   Search,
@@ -40,10 +46,11 @@ import {
   ExplorerTxLink,
   RailBadge,
   inferRailFromCommand,
+  getChainMeta,
 } from "@/components/chain-identity";
-import { MetaMaskStatusPills } from "@/components/metamask-status-pills";
 import { PayCmdShell } from "@/components/paycmd-shell";
 import {
+  bridgeErrorWithFaucet,
   isForegroundOnlyCommand,
   usePayCmdRuntime,
 } from "@/components/paycmd-runtime";
@@ -51,12 +58,40 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
+import { localeRequestHeaders, translateClient, useI18n } from "@/lib/i18n";
+import {
+  cctpBridgeChainMap,
+  bridgeModeFrom,
+  bridgeSpeedFrom,
+  CIRCLE_TESTNET_FAUCET_URL,
+  getSupportedCctpBridgeChains,
+  normalizeCctpBridgeChain,
+  type CctpBridgeChainKey,
+  type CctpBridgeRuntimeChain,
+  type CctpBridgeMintMode,
+  type CctpBridgeTransferSpeed,
+} from "@/lib/paycmd/cctp-bridge";
 import {
   parsePayCmd,
   ParsedCommand,
   requiresConfirmation,
 } from "@/lib/paycmd/commands";
 import { web3Chains } from "@/lib/paycmd/web3-chains";
+import {
+  amountOutFromReserves,
+  amountOutMinFromSlippage,
+  getSwapAdapterAddress,
+  parseSwapAmount,
+  paynaFactoryAbi,
+  paynaDexFactory,
+  paynaPairAbi,
+  paynaSwapAdapterAbi,
+  paynaSwapTokens,
+  PAYNA_SWAP_CHAIN,
+  PAYNA_SWAP_SLIPPAGE_BPS,
+  swapPathFor,
+  type PaynaSwapTokenSymbol,
+} from "@/lib/paycmd/swap";
 
 declare global {
   interface Window {
@@ -163,22 +198,30 @@ type ChatMessageRow = {
   created_at: string;
 };
 
+type ChatThreadSummary = {
+  id: string;
+  user_id: string;
+  title: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  last_message_preview?: string | null;
+  last_message_at?: string | null;
+  last_message_role?: string | null;
+  last_message_kind?: string | null;
+  message_count?: number | null;
+};
+
 const MESSAGE_PAGE_SIZE = 10;
+const THREAD_LIST_PAGE_SIZE = 30;
+const AUTO_SCROLL_BOTTOM_THRESHOLD = 160;
 const METAMASK_CONFIRMATION_TIMEOUT_MS = 90_000;
 const METAMASK_CHAIN_TIMEOUT_MS = 60_000;
 const METAMASK_RPC_TIMEOUT_MS = 15_000;
-const aiLoadingCopy: Record<AiProvider, string[]> = {
-  openai: [
-    "OpenAI đang hiểu ý định PayCMD...",
-    "Đang kiểm tra lệnh, chain và trường cần thiết...",
-    "Đang chuẩn bị preview an toàn...",
-  ],
-  asksurf: [
-    "AskSurf đang tìm thông tin crypto...",
-    "Đang tổng hợp market, protocol và on-chain context...",
-    "Đang chuẩn hóa câu trả lời cho PayCMD...",
-  ],
-  paycmd: ["PayCMD đang xử lý..."],
+const aiLoadingKeys: Record<AiProvider, string[]> = {
+  openai: ["chat.loading.openai.0", "chat.loading.openai.1", "chat.loading.openai.2"],
+  asksurf: ["chat.loading.asksurf.0", "chat.loading.asksurf.1", "chat.loading.asksurf.2"],
+  paycmd: ["chat.loading.paycmd.0"],
 };
 
 const surfEffortOptions: { id: SurfEffort; label: string; description: string }[] = [
@@ -207,6 +250,40 @@ function formatDuration(ms?: number) {
   return minutes ? `${minutes}m ${String(remainder).padStart(2, "0")}s` : `${seconds}s`;
 }
 
+function threadSortTime(thread: ChatThreadSummary) {
+  return new Date(thread.last_message_at ?? thread.updated_at ?? thread.created_at).getTime();
+}
+
+function isGenericThreadTitle(title?: string | null) {
+  return !title || /^(payna chat|payna main thread|new chat)$/i.test(title.trim());
+}
+
+function inferThreadTitle(input: string) {
+  const clean = input
+    .replace(/^\/+/, "")
+    .replace(/0x[a-fA-F0-9]{40}/g, "0x...")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!clean) return "New chat";
+
+  const title = clean.length > 58 ? `${clean.slice(0, 55).trim()}...` : clean;
+  return title.charAt(0).toUpperCase() + title.slice(1);
+}
+
+function formatThreadTimestamp(value: string | null | undefined, locale: string) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat(locale === "vi" ? "vi-VN" : "en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function isNearViewportBottom(viewport: HTMLDivElement) {
+  return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < AUTO_SCROLL_BOTTOM_THRESHOLD;
+}
+
 function normalizeAiProvider(value: unknown): AiProvider | undefined {
   return value === "openai" || value === "asksurf" || value === "paycmd" ? value : undefined;
 }
@@ -219,7 +296,7 @@ function normalizeAssistantActions(value: unknown): AssistantAction[] | undefine
     .filter((item) => item.kind === "switch_to_asksurf" && typeof item.query === "string" && item.query.trim())
     .map((item) => ({
       kind: "switch_to_asksurf" as const,
-      label: typeof item.label === "string" && item.label.trim() ? item.label.trim() : "Hỏi bằng AskSurf",
+      label: typeof item.label === "string" && item.label.trim() ? item.label.trim() : translateClient("asksurf.askButton"),
       query: (item.query as string).trim(),
       surfMode: item.surfMode === "instant" || item.surfMode === "research" ? item.surfMode : "research",
       effort:
@@ -234,199 +311,213 @@ function normalizeAssistantActions(value: unknown): AssistantAction[] | undefine
 function providerName(provider?: AiProvider) {
   if (provider === "openai") return "OpenAI Router";
   if (provider === "asksurf") return "AskSurf Research";
-  if (provider === "paycmd") return "PayCMD";
+  if (provider === "paycmd") return "Payna";
   return "";
 }
 
 const commandTemplates = [
   {
-    group: "Wallet",
+    groupKey: "commandPalette.group.wallet",
     items: [
       {
         sample: "/link metamask",
-        title: "Link MetaMask",
-        description: "Gắn MetaMask vào tài khoản PayCMD hiện tại.",
+        titleKey: "commandPalette.linkMetamask.title",
+        descriptionKey: "commandPalette.linkMetamask.description",
         badge: "write",
         icon: Link2,
       },
       {
         sample: "/fund 50 from metamask on base",
-        title: "Fund Circle wallet",
-        description: "Chuyển USDC từ MetaMask vào Circle wallet.",
+        titleKey: "commandPalette.fundWallet.title",
+        descriptionKey: "commandPalette.fundWallet.description",
         badge: "confirm",
         icon: Wallet,
       },
       {
         sample: "/wallet create",
-        title: "Tạo Circle wallet",
-        description: "Khởi tạo wallet set và SCA wallet cho tài khoản.",
+        titleKey: "commandPalette.walletCreate.title",
+        descriptionKey: "commandPalette.walletCreate.description",
         badge: "write",
         icon: Wallet,
       },
       {
         sample: "/wallet status",
-        title: "Xem trạng thái ví",
-        description: "Kiểm tra ví Circle và Gateway signer đã có chưa.",
+        titleKey: "commandPalette.walletStatus.title",
+        descriptionKey: "commandPalette.walletStatus.description",
         badge: "read",
         icon: WalletCards,
       },
       {
         sample: "/wallet balance",
-        title: "SCA wallet USDC",
-        description: "Xem USDC còn nằm trong Circle SCA wallet.",
+        titleKey: "commandPalette.walletBalance.title",
+        descriptionKey: "commandPalette.walletBalance.description",
         badge: "read",
         icon: WalletCards,
       },
     ],
   },
   {
-    group: "Balance",
+    groupKey: "commandPalette.group.balance",
     items: [
       {
         sample: "/balance",
-        title: "Unified balance",
-        description: "Tổng USDC on-chain và Gateway trên mọi chain.",
+        titleKey: "commandPalette.balance.title",
+        descriptionKey: "commandPalette.balance.description",
         badge: "read",
         icon: BadgeDollarSign,
       },
       {
         sample: "/balance arc",
-        title: "Balance Arc",
-        description: "Lọc USDC balance trên Arc Testnet.",
+        titleKey: "commandPalette.balanceArc.title",
+        descriptionKey: "commandPalette.balanceArc.description",
         badge: "read",
         icon: BadgeDollarSign,
       },
       {
         sample: "/balance base",
-        title: "Balance Base",
-        description: "Lọc USDC balance trên Base Sepolia.",
+        titleKey: "commandPalette.balanceBase.title",
+        descriptionKey: "commandPalette.balanceBase.description",
         badge: "read",
         icon: BadgeDollarSign,
       },
       {
         sample: "/balance avalanche",
-        title: "Balance Avalanche",
-        description: "Lọc USDC balance trên Avalanche Fuji.",
+        titleKey: "commandPalette.balanceAvalanche.title",
+        descriptionKey: "commandPalette.balanceAvalanche.description",
         badge: "read",
         icon: BadgeDollarSign,
       },
       {
         sample: "/gateway balance",
-        title: "Gateway balance",
-        description: "Chỉ xem USDC đã deposit vào Gateway.",
+        titleKey: "commandPalette.gatewayBalance.title",
+        descriptionKey: "commandPalette.gatewayBalance.description",
         badge: "read",
         icon: BadgeDollarSign,
       },
     ],
   },
   {
-    group: "Gateway Actions",
+    groupKey: "commandPalette.group.gateway",
     items: [
       {
         sample: "/deposit 50 from arc",
-        title: "Deposit vào Gateway",
-        description: "Approve và deposit USDC từ source chain.",
+        titleKey: "commandPalette.deposit.title",
+        descriptionKey: "commandPalette.deposit.description",
         badge: "confirm",
         icon: Waypoints,
       },
       {
         sample: "/withdraw 5 from base",
-        title: "Withdraw khỏi Gateway",
-        description: "Rút Gateway balance về Circle SCA wallet cùng chain.",
+        titleKey: "commandPalette.withdraw.title",
+        descriptionKey: "commandPalette.withdraw.description",
         badge: "confirm",
         icon: Download,
       },
       {
         sample: "/transfer 10 from base to arc",
-        title: "Cross-chain transfer",
-        description: "Burn intent, attestation, rồi mint ở destination.",
+        titleKey: "commandPalette.transfer.title",
+        descriptionKey: "commandPalette.transfer.description",
         badge: "confirm",
         icon: Waypoints,
       },
       {
+        sample: "/bridge 10 USDC from base to arc",
+        titleKey: "commandPalette.bridge.title",
+        descriptionKey: "commandPalette.bridge.description",
+        badge: "confirm",
+        icon: Waypoints,
+      },
+      {
+        sample: "/swap 1 USDC to EURC",
+        titleKey: "commandPalette.swap.title",
+        descriptionKey: "commandPalette.swap.description",
+        badge: "confirm",
+        icon: ArrowRightLeft,
+      },
+      {
         sample: "/gas check arc",
-        title: "Gas Arc",
-        description: "Kiểm tra native gas trên Arc Testnet.",
+        titleKey: "commandPalette.gasArc.title",
+        descriptionKey: "commandPalette.gasArc.description",
         badge: "read",
         icon: Clock3,
       },
       {
         sample: "/gas check base",
-        title: "Gas Base",
-        description: "Kiểm tra ETH gas trên Base Sepolia.",
+        titleKey: "commandPalette.gasBase.title",
+        descriptionKey: "commandPalette.gasBase.description",
         badge: "read",
         icon: Clock3,
       },
       {
         sample: "/gas check avalanche",
-        title: "Gas Avalanche",
-        description: "Kiểm tra AVAX gas trên Avalanche Fuji.",
+        titleKey: "commandPalette.gasAvalanche.title",
+        descriptionKey: "commandPalette.gasAvalanche.description",
         badge: "read",
         icon: Clock3,
       },
       {
         sample: "/gateway info",
-        title: "Gateway info",
-        description: "Xem domains và contract data từ Circle Gateway.",
+        titleKey: "commandPalette.gatewayInfo.title",
+        descriptionKey: "commandPalette.gatewayInfo.description",
         badge: "read",
         icon: Sparkles,
       },
     ],
   },
   {
-    group: "Payments",
+    groupKey: "commandPalette.group.payments",
     items: [
       {
         sample: "/pay 25 to Minh on arc from base",
-        title: "Pay contact",
-        description: "Chuyển USDC cho PayCMD contact hoặc địa chỉ ngoài.",
+        titleKey: "commandPalette.pay.title",
+        descriptionKey: "commandPalette.pay.description",
         badge: "confirm",
         icon: Send,
       },
       {
         sample: "/request 25 from Minh on arc",
-        title: "Request payment",
-        description: "Tạo payment request link/QR để người trả confirm.",
+        titleKey: "commandPalette.request.title",
+        descriptionKey: "commandPalette.request.description",
         badge: "write",
         icon: ReceiptText,
       },
       {
         sample: "/payroll run team 25 from base",
-        title: "Run payroll",
-        description: "Tạo batch trả cùng amount cho contacts active.",
+        titleKey: "commandPalette.payroll.title",
+        descriptionKey: "commandPalette.payroll.description",
         badge: "confirm",
         icon: Users,
       },
       {
         sample: "/contacts add Minh 0x0000000000000000000000000000000000000000 on arc",
-        title: "Add contact",
-        description: "Lưu người nhận để /pay và payroll resolve tên.",
+        titleKey: "commandPalette.contactsAdd.title",
+        descriptionKey: "commandPalette.contactsAdd.description",
         badge: "write",
         icon: UserPlus,
       },
     ],
   },
   {
-    group: "History",
+    groupKey: "commandPalette.group.history",
     items: [
       {
         sample: "/history",
-        title: "Tất cả giao dịch",
-        description: "Xem các deposit và transfer mới nhất.",
+        titleKey: "commandPalette.history.title",
+        descriptionKey: "commandPalette.history.description",
         badge: "read",
         icon: History,
       },
       {
         sample: "/history deposit",
-        title: "Deposit history",
-        description: "Lọc riêng các giao dịch deposit.",
+        titleKey: "commandPalette.historyDeposit.title",
+        descriptionKey: "commandPalette.historyDeposit.description",
         badge: "read",
         icon: History,
       },
       {
         sample: "/history transfer",
-        title: "Transfer history",
-        description: "Lọc riêng các giao dịch transfer.",
+        titleKey: "commandPalette.historyTransfer.title",
+        descriptionKey: "commandPalette.historyTransfer.description",
         badge: "read",
         icon: History,
       },
@@ -437,69 +528,47 @@ const commandTemplates = [
 const onboardingCommands = [
   {
     sample: "/wallet create",
-    title: "Tạo ví Circle",
-    description: "Idempotent: nếu có ví rồi PayCMD sẽ báo ví đã sẵn sàng.",
+    titleKey: "onboarding.walletCreate.title",
+    descriptionKey: "onboarding.walletCreate.description",
   },
   {
     sample: "/wallet status",
-    title: "Kiểm tra ví",
-    description: "Xem Circle SCA wallet và Gateway signer.",
+    titleKey: "onboarding.walletStatus.title",
+    descriptionKey: "onboarding.walletStatus.description",
   },
   {
     sample: "/balance",
-    title: "Xem tổng USDC",
-    description: "Unified view gồm SCA wallet và Gateway balance.",
+    titleKey: "onboarding.balance.title",
+    descriptionKey: "onboarding.balance.description",
   },
   {
     sample: "/fund 10 from metamask on base",
-    title: "Nạp từ MetaMask",
-    description: "Chuyển USDC vào Circle SCA wallet trên chain nguồn.",
+    titleKey: "onboarding.fund.title",
+    descriptionKey: "onboarding.fund.description",
   },
   {
     sample: "/transfer 5 from base to arc",
-    title: "Cross-chain",
-    description: "Dùng Circle Gateway để chuyển USDC sang chain khác.",
+    titleKey: "onboarding.transfer.title",
+    descriptionKey: "onboarding.transfer.description",
   },
   {
     sample: "/contacts add Minh 0x0000000000000000000000000000000000000000 on arc",
-    title: "Lưu contact",
-    description: "Sau đó có thể gõ pay Minh bằng tên.",
+    titleKey: "onboarding.contacts.title",
+    descriptionKey: "onboarding.contacts.description",
   },
 ];
 
-function missingFieldQuestion(field: string) {
-  const labels: Record<string, string> = {
-    amount: "Bạn muốn dùng số tiền bao nhiêu?",
-    token: "Bạn muốn dùng token nào?",
-    recipient: "Bạn muốn gửi cho ai?",
-    payer: "Bạn muốn yêu cầu ai thanh toán?",
-    name: "Bạn muốn đặt tên contact là gì?",
-    address: "Bạn cần nhập địa chỉ ví 0x... của contact.",
-    batchName: "Bạn muốn đặt tên payroll batch là gì?",
-    budgetName: "Bạn muốn đặt tên ngân sách là gì?",
-    frequency: "Bạn muốn lịch chạy daily, weekly hay monthly?",
-    action: "Bạn muốn dùng action nào?",
-    walletType: "Bạn muốn link ví nào? Ví dụ: /link metamask.",
-    sourceWallet: "Bạn muốn nạp từ ví nào? Ví dụ: /fund 50 from metamask on base.",
-    sourceChain: "Bạn muốn dùng source chain nào? Ví dụ: arc, base, avalanche.",
-    destinationChain: "Bạn muốn chuyển sang chain nào? Ví dụ: arc, base, avalanche.",
-    chain: "Bạn muốn kiểm tra chain nào? Ví dụ: arc, base, avalanche.",
-    command: "Bạn muốn dùng command nào? Gõ / để xem danh sách.",
-  };
-
-  return labels[field] ?? `Bạn cần bổ sung ${field}.`;
+function missingFieldQuestion(
+  field: string,
+  t: (key: string, params?: Record<string, string | number | undefined | null>) => string,
+) {
+  const key = `missing.${field}`;
+  const translated = t(key);
+  return translated === key ? t("missing.default", { field }) : translated;
 }
 
-function statusLabel(status: ExecutionItem["status"]) {
-  const labels = {
-    queued: "Queued",
-    running: "Running",
-    waiting_gateway: "Gateway",
-    success: "Success",
-    failed: "Failed",
-  };
-
-  return labels[status];
+function statusLabel(status: ExecutionItem["status"], t?: (key: string) => string) {
+  return t?.(`status.${status}`) ?? status;
 }
 
 function recordFrom(value: unknown): Record<string, unknown> {
@@ -523,7 +592,7 @@ function looksLikeResearchQuestion(value: string) {
 }
 
 function looksLikePayCmdAction(value: string) {
-  return /\b(chuyển|chuyen|gửi|gui|trả|tra|pay|send|transfer|nạp|nap|fund|deposit|withdraw|rút|rut|balance|số dư|so du|wallet|ví|vi|contact|liên hệ|lien he|payroll|request)\b/i.test(
+  return /\b(chuyển|chuyen|gửi|gui|trả|tra|pay|send|transfer|swap|đổi|doi|convert|bridge|cctp|nạp|nap|fund|deposit|withdraw|rút|rut|balance|số dư|so du|wallet|ví|vi|contact|liên hệ|lien he|payroll|request)\b/i.test(
     value,
   );
 }
@@ -561,10 +630,14 @@ function executionDestinationChain(execution: ExecutionItem) {
   );
 }
 
-function executionTxLinks(execution: ExecutionItem) {
+function executionTxLinks(execution: ExecutionItem, t: TranslateFn) {
   const { result, transfer } = executionResultRecords(execution);
   const sourceChain = executionSourceChain(execution);
   const destinationChain = executionDestinationChain(execution);
+  const transaction =
+    [result.transaction, transfer.transaction, result.recordedTransaction]
+      .map(recordFrom)
+      .find((record) => Object.keys(record).length > 0) ?? {};
   const primaryHash =
     stringFrom(execution.txHash) ??
     stringFrom(result.txHash) ??
@@ -575,22 +648,232 @@ function executionTxLinks(execution: ExecutionItem) {
   const links: Array<{ label: string; txHash: string; chain: string | null }> = [];
 
   if (autoDepositHash) {
-    links.push({ label: "Auto-deposit", txHash: autoDepositHash, chain: sourceChain });
+    links.push({ label: t("runtime.tx.autoDeposit"), txHash: autoDepositHash, chain: sourceChain });
   }
 
   if (primaryHash && primaryHash !== autoDepositHash) {
-    const chain = execution.command === "transfer" || execution.command === "pay"
-      ? destinationChain ?? sourceChain
-      : sourceChain ?? destinationChain;
+    const chain =
+      execution.command === "transfer" || execution.command === "pay" || execution.command === "bridge"
+        ? destinationChain ?? sourceChain
+        : sourceChain ?? destinationChain;
     const label =
-      execution.command === "transfer" || execution.command === "pay" || execution.command === "withdraw"
-        ? "Mint"
-        : "Transaction";
+      execution.command === "transfer" || execution.command === "pay" || execution.command === "withdraw" || execution.command === "bridge"
+        ? t("runtime.tx.mint")
+        : t("runtime.tx.transaction");
 
     links.push({ label, txHash: primaryHash, chain });
   }
 
+  const bridgeSourceHash = stringFrom(result.sourceTxHash);
+  if (execution.command === "bridge" && bridgeSourceHash && bridgeSourceHash !== primaryHash) {
+    links.unshift({ label: t("runtime.tx.source"), txHash: bridgeSourceHash, chain: sourceChain });
+  }
+
+  const proofHash =
+    stringFrom(result.proofTxHash) ??
+    stringFrom(transfer.proofTxHash) ??
+    stringFrom(transaction?.proof_tx_hash);
+  if (proofHash && !links.some((link) => link.txHash === proofHash)) {
+    links.push({ label: t("receipt.paynaProof"), txHash: proofHash, chain: "arcTestnet" });
+  }
+
   return links;
+}
+
+type ExecutionReceiptMetric = {
+  label: string;
+  value: string;
+};
+
+type ExecutionReceiptLink = {
+  label: string;
+  txHash: string;
+  chain: string | null;
+};
+
+type ExecutionReceipt = {
+  title: string;
+  primary: string;
+  secondary?: string;
+  sourceChain: string | null;
+  destinationChain: string | null;
+  metrics: ExecutionReceiptMetric[];
+  links: ExecutionReceiptLink[];
+  details: ExecutionReceiptMetric[];
+};
+
+type TranslateFn = ReturnType<typeof useI18n>["t"];
+
+function shortChainLabel(chain?: string | null) {
+  return getChainMeta(chain)?.shortLabel ?? getChainMeta(chain)?.label ?? chain ?? "";
+}
+
+function metric(label: string, value?: string | number | null): ExecutionReceiptMetric | null {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  return { label, value: String(value) };
+}
+
+function receiptLinks(...links: Array<ExecutionReceiptLink | null | undefined>) {
+  const seen = new Set<string>();
+
+  return links.filter((link): link is ExecutionReceiptLink => {
+    if (!link?.txHash || seen.has(link.txHash)) {
+      return false;
+    }
+    seen.add(link.txHash);
+    return true;
+  });
+}
+
+function buildExecutionReceipt(execution: ExecutionItem, t: TranslateFn): ExecutionReceipt | null {
+  if (execution.status !== "success") {
+    return null;
+  }
+
+  const { result, transfer, payment } = executionResultRecords(execution);
+  const sourceChain = executionSourceChain(execution);
+  const destinationChain = executionDestinationChain(execution);
+  const proofTxHash =
+    stringFrom(result.proofTxHash) ??
+    stringFrom(transfer.proofTxHash) ??
+    stringFrom(recordFrom(result.recordedTransaction).proof_tx_hash);
+
+  if (execution.command === "swap") {
+    const tokenIn = stringFrom(result.tokenIn) ?? "USDC";
+    const tokenOut = stringFrom(result.tokenOut) ?? "";
+    const amountIn = stringFrom(result.amountIn) ?? "";
+    const estimatedOut = formatDecimalAmount(result.estimatedAmountOut, 8);
+    const minOut = formatDecimalAmount(result.minimumAmountOut, 8);
+    const route = Array.isArray(result.route) ? result.route.join(" -> ") : "";
+    const txHash = stringFrom(result.txHash) ?? execution.txHash ?? null;
+    const approvalTxHash = stringFrom(result.approvalTxHash);
+
+    return {
+      title: t("receipt.swapComplete"),
+      primary: `${amountIn} ${tokenIn} -> ~${estimatedOut} ${tokenOut}`.trim(),
+      secondary: t("receipt.swapSecondary"),
+      sourceChain: "arcTestnet",
+      destinationChain: "arcTestnet",
+      metrics: [
+        metric(t("receipt.minimum"), `${minOut} ${tokenOut}`),
+        metric(t("receipt.slippage"), `${PAYNA_SWAP_SLIPPAGE_BPS / 100}%`),
+        metric(t("receipt.route"), route),
+      ].filter(Boolean) as ExecutionReceiptMetric[],
+      links: receiptLinks(
+        txHash ? { label: t("receipt.swapTx"), txHash, chain: "arcTestnet" } : null,
+        proofTxHash ? { label: t("receipt.paynaProof"), txHash: proofTxHash, chain: "arcTestnet" } : null,
+      ),
+      details: [
+        metric(t("receipt.approveTx"), approvalTxHash),
+        metric(t("receipt.adapter"), stringFrom(result.adapterAddress)),
+      ].filter(Boolean) as ExecutionReceiptMetric[],
+    };
+  }
+
+  if (execution.command === "bridge") {
+    const amount = formatDecimalAmount(result.amount);
+    const recipient =
+      result.recipientMode === "external"
+        ? stringFrom(result.recipientAddress)
+        : t("receipt.myWallet");
+    const sourceSpend = Number(result.sourceDebit ?? 0);
+    const bridgeFee = Number(result.estimatedFeeTotal ?? 0);
+    const sourceTxHash = stringFrom(result.sourceTxHash);
+    const mintTxHash = stringFrom(result.mintTxHash) ?? execution.txHash ?? null;
+
+    return {
+      title: t("receipt.bridgeComplete"),
+      primary: `${amount} USDC ${shortChainLabel(sourceChain)} -> ${shortChainLabel(destinationChain)}`,
+      sourceChain,
+      destinationChain,
+      metrics: [
+        metric(t("receipt.receives"), `${amount} USDC`),
+        sourceSpend > 0 ? metric(t("receipt.sourceSpend"), `~${formatDecimalAmount(sourceSpend)} USDC`) : null,
+        bridgeFee > 0 ? metric(t("receipt.fees"), `~${formatDecimalAmount(bridgeFee)} USDC`) : null,
+        metric(t("receipt.destinationGas"), result.mintMode === "manual_mint" ? t("receipt.manual") : t("receipt.forwarderPaid")),
+      ].filter(Boolean) as ExecutionReceiptMetric[],
+      links: receiptLinks(
+        sourceTxHash ? { label: t("receipt.sourceTx"), txHash: sourceTxHash, chain: sourceChain } : null,
+        mintTxHash ? { label: t("receipt.mintTx"), txHash: mintTxHash, chain: destinationChain ?? sourceChain } : null,
+        proofTxHash ? { label: t("receipt.paynaProof"), txHash: proofTxHash, chain: "arcTestnet" } : null,
+      ),
+      details: [
+        metric(t("receipt.recipient"), recipient),
+        metric(t("receipt.transferId"), stringFrom(result.transferId)),
+        metric(t("receipt.mode"), stringFrom(result.mintMode)),
+      ].filter(Boolean) as ExecutionReceiptMetric[],
+    };
+  }
+
+  if (execution.command === "transfer") {
+    const amount = formatDecimalAmount(result.amount);
+    const txHash = stringFrom(result.mintTxHash) ?? stringFrom(result.txHash) ?? execution.txHash ?? null;
+    const fees = recordFrom(result.fees);
+    const fee = Number(result.estimatedGatewayFee ?? fees.total ?? 0);
+    const required = Number(result.requiredGatewayBalance ?? 0);
+
+    return {
+      title: t("receipt.transferComplete"),
+      primary: `${amount} USDC ${shortChainLabel(sourceChain)} -> ${shortChainLabel(destinationChain)}`,
+      sourceChain,
+      destinationChain,
+      metrics: [
+        result.autoDeposit ? metric(t("receipt.autoDeposit"), `${formatDecimalAmount(result.autoDepositedAmount)} USDC`) : null,
+        result.forwarding ? metric(t("receipt.forwarding"), t("receipt.enabled")) : metric(t("receipt.destinationGas"), t("receipt.manual")),
+        fee > 0 ? metric(t("receipt.fees"), `${formatDecimalAmount(fee)} USDC`) : null,
+      ].filter(Boolean) as ExecutionReceiptMetric[],
+      links: receiptLinks(
+        txHash ? { label: t("receipt.transferTx"), txHash, chain: destinationChain ?? sourceChain } : null,
+        proofTxHash ? { label: t("receipt.paynaProof"), txHash: proofTxHash, chain: "arcTestnet" } : null,
+      ),
+      details: [
+        required > 0 ? metric(t("receipt.sourceDebit"), `~${formatDecimalAmount(required)} USDC`) : null,
+        metric(t("receipt.mode"), result.forwarding ? t("transfer.autoForwarding") : t("transfer.manualGas")),
+        metric(t("receipt.transferId"), stringFrom(result.transferId)),
+      ].filter(Boolean) as ExecutionReceiptMetric[],
+    };
+  }
+
+  if (execution.command === "pay") {
+    const amount = formatDecimalAmount(payment.amount ?? result.amount);
+    const recipient = stringFrom(recordFrom(payment.recipient).label) ?? stringFrom(result.recipient) ?? t("receipt.recipient");
+    const txHash =
+      stringFrom(transfer.mintTxHash) ??
+      stringFrom(transfer.txHash) ??
+      stringFrom(payment.txHash) ??
+      execution.txHash ??
+      null;
+    const fees = recordFrom(transfer.fees);
+    const fee = Number(transfer.estimatedGatewayFee ?? fees.total ?? 0);
+    const required = Number(transfer.requiredGatewayBalance ?? 0);
+
+    return {
+      title: t("receipt.paymentSent"),
+      primary: `${amount} USDC to ${recipient}`,
+      secondary: destinationChain ? t("receipt.deliveredOn", { chain: getChainMeta(destinationChain)?.label ?? destinationChain }) : undefined,
+      sourceChain,
+      destinationChain,
+      metrics: [
+        metric(t("receipt.recipient"), recipient),
+        transfer.forwarding ? metric(t("receipt.forwarding"), t("receipt.enabled")) : metric(t("receipt.destinationGas"), t("receipt.manual")),
+        fee > 0 ? metric(t("receipt.fees"), `${formatDecimalAmount(fee)} USDC`) : null,
+      ].filter(Boolean) as ExecutionReceiptMetric[],
+      links: receiptLinks(
+        txHash ? { label: t("receipt.paymentTx"), txHash, chain: destinationChain ?? sourceChain } : null,
+        proofTxHash ? { label: t("receipt.paynaProof"), txHash: proofTxHash, chain: "arcTestnet" } : null,
+      ),
+      details: [
+        metric(t("receipt.recipientAddress"), stringFrom(payment.recipient_address) ?? stringFrom(payment.recipientAddress)),
+        required > 0 ? metric(t("receipt.sourceDebit"), `~${formatDecimalAmount(required)} USDC`) : null,
+        metric(t("receipt.mode"), transfer.forwarding ? t("transfer.autoForwarding") : t("transfer.manualGas")),
+      ].filter(Boolean) as ExecutionReceiptMetric[],
+    };
+  }
+
+  return null;
 }
 
 function usesGatewayPipeline(draft: ParsedCommand) {
@@ -610,6 +893,7 @@ async function requestJson(path: string, init?: RequestInit) {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...localeRequestHeaders(),
       ...(init?.headers ?? {}),
     },
   });
@@ -619,14 +903,14 @@ async function requestJson(path: string, init?: RequestInit) {
     const message =
       data?.error === "INSUFFICIENT_GAS"
         ? [
-            data?.message ?? "Wallet thực thi giao dịch chưa có native gas token.",
-            data?.walletAddress ? `Nạp gas vào ví: ${data.walletAddress}.` : "",
-            data?.chain ? `Chain: ${data.chain}.` : "",
+            data?.message ?? translateClient("request.insufficientGasDefault"),
+            data?.walletAddress ? translateClient("request.fundGasAddress", { address: data.walletAddress }) : "",
+            data?.chain ? translateClient("request.chain", { chain: data.chain }) : "",
           ]
             .filter(Boolean)
             .join(" ")
         : data?.error === "GATEWAY_FINALITY_PENDING"
-          ? data?.message ?? "Gateway đang chờ finality. Chạy lại command sau vài phút."
+          ? data?.message ?? translateClient("request.gatewayFinalityPending")
         : data?.message ?? data?.error ?? `Request failed: ${response.status}`;
     throw Object.assign(new Error(message), {
       code: data?.error,
@@ -731,9 +1015,9 @@ function formatDecimalAmount(value: unknown, maxFractionDigits = 6) {
 }
 
 function formatNativeGasBalance(rawBalance: unknown, chain: string) {
-  const decimals = chain === "arcTestnet" ? 6 : 18;
-  const symbol =
-    chain === "arcTestnet" ? "USDC" : chain === "avalancheFuji" ? "AVAX" : "ETH";
+  const meta = getChainMeta(chain);
+  const decimals = meta?.nativeSymbol === "USDC" ? 6 : 18;
+  const symbol = meta?.nativeSymbol ?? "ETH";
 
   try {
     const value = typeof rawBalance === "bigint" ? rawBalance : BigInt(String(rawBalance ?? "0"));
@@ -781,10 +1065,19 @@ async function requestMetaMaskAccount() {
   return normalizeAddress(address);
 }
 
+async function getConnectedMetaMaskAccount() {
+  const accounts = await requestMetaMask(
+    { method: "eth_accounts" },
+    { label: "MetaMask connected account lookup" },
+  );
+  const address = Array.isArray(accounts) ? String(accounts[0] ?? "") : "";
+  return address ? normalizeAddress(address) : "";
+}
+
 async function linkMetaMaskWallet() {
   const address = await requestMetaMaskAccount();
   const message = [
-    "Link this MetaMask wallet to PayCMD.",
+    "Link this MetaMask wallet to Payna.",
     `Address: ${address}`,
     `Timestamp: ${new Date().toISOString()}`,
   ].join("\n");
@@ -826,6 +1119,17 @@ async function switchMetaMaskChain(chainKey: keyof typeof web3Chains) {
       throw error;
     }
 
+    const confirmed = window.confirm(
+      translateClient("metamask.addNetworkPrompt", {
+        chain: chain.name,
+        action: translateClient("metamask.bridgeFundAction"),
+      }),
+    );
+
+    if (!confirmed) {
+      throw new Error(translateClient("metamask.addNetworkCancelled", { chain: chain.name }));
+    }
+
     await requestMetaMask(
       {
         method: "wallet_addEthereumChain",
@@ -833,7 +1137,7 @@ async function switchMetaMaskChain(chainKey: keyof typeof web3Chains) {
           {
             chainId: chain.hexChainId,
             chainName: chain.name,
-            nativeCurrency: chain.nativeCurrency,
+            nativeCurrency: metaMaskNativeCurrency(chain.nativeCurrency),
             rpcUrls: [chain.rpcUrl],
             blockExplorerUrls: [chain.blockExplorerUrl],
           },
@@ -842,6 +1146,98 @@ async function switchMetaMaskChain(chainKey: keyof typeof web3Chains) {
       { timeoutMs: METAMASK_CHAIN_TIMEOUT_MS, label: `Add ${chain.name} to MetaMask` },
     );
   }
+}
+
+type MetaMaskChainSwitchConfig = {
+  id: number;
+  hexChainId: `0x${string}`;
+  name: string;
+  rpcUrl: string;
+  blockExplorerUrl: string;
+  nativeCurrency: {
+    name: string;
+    symbol: string;
+    decimals: number;
+  };
+};
+
+function metaMaskNativeCurrency(currency: MetaMaskChainSwitchConfig["nativeCurrency"]) {
+  return {
+    ...currency,
+    // MetaMask rejects wallet_addEthereumChain on EVM chains when nativeCurrency.decimals is not 18.
+    // Keep app-level Arc metadata as USDC/6 for display, but send MetaMask-compatible metadata here.
+    decimals: 18,
+  };
+}
+
+function metaMaskBridgeChainConfig(chainKey: CctpBridgeChainKey): MetaMaskChainSwitchConfig {
+  const chain = cctpBridgeChainMap[chainKey].viemChain;
+  return {
+    id: chain.id,
+    hexChainId: `0x${chain.id.toString(16)}`,
+    name: chain.name,
+    rpcUrl: chain.rpcUrls.default.http[0] ?? "",
+    blockExplorerUrl: chain.blockExplorers?.default.url ?? "",
+    nativeCurrency: chain.nativeCurrency,
+  };
+}
+
+async function switchMetaMaskChainByKey(chainKey: string) {
+  const chain =
+    isCctpBridgeKey(chainKey)
+      ? metaMaskBridgeChainConfig(chainKey)
+      : chainKey in web3Chains
+        ? web3Chains[chainKey as keyof typeof web3Chains]
+        : null;
+
+  if (!chain) {
+    throw new Error(`Unsupported MetaMask chain: ${chainKey}`);
+  }
+
+  try {
+    await requestMetaMask(
+      {
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: chain.hexChainId }],
+      },
+      { timeoutMs: METAMASK_CHAIN_TIMEOUT_MS, label: `Switch MetaMask to ${chain.name}` },
+    );
+  } catch (error: any) {
+    if (error?.code !== 4902) {
+      throw error;
+    }
+
+    const confirmed = window.confirm(
+      translateClient("metamask.addNetworkPrompt", {
+        chain: chain.name,
+        action: translateClient("metamask.bridgeAction"),
+      }),
+    );
+
+    if (!confirmed) {
+      throw new Error(translateClient("metamask.addNetworkCancelled", { chain: chain.name }));
+    }
+
+    await requestMetaMask(
+      {
+        method: "wallet_addEthereumChain",
+        params: [
+          {
+            chainId: chain.hexChainId,
+            chainName: chain.name,
+            nativeCurrency: metaMaskNativeCurrency(chain.nativeCurrency),
+            rpcUrls: [chain.rpcUrl],
+            blockExplorerUrls: chain.blockExplorerUrl ? [chain.blockExplorerUrl] : [],
+          },
+        ],
+      },
+      { timeoutMs: METAMASK_CHAIN_TIMEOUT_MS, label: `Add ${chain.name} to MetaMask` },
+    );
+  }
+}
+
+function isCctpBridgeKey(value: string): value is CctpBridgeChainKey {
+  return value in cctpBridgeChainMap;
 }
 
 async function waitForMetaMaskReceipt(txHash: string) {
@@ -901,6 +1297,287 @@ async function getErc20Balance(tokenAddress: `0x${string}`, account: string) {
   });
 }
 
+async function readMetaMaskContract<T>({
+  to,
+  abi,
+  functionName,
+  args = [],
+  label,
+}: {
+  to: `0x${string}`;
+  abi: any;
+  functionName: string;
+  args?: readonly unknown[];
+  label: string;
+}) {
+  const data = encodeFunctionData({
+    abi,
+    functionName,
+    args,
+  } as any);
+  const result = await requestMetaMask(
+    {
+      method: "eth_call",
+      params: [{ to, data }, "latest"],
+    },
+    { timeoutMs: METAMASK_RPC_TIMEOUT_MS, label },
+  );
+
+  if (typeof result !== "string") {
+    throw new Error(`${label} returned an invalid response.`);
+  }
+
+  return decodeFunctionResult({
+    abi,
+    functionName,
+    data: result as `0x${string}`,
+  } as any) as T;
+}
+
+async function getErc20Allowance(tokenAddress: `0x${string}`, owner: string, spender: string) {
+  const data = encodeFunctionData({
+    abi: erc20Abi,
+    functionName: "allowance",
+    args: [owner as `0x${string}`, spender as `0x${string}`],
+  });
+  const result = await requestMetaMask(
+    {
+      method: "eth_call",
+      params: [{ to: tokenAddress, data }, "latest"],
+    },
+    { timeoutMs: METAMASK_RPC_TIMEOUT_MS, label: "Token allowance lookup" },
+  );
+
+  if (typeof result !== "string") {
+    return 0n;
+  }
+
+  return decodeFunctionResult({
+    abi: erc20Abi,
+    functionName: "allowance",
+    data: result as `0x${string}`,
+  }) as bigint;
+}
+
+type SwapEstimate = {
+  tokenIn: PaynaSwapTokenSymbol;
+  tokenOut: PaynaSwapTokenSymbol;
+  amountIn: bigint;
+  amountOut: bigint;
+  amountOutMin: bigint;
+  route: PaynaSwapTokenSymbol[];
+  pairs: `0x${string}`[];
+};
+
+async function estimateSwapDraft(draft: ParsedCommand): Promise<SwapEstimate> {
+  const tokenIn = draft.fields.tokenIn as PaynaSwapTokenSymbol;
+  const tokenOut = draft.fields.tokenOut as PaynaSwapTokenSymbol;
+  const amountIn = parseSwapAmount(draft.fields.amount, tokenIn);
+  const route = swapPathFor(tokenIn, tokenOut);
+
+  if (!route.length) {
+    throw new Error("Choose two different swap tokens.");
+  }
+
+  let rollingAmount = amountIn;
+  const pairs: `0x${string}`[] = [];
+
+  for (let index = 0; index + 1 < route.length; index += 1) {
+    const current = paynaSwapTokens[route[index]];
+    const next = paynaSwapTokens[route[index + 1]];
+    const pair = await readMetaMaskContract<`0x${string}`>({
+      to: paynaDexFactory,
+      abi: paynaFactoryAbi,
+      functionName: "getPair",
+      args: [current.address, next.address],
+      label: "DEX pair lookup",
+    });
+
+    if (!pair || /^0x0{40}$/i.test(pair)) {
+      throw new Error(`No liquidity pair for ${current.symbol}/${next.symbol}.`);
+    }
+
+    const token0 = normalizeAddress(
+      await readMetaMaskContract<string>({
+        to: pair,
+        abi: paynaPairAbi,
+        functionName: "token0",
+        label: "Pair token0 lookup",
+      }),
+    );
+    const reserves = await readMetaMaskContract<readonly [bigint, bigint, number]>({
+      to: pair,
+      abi: paynaPairAbi,
+      functionName: "getReserves",
+      label: "Pair reserves lookup",
+    });
+    const currentIsToken0 = token0 === normalizeAddress(current.address);
+    const reserveIn = currentIsToken0 ? reserves[0] : reserves[1];
+    const reserveOut = currentIsToken0 ? reserves[1] : reserves[0];
+
+    rollingAmount = amountOutFromReserves(rollingAmount, reserveIn, reserveOut);
+    if (rollingAmount <= 0n) {
+      throw new Error(`Pool ${current.symbol}/${next.symbol} has insufficient liquidity.`);
+    }
+    pairs.push(pair);
+  }
+
+  return {
+    tokenIn,
+    tokenOut,
+    amountIn,
+    amountOut: rollingAmount,
+    amountOutMin: amountOutMinFromSlippage(rollingAmount, PAYNA_SWAP_SLIPPAGE_BPS),
+    route,
+    pairs,
+  };
+}
+
+async function approveErc20IfNeeded(params: {
+  tokenAddress: `0x${string}`;
+  owner: string;
+  spender: `0x${string}`;
+  amount: bigint;
+}) {
+  const allowance = await getErc20Allowance(params.tokenAddress, params.owner, params.spender);
+  if (allowance >= params.amount) {
+    return null;
+  }
+
+  const data = encodeFunctionData({
+    abi: erc20Abi,
+    functionName: "approve",
+    args: [params.spender, params.amount],
+  });
+  const txHash = await requestMetaMask(
+    {
+      method: "eth_sendTransaction",
+      params: [
+        {
+          from: params.owner,
+          to: params.tokenAddress,
+          value: "0x0",
+          data,
+        },
+      ],
+    },
+    { label: "MetaMask token approval" },
+  );
+
+  if (typeof txHash !== "string") {
+    throw new Error("MetaMask did not return an approval transaction hash.");
+  }
+
+  const receipt = await waitForMetaMaskReceipt(txHash);
+  if (receipt?.status === "0x0") {
+    throw new Error("Token approval failed on-chain.");
+  }
+
+  return txHash;
+}
+
+async function swapWithMetaMask(draft: ParsedCommand) {
+  const adapterAddress = getSwapAdapterAddress();
+  if (!adapterAddress) {
+    throw new Error("Payna swap adapter address is not configured.");
+  }
+
+  const account = await requestMetaMaskAccount();
+  await switchMetaMaskChain(PAYNA_SWAP_CHAIN);
+  const estimate = await estimateSwapDraft(draft);
+  const inputToken = paynaSwapTokens[estimate.tokenIn];
+  const outputToken = paynaSwapTokens[estimate.tokenOut];
+
+  const nativeBalance = await getNativeBalance(account);
+  if (nativeBalance === 0n) {
+    throw new Error(
+      translateClient("fund.noNativeGas", {
+        address: account,
+        symbol: web3Chains.arcTestnet.nativeCurrency.symbol,
+        chain: web3Chains.arcTestnet.name,
+      }),
+    );
+  }
+
+  const inputBalance = await getErc20Balance(inputToken.address, account);
+  if (inputBalance < estimate.amountIn) {
+    throw new Error(`Insufficient ${inputToken.symbol}. Required ${draft.fields.amount}, current ${formatUnits(inputBalance, inputToken.decimals)}.`);
+  }
+
+  const approvalTxHash = await approveErc20IfNeeded({
+    tokenAddress: inputToken.address,
+    owner: account,
+    spender: adapterAddress,
+    amount: estimate.amountIn,
+  });
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
+  const data = encodeFunctionData({
+    abi: paynaSwapAdapterAbi,
+    functionName: "swapExactTokensForTokens",
+    args: [
+      inputToken.address,
+      outputToken.address,
+      estimate.amountIn,
+      estimate.amountOutMin,
+      account as `0x${string}`,
+      deadline,
+    ],
+  });
+  const txHash = await requestMetaMask(
+    {
+      method: "eth_sendTransaction",
+      params: [
+        {
+          from: account,
+          to: adapterAddress,
+          value: "0x0",
+          data,
+        },
+      ],
+    },
+    { label: "MetaMask Payna swap confirmation" },
+  );
+
+  if (typeof txHash !== "string") {
+    throw new Error("MetaMask did not return a swap transaction hash.");
+  }
+
+  const receipt = await waitForMetaMaskReceipt(txHash);
+  const status = receipt?.status === "0x1" ? "success" : receipt?.status === "0x0" ? "failed" : "pending";
+  const recorded = await requestJson("/api/swap/record", {
+    method: "POST",
+    body: JSON.stringify({
+      txHash,
+      userAddress: account,
+      recipientAddress: account,
+      tokenIn: estimate.tokenIn,
+      tokenOut: estimate.tokenOut,
+      amountIn: formatUnits(estimate.amountIn, inputToken.decimals),
+      amountOut: formatUnits(estimate.amountOut, outputToken.decimals),
+      amountOutMin: formatUnits(estimate.amountOutMin, outputToken.decimals),
+      route: estimate.route,
+      status,
+    }),
+  }).catch(() => null);
+
+  return {
+    sourceChain: "arcTestnet",
+    destinationChain: "arcTestnet",
+    tokenIn: estimate.tokenIn,
+    tokenOut: estimate.tokenOut,
+    amountIn: formatUnits(estimate.amountIn, inputToken.decimals),
+    estimatedAmountOut: formatUnits(estimate.amountOut, outputToken.decimals),
+    minimumAmountOut: formatUnits(estimate.amountOutMin, outputToken.decimals),
+    route: estimate.route,
+    pairs: estimate.pairs,
+    approvalTxHash,
+    txHash,
+    status,
+    recordedTransaction: recorded?.transaction,
+    proofTxHash: recorded?.transaction?.proof_tx_hash,
+  };
+}
+
 async function estimateFundGas(params: {
   account: string;
   tokenAddress: `0x${string}`;
@@ -925,7 +1602,7 @@ async function estimateFundGas(params: {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown gas estimation error";
     throw new Error(
-      `Không thể ước tính gas cho lệnh fund trên ${params.chainName}. Kiểm tra ví MetaMask có đủ native gas token và USDC trên đúng network. Chi tiết: ${message}`,
+      translateClient("fund.gasEstimateFailed", { chain: params.chainName, message }),
     );
   }
 }
@@ -959,14 +1636,22 @@ async function fundCircleWalletFromMetaMask(draft: ParsedCommand) {
   const nativeBalance = await getNativeBalance(account);
   if (nativeBalance === 0n) {
     throw new Error(
-      `Ví MetaMask ${account} chưa có ${chain.nativeCurrency.symbol} trên ${chain.name} để trả gas. Nạp một ít ${chain.nativeCurrency.symbol} vào ví rồi chạy lại lệnh fund.`,
+      translateClient("fund.noNativeGas", {
+        address: account,
+        symbol: chain.nativeCurrency.symbol,
+        chain: chain.name,
+      }),
     );
   }
 
   const usdcBalance = await getErc20Balance(chain.usdcAddress, account);
   if (usdcBalance < amount) {
     throw new Error(
-      `Ví MetaMask không đủ USDC trên ${chain.name}. Cần ${draft.fields.amount} USDC, hiện có ${formatUnits(usdcBalance, 6)} USDC.`,
+      translateClient("fund.insufficientUsdc", {
+        chain: chain.name,
+        required: draft.fields.amount,
+        current: formatUnits(usdcBalance, 6),
+      }),
     );
   }
 
@@ -1012,6 +1697,254 @@ async function fundCircleWalletFromMetaMask(draft: ParsedCommand) {
   });
 }
 
+type BridgeEstimateSummary = {
+  amount: string;
+  sourceDebit: string;
+  estimatedFeeTotal: string;
+  feeItems: Array<{ token: string; amount: string; type: string }>;
+  gasItems: Array<{ blockchain: string; token: string; fee: string; name: string }>;
+};
+
+type BridgeExecutionResult = {
+  sourceChain: string;
+  destinationChain: string;
+  sourceChainLabel?: string;
+  destinationChainLabel?: string;
+  amount: string;
+  recipientAddress: string;
+  recipientMode: "self" | "external";
+  mintMode: CctpBridgeMintMode;
+  transferSpeed: CctpBridgeTransferSpeed;
+  sourceDebit: string;
+  estimatedFeeTotal: string;
+  estimate: BridgeEstimateSummary;
+  sourceTxHash?: string;
+  mintTxHash?: string;
+  transferId?: string;
+  recordedTransaction?: unknown;
+  proofTxHash?: string;
+};
+
+function bridgeFeeTotal(estimate: any) {
+  return (estimate?.fees ?? []).reduce((sum: number, fee: any) => sum + Number(fee?.amount ?? 0), 0);
+}
+
+function bridgeEstimateSummary(estimate: any, amount: string): BridgeEstimateSummary {
+  const totalFee = bridgeFeeTotal(estimate);
+  const sourceDebit = Number(amount) + totalFee;
+  return {
+    amount,
+    sourceDebit: sourceDebit.toString(),
+    estimatedFeeTotal: totalFee.toString(),
+    feeItems: (estimate?.fees ?? []).map((fee: any) => ({
+      token: fee?.token ?? "USDC",
+      amount: String(fee?.amount ?? "0"),
+      type: String(fee?.type ?? "provider"),
+    })),
+    gasItems: (estimate?.gasFees ?? []).map((fee: any) => ({
+      blockchain: String(fee?.blockchain ?? ""),
+      token: String(fee?.token ?? ""),
+      fee: String(fee?.fees?.fee ?? "0"),
+      name: String(fee?.name ?? ""),
+    })),
+  };
+}
+
+function bridgeTxHashFromSteps(steps: any[], match: RegExp) {
+  const step = steps.find((item) => match.test(String(item?.name ?? item?.method ?? "")));
+  return step?.txHash ?? step?.values?.txHash ?? step?.receipt?.transactionHash ?? undefined;
+}
+
+async function buildBridgeContext(draft: ParsedCommand, options?: { promptForAccount?: boolean }) {
+  const sourceChain = normalizeCctpBridgeChain(draft.fields.sourceChain);
+  const destinationChain = normalizeCctpBridgeChain(draft.fields.destinationChain);
+
+  if (!sourceChain || !destinationChain) {
+    throw new Error(translateClient("bridge.error.invalidRoute"));
+  }
+
+  if (sourceChain === destinationChain) {
+    throw new Error(translateClient("bridge.error.sameChain"));
+  }
+
+  const amount = draft.fields.amount;
+  if (!amount) {
+    throw new Error(translateClient("bridge.error.missingAmount"));
+  }
+
+  const mintMode = (draft.fields.bridgeMintMode as CctpBridgeMintMode) || bridgeModeFrom(draft.raw);
+  const transferSpeed =
+    (draft.fields.transferSpeed as CctpBridgeTransferSpeed) || bridgeSpeedFrom(draft.raw);
+  const recipientMode: "self" | "external" =
+    draft.fields.recipientMode === "external" ? "external" : "self";
+  const recipientAddress = draft.fields.recipientAddress?.trim() ?? "";
+
+  if (recipientMode === "external" && mintMode === "manual_mint") {
+    throw new Error(translateClient("bridge.error.externalManual"));
+  }
+
+  const account = options?.promptForAccount === false ? await getConnectedMetaMaskAccount() : await requestMetaMaskAccount();
+  if (!account) {
+    throw new Error(translateClient("bridge.error.connectMetamask"));
+  }
+  const adapter = await createAdapterFromProvider({ provider: window.ethereum as any });
+  const runtimeChains = await getSupportedCctpBridgeChains();
+  const runtimeMap = Object.fromEntries(runtimeChains.map((chain) => [chain.key, chain])) as Record<
+    string,
+    CctpBridgeRuntimeChain
+  >;
+  const sourceRuntime = runtimeMap[sourceChain];
+  const destinationRuntime = runtimeMap[destinationChain];
+
+  if (!sourceRuntime || !destinationRuntime) {
+    throw new Error(translateClient("bridge.error.unsupportedRoute"));
+  }
+
+  if (mintMode === "auto_forwarding" && !destinationRuntime.canForwardToDestination) {
+    throw new Error(translateClient("bridge.error.forwardingUnsupported", { chain: destinationRuntime.label }));
+  }
+
+  const resolvedRecipient =
+    recipientMode === "external" ? recipientAddress : account;
+
+  if (!resolvedRecipient || !/^0x[a-fA-F0-9]{40}$/.test(resolvedRecipient)) {
+    throw new Error(translateClient("bridge.error.invalidRecipient"));
+  }
+
+  const sourceParams = {
+    adapter,
+    chain: sourceRuntime.bridgeKitChain,
+  };
+  const destinationParams =
+    ({
+      adapter,
+      chain: destinationRuntime.bridgeKitChain,
+      recipientAddress:
+        recipientMode === "external" || mintMode === "auto_forwarding" ? resolvedRecipient : undefined,
+    } as any);
+
+  return {
+    account,
+    amount,
+    mintMode,
+    transferSpeed,
+    recipientMode,
+    recipientAddress: resolvedRecipient,
+    sourceChain,
+    destinationChain,
+    sourceRuntime,
+    destinationRuntime,
+    sourceParams,
+    destinationParams,
+  };
+}
+
+async function estimateBridgeDraft(draft: ParsedCommand) {
+  const context = await buildBridgeContext(draft, { promptForAccount: false });
+  const kit = new BridgeKit();
+  const estimate = await kit.estimate({
+    from: context.sourceParams as any,
+    to: context.destinationParams,
+    amount: context.amount,
+    token: "USDC",
+    config: {
+      transferSpeed: context.transferSpeed,
+    } as any,
+  });
+
+  return {
+    ...context,
+    estimate,
+    summary: bridgeEstimateSummary(estimate, context.amount),
+  };
+}
+
+async function bridgeUsdcWithMetaMask(draft: ParsedCommand): Promise<BridgeExecutionResult> {
+  try {
+    const context = await buildBridgeContext(draft, { promptForAccount: true });
+    const kit = new BridgeKit();
+    const estimate = await kit.estimate({
+      from: context.sourceParams as any,
+      to: context.destinationParams,
+      amount: context.amount,
+      token: "USDC",
+      config: {
+        transferSpeed: context.transferSpeed,
+      } as any,
+    });
+    const estimateSummary = bridgeEstimateSummary(estimate, context.amount);
+
+    await switchMetaMaskChainByKey(context.sourceChain);
+
+    const result = await kit.bridge({
+      from: context.sourceParams as any,
+      to: context.destinationParams,
+      amount: context.amount,
+      token: "USDC",
+      config: {
+        transferSpeed: context.transferSpeed,
+      } as any,
+    });
+
+    if (result?.state !== "success") {
+      throw new Error(translateClient("bridge.error.incomplete"));
+    }
+
+    const steps = Array.isArray(result?.steps) ? result.steps : [];
+    const sourceTxHash = bridgeTxHashFromSteps(steps, /burn/i);
+    const mintTxHash = bridgeTxHashFromSteps(steps, /mint/i);
+    const transferId =
+      (steps.find((step: any) => /attestation|mint/i.test(String(step?.name ?? step?.method ?? ""))) as any)
+        ?.transferId ?? (result as any)?.transferId;
+
+    const recorded = await requestJson("/api/cctp/bridge/record", {
+      method: "POST",
+      body: JSON.stringify({
+        sourceChain: context.sourceChain,
+        destinationChain: context.destinationChain,
+        amount: context.amount,
+        sourceTxHash,
+        mintTxHash,
+        userAddress: context.account,
+        recipientAddress: context.recipientAddress,
+        recipientMode: context.recipientMode,
+        mintMode: context.mintMode,
+        transferSpeed: context.transferSpeed,
+        transferId,
+        status: "success",
+      }),
+    }).catch(() => null);
+
+    return {
+      sourceChain: context.sourceChain,
+      destinationChain: context.destinationChain,
+      sourceChainLabel: context.sourceRuntime.label,
+      destinationChainLabel: context.destinationRuntime.label,
+      amount: context.amount,
+      recipientAddress: context.recipientAddress,
+      recipientMode: context.recipientMode,
+      mintMode: context.mintMode,
+      transferSpeed: context.transferSpeed,
+      sourceDebit: estimateSummary.sourceDebit,
+      estimatedFeeTotal: estimateSummary.estimatedFeeTotal,
+      estimate: estimateSummary,
+      sourceTxHash,
+      mintTxHash,
+      transferId,
+      recordedTransaction: recorded?.transaction,
+      proofTxHash: recorded?.transaction?.proof_tx_hash,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Bridge failed";
+    throw new Error(
+      bridgeErrorWithFaucet(message, [
+        draft.fields.sourceChain,
+        draft.fields.bridgeMintMode === "manual_mint" ? draft.fields.destinationChain : null,
+      ]),
+    );
+  }
+}
+
 async function executeCommand(draft: ParsedCommand) {
   if (draft.command === "link") {
     if (draft.fields.walletType === "metamask") {
@@ -1022,6 +1955,14 @@ async function executeCommand(draft: ParsedCommand) {
 
   if (draft.command === "fund") {
     return fundCircleWalletFromMetaMask(draft);
+  }
+
+  if (draft.command === "bridge") {
+    return bridgeUsdcWithMetaMask(draft);
+  }
+
+  if (draft.command === "swap") {
+    return swapWithMetaMask(draft);
   }
 
   if (draft.command === "wallet") {
@@ -1079,7 +2020,7 @@ async function executeCommand(draft: ParsedCommand) {
         recipient: draft.fields.recipient,
         sourceChain: draft.fields.sourceChain,
         destinationChain: draft.fields.destinationChain,
-        mintGasMode: draft.fields.mintGasMode ?? "auto_forwarding",
+        mintGasMode: draft.fields.mintGasMode ?? "manual",
       }),
     });
   }
@@ -1156,12 +2097,16 @@ async function executeCommand(draft: ParsedCommand) {
 }
 
 export function PayCmdApp() {
-  const { registerStatusWriter, runServerCommand, unreadCount } = usePayCmdRuntime();
+  const { t, locale } = useI18n();
+  const { registerStatusWriter, runServerCommand, refreshBalance } = usePayCmdRuntime();
   const [input, setInput] = useState("");
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
+  const [chatThreads, setChatThreads] = useState<ChatThreadSummary[]>([]);
+  const [isThreadListOpen, setIsThreadListOpen] = useState(false);
+  const [isLoadingThreads, setIsLoadingThreads] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
@@ -1183,10 +2128,13 @@ export function PayCmdApp() {
   const [isSlowAskSurfNoticeDismissed, setIsSlowAskSurfNoticeDismissed] = useState(false);
   const [, setExecutions] = useState<ExecutionItem[]>([]);
   const [scrollMetrics, setScrollMetrics] = useState({ top: 0, height: 1, client: 1 });
+  const scrollMetricsRef = useRef(scrollMetrics);
+  const scrollMetricsFrameRef = useRef<number | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const previousScrollHeightRef = useRef<number | null>(null);
   const isLoadingOlderRef = useRef(false);
   const skipNextAutoScrollRef = useRef(false);
+  const shouldAutoScrollRef = useRef(true);
   const draftInputBeforeHistoryRef = useRef("");
   const submitLockRef = useRef(false);
   const aiAbortControllerRef = useRef<AbortController | null>(null);
@@ -1261,6 +2209,63 @@ export function PayCmdApp() {
     ]);
   }
 
+  function touchThreadPreview(activeThreadId: string, message: Omit<ChatMessage, "id">) {
+    const timestamp = new Date().toISOString();
+    setChatThreads((current) => {
+      const existing = current.find((thread) => thread.id === activeThreadId);
+      const updatedThread: ChatThreadSummary =
+        existing != null
+          ? {
+              ...existing,
+              last_message_preview: message.text,
+              last_message_at: timestamp,
+              last_message_role: message.role,
+              last_message_kind: message.kind ?? "text",
+              message_count: (existing.message_count ?? 0) + 1,
+              updated_at: timestamp,
+            }
+          : {
+              id: activeThreadId,
+              user_id: userId ?? "",
+              title: "New chat",
+              status: "active",
+              created_at: timestamp,
+              updated_at: timestamp,
+              last_message_preview: message.text,
+              last_message_at: timestamp,
+              last_message_role: message.role,
+              last_message_kind: message.kind ?? "text",
+              message_count: 1,
+            };
+
+      return [updatedThread, ...current.filter((thread) => thread.id !== activeThreadId)].sort(
+        (left, right) => threadSortTime(right) - threadSortTime(left),
+      );
+    });
+  }
+
+  async function maybeUpdateThreadTitleFromMessage(activeThreadId: string, text: string) {
+    if (!userId) return;
+    const existing = chatThreads.find((thread) => thread.id === activeThreadId);
+    if (existing && !isGenericThreadTitle(existing.title)) return;
+
+    const title = inferThreadTitle(text);
+    setChatThreads((current) =>
+      current.map((thread) => (thread.id === activeThreadId ? { ...thread, title } : thread)),
+    );
+
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("chat_threads")
+      .update({ title })
+      .eq("id", activeThreadId)
+      .eq("user_id", userId);
+
+    if (error) {
+      console.error("Failed to update chat thread title", error);
+    }
+  }
+
   async function saveMessage(message: Omit<ChatMessage, "id">) {
     if (!threadId || !userId) {
       addMessage(message);
@@ -1301,6 +2306,10 @@ export function PayCmdApp() {
 
     const savedMessage = mapRowToMessage(data as ChatMessageRow);
     setMessages((current) => [...current, savedMessage]);
+    touchThreadPreview(threadId, savedMessage);
+    if (savedMessage.role === "user") {
+      void maybeUpdateThreadTitleFromMessage(threadId, savedMessage.text);
+    }
     return savedMessage;
   }
 
@@ -1414,6 +2423,7 @@ export function PayCmdApp() {
           recentMessages,
           surfMode,
           effort,
+          locale,
         }),
       })) as CryptoResearchResult;
 
@@ -1444,7 +2454,7 @@ export function PayCmdApp() {
       const message = error instanceof Error ? error.message : "AskSurf research failed";
       await saveMessage({
         role: "assistant",
-        text: `AskSurf chưa lấy được thông tin: ${message}`,
+        text: t("asksurf.failed", { message }),
         provider: "asksurf",
         surfMode,
         effort,
@@ -1513,7 +2523,7 @@ export function PayCmdApp() {
 
       await saveMessage({
         role: "assistant",
-        text: result.assistantText || "Mình cần thêm thông tin để tạo command.",
+        text: result.assistantText || t("ai.needsMoreInfo"),
         provider: "openai",
         model: result.modelProfile,
       });
@@ -1526,14 +2536,14 @@ export function PayCmdApp() {
       await saveMessage({
         role: "assistant",
         text: looksLikeResearchQuestion(value)
-          ? "PayCMD đang ở chế độ lệnh/thanh toán nên OpenAI Router chưa xử lý được câu hỏi research này. Chuyển sang AskSurf để hỏi trực tiếp và nhận bài research có nguồn, sections, bảng nếu có dữ liệu."
-          : `AI chưa xử lý được câu này: ${message}`,
+          ? t("ai.researchModeHint")
+          : t("ai.unhandled", { message }),
         provider: "openai",
         actions: looksLikeResearchQuestion(value)
           ? [
               {
                 kind: "switch_to_asksurf",
-                label: "Hỏi bằng AskSurf",
+                label: t("asksurf.askButton"),
                 query: value,
                 surfMode: "research",
                 effort: selectedSurfEffort,
@@ -1560,7 +2570,7 @@ export function PayCmdApp() {
       title: draft.summary,
       createdAt: now.toISOString(),
       gateway: {
-        network: "Arc Testnet, Base Sepolia, Avalanche Fuji",
+        network: "Circle Gateway testnets",
         rail: "Circle Gateway",
         mode: "real",
       },
@@ -1570,11 +2580,64 @@ export function PayCmdApp() {
   function resultText(draft: ParsedCommand, result: any) {
     if (draft.command === "link") {
       const address = result?.externalWallet?.wallet_address;
-      return address ? `Đã link MetaMask ${address}.` : "Đã link MetaMask.";
+      return address ? t("runtime.linkedMetamask", { address }) : t("runtime.linkedMetamaskNoAddress");
     }
 
     if (draft.command === "fund") {
-      return `Fund ${result.amount} USDC từ MetaMask vào Circle wallet trên ${result.chain}. Tx: ${result.txHash} (${result.status}).`;
+      return t("runtime.fundSuccess", {
+        amount: result.amount,
+        chain: result.chain,
+        txHash: result.txHash,
+        status: result.status,
+      });
+    }
+
+    if (draft.command === "bridge") {
+      const recipientLabel =
+        result?.recipientMode === "external"
+          ? result?.recipientAddress ?? draft.fields.recipientAddress
+          : t("bridge.myWallet");
+      const sourceDebit = Number(result?.sourceDebit ?? 0);
+      const bridgeFee = Number(result?.estimatedFeeTotal ?? 0);
+      const sourceChain = result?.sourceChain ?? draft.fields.sourceChain;
+      const destinationChain = result?.destinationChain ?? draft.fields.destinationChain;
+      const sourceMeta = getChainMeta(sourceChain);
+      const destinationMeta = getChainMeta(destinationChain);
+      const sourceGasSymbol = sourceMeta?.nativeSymbol ?? "ETH";
+      return [
+        t("bridge.success", {
+          source: sourceMeta?.label ?? sourceChain,
+          destination: destinationMeta?.label ?? destinationChain,
+        }),
+        `${t("bridge.recipient")}: ${recipientLabel}`,
+        t("bridge.recipientReceives", { amount: formatDecimalAmount(result?.amount ?? draft.fields.amount) }),
+        sourceDebit > 0 ? t("bridge.sourceSpend", { amount: formatDecimalAmount(sourceDebit) }) : "",
+        bridgeFee > 0 ? t("bridge.bridgeFees", { amount: formatDecimalAmount(bridgeFee) }) : "",
+        t("bridge.sourceGas", { symbol: sourceGasSymbol, chain: sourceMeta?.label ?? sourceChain }),
+        result?.mintMode === "manual_mint"
+          ? t("bridge.destinationGasManual", {
+              symbol: destinationMeta?.nativeSymbol ?? "native",
+              chain: destinationMeta?.label ?? destinationChain,
+            })
+          : t("bridge.destinationGasForwarder"),
+        result?.sourceTxHash ? t("bridge.sourceTx", { hash: result.sourceTxHash }) : "",
+        result?.mintTxHash ? t("bridge.mintTx", { hash: result.mintTxHash }) : "",
+        result?.transferId ? t("bridge.transferId", { id: result.transferId }) : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    }
+
+    if (draft.command === "swap") {
+      return [
+        `Swap success: ${result.amountIn ?? draft.fields.amount} ${result.tokenIn ?? draft.fields.tokenIn} -> ${result.tokenOut ?? draft.fields.tokenOut}`,
+        `Estimated receive: ${formatDecimalAmount(result.estimatedAmountOut, 8)} ${result.tokenOut ?? draft.fields.tokenOut}`,
+        `Minimum receive: ${formatDecimalAmount(result.minimumAmountOut, 8)} ${result.tokenOut ?? draft.fields.tokenOut}`,
+        `Route: ${(result.route ?? []).join(" -> ")}`,
+        result.approvalTxHash ? `Approve tx: ${result.approvalTxHash}` : "",
+        result.txHash ? `Swap tx: ${result.txHash}` : "",
+        result.proofTxHash ? `Payna proof: ${result.proofTxHash}` : "",
+      ].filter(Boolean).join("\n");
     }
 
     if (draft.command === "wallet") {
@@ -1585,21 +2648,21 @@ export function PayCmdApp() {
 
         return address
           ? alreadyExists
-            ? `Wallet đã tồn tại: ${address}`
-            : `Wallet đã sẵn sàng: ${address}`
-          : result?.message ?? "Wallet đã sẵn sàng.";
+            ? t("runtime.walletExists", { address })
+            : t("runtime.walletReady", { address })
+          : t("runtime.walletReadyNoAddress");
       }
       if (draft.fields.action === "balance") {
         const chain = draft.fields.chain;
         const total = totalBalanceSource(result?.balances ?? [], "wallet", chain);
 
         return chain
-          ? `Circle SCA wallet trên ${chain}: ${formatDecimalAmount(total)} USDC.`
-          : `Circle SCA wallet total: ${formatDecimalAmount(total)} USDC.`;
+          ? t("runtime.walletBalance", { chain, amount: formatDecimalAmount(total) })
+          : t("runtime.walletBalanceAll", { amount: formatDecimalAmount(total) });
       }
       return result?.hasWallet
-        ? `Wallet active: ${result.scaWallet?.address ?? result.scaWallet?.wallet_address}`
-        : "Chưa có Circle wallet. Dùng /wallet create để tạo.";
+        ? t("runtime.walletActive", { address: result.scaWallet?.address ?? result.scaWallet?.wallet_address })
+        : t("runtime.walletMissing");
     }
 
     if (draft.command === "balance") {
@@ -1614,15 +2677,15 @@ export function PayCmdApp() {
 
     if (draft.command === "deposit") {
       if (result?.status === "pending_gateway_finality") {
-        return result?.message ?? `Đã gửi deposit ${result.amount} USDC từ ${result.chain}. Đang chờ Gateway finality.`;
+        return t("runtime.depositPending", { amount: result.amount, chain: result.chain });
       }
-      return `Deposit thành công: ${result.amount} USDC từ ${result.chain}.`;
+      return t("runtime.depositSuccess", { amount: result.amount, chain: result.chain });
     }
 
     if (draft.command === "withdraw") {
       const fee = Number(result?.estimatedGatewayFee ?? 0);
       const feeText = fee > 0 ? ` Fee: ${formatDecimalAmount(fee)} USDC.` : "";
-      return `Withdraw thành công: ${result.amount} USDC từ Gateway ${result.chain} về Circle SCA wallet.${feeText}`;
+      return t("runtime.withdrawSuccess", { amount: result.amount, chain: result.chain, fee: feeText });
     }
 
     function gatewayFeeText(transfer: any) {
@@ -1632,8 +2695,8 @@ export function PayCmdApp() {
       const txRef = transfer?.mintTxHash ?? transfer?.txHash ?? transfer?.transferId;
       const manualHint =
         transfer?.forwarding
-          ? "Đang dùng Auto forwarding. Muốn rẻ hơn và tự trả gas destination: thêm `manual` hoặc `no forwarding` vào command."
-          : "Đang dùng Manual mint gas. SCA/signer ở destination đã trả native gas.";
+          ? t("runtime.gatewayFeeAutoHint")
+          : t("runtime.gatewayFeeManualHint");
 
       if (!amount && !estimatedFee) {
         return txRef ? `ID: ${txRef}\nMode: ${manualHint}` : `Mode: ${manualHint}`;
@@ -1642,7 +2705,7 @@ export function PayCmdApp() {
       const feeLine =
         estimatedFee > 0
           ? `${formatDecimalAmount(estimatedFee)} USDC`
-          : "Gateway không trả breakdown";
+          : t("runtime.gatewayNoBreakdown");
 
       return [
         `Recipient: ${formatDecimalAmount(amount)} USDC`,
@@ -1659,13 +2722,13 @@ export function PayCmdApp() {
 
     if (draft.command === "transfer") {
       const autoDeposit = result.autoDeposit
-        ? ` Đã auto-deposit ${result.autoDepositedAmount} USDC trước khi transfer.`
+        ? t("runtime.autoDeposit", { amount: result.autoDepositedAmount })
         : "";
       const forwarding = result.forwarding
-        ? " Circle Forwarding Service sẽ mint hộ ở destination; không cần gas ở chain đích."
+        ? t("runtime.forwardingMint")
         : "";
       return [
-        `Transfer success: ${result.sourceChain} -> ${result.destinationChain}`,
+        t("runtime.transferSuccess", { source: result.sourceChain, destination: result.destinationChain }),
         autoDeposit.trim(),
         forwarding.trim(),
         gatewayFeeText(result),
@@ -1675,7 +2738,7 @@ export function PayCmdApp() {
     if (draft.command === "pay") {
       const payment = result.payment;
       const recipient = payment?.recipient?.label ?? draft.fields.recipient;
-      const forwarding = result.transfer?.forwarding ? " Forwarding mint hộ ở destination." : "";
+      const forwarding = result.transfer?.forwarding ? t("runtime.forwardingMint") : "";
       return [
         `Paid ${payment?.amount ?? draft.fields.amount} USDC to ${recipient} on ${payment?.destinationChain}`,
         forwarding.trim(),
@@ -1684,23 +2747,27 @@ export function PayCmdApp() {
     }
 
     if (draft.command === "request") {
-      return `Payment request đã tạo: ${result.paymentUrl}${result.qrImageUrl ? ` · QR: ${result.qrImageUrl}` : ""}`;
+      return t("runtime.paymentRequestCreated", {
+        url: result.paymentUrl,
+        qr: result.qrImageUrl ? ` · QR: ${result.qrImageUrl}` : "",
+      });
     }
 
     if (draft.command === "payroll") {
       const results = result.results ?? [];
       const successCount = results.filter((item: any) => item.status === "success").length;
-      return `Payroll ${result.status}: ${successCount}/${results.length} payment thành công.`;
+      return t("runtime.payrollResult", { status: result.status, success: successCount, total: results.length });
     }
 
     if (draft.command === "contacts") {
       if (draft.fields.action === "list") {
-        return `Có ${(result.contacts ?? []).length} contact.`;
+        return t("runtime.contactsCount", { count: (result.contacts ?? []).length });
       }
-      const resolution = result.resolution === "internal" ? "internal PayCMD user" : "external wallet";
+      const resolution = result.resolution === "internal" ? "internal Payna user" : "external wallet";
+      const name = result.contact?.display_name ?? draft.fields.name;
       return result.warning?.message
-        ? `Đã lưu contact ${result.contact?.display_name ?? draft.fields.name} (${resolution}). ${result.warning.message}`
-        : `Đã lưu contact ${result.contact?.display_name ?? draft.fields.name} (${resolution}).`;
+        ? t("runtime.contactSavedWarning", { name, resolution, warning: result.warning.message })
+        : t("runtime.contactSaved", { name, resolution });
     }
 
     if (draft.command === "gas") {
@@ -1710,48 +2777,78 @@ export function PayCmdApp() {
       if (sca || signer || result?.gatewaySignerError) {
         const scaText = sca
           ? sca.hasGas
-            ? `SCA có ${formatNativeGasBalance(sca.balance, result.chain)}`
-            : `SCA chưa có gas (${sca.address})`
-          : "SCA chưa có ví";
+            ? t("runtime.gasScaHas", { balance: formatNativeGasBalance(sca.balance, result.chain) })
+            : t("runtime.gasScaMissing", { address: sca.address })
+          : t("runtime.gasScaNoWallet");
         const signerText = signer
           ? signer.hasGas
-            ? `Gateway signer có ${formatNativeGasBalance(signer.balance, result.chain)}`
-            : `Gateway signer chưa có gas (${signer.address})`
-          : `Gateway signer chưa kiểm tra được${result?.gatewaySignerError ? `: ${result.gatewaySignerError}` : ""}`;
+            ? t("runtime.gasSignerHas", { balance: formatNativeGasBalance(signer.balance, result.chain) })
+            : t("runtime.gasSignerMissing", { address: signer.address })
+          : t("runtime.gasSignerUnknown", { error: result?.gatewaySignerError ? `: ${result.gatewaySignerError}` : "" });
 
         return `${result.chain}: ${scaText}. ${signerText}.`;
       }
 
       return result?.hasGas
-        ? `${result.chain}: có gas. Balance native: ${formatNativeGasBalance(result.balance, result.chain)}.`
-        : `${result.chain}: chưa có native gas cho wallet ${result.address}.`;
+        ? t("runtime.gasHas", { chain: result.chain, balance: formatNativeGasBalance(result.balance, result.chain) })
+        : t("runtime.gasMissing", { chain: result.chain, address: result.address });
     }
 
     if (draft.command === "gateway") {
       if (draft.fields.action === "balance") {
         const chain = draft.fields.chain;
-        const total = totalBalanceSource(result?.balances ?? [], "gateway", chain);
+        const balances = result?.balances ?? [];
+        const total = totalBalanceSource(balances, "gateway", chain);
+
+        if (!chain && Array.isArray(balances) && balances.length) {
+          const lines = balances
+            .filter((row) => row?.source === "gateway")
+            .map((row) => `${row.chain}: ${formatDecimalAmount(row.amount ?? "0")} USDC`);
+          if (lines.length) {
+            return `${t("runtime.gatewayBalanceResultAll", { amount: formatDecimalAmount(total) })}\n${lines.join("\n")}`;
+          }
+        }
 
         return chain
-          ? `Gateway balance trên ${chain}: ${formatDecimalAmount(total)} USDC.`
-          : `Gateway balance total: ${formatDecimalAmount(total)} USDC.`;
+          ? t("runtime.gatewayBalanceResult", { chain, amount: formatDecimalAmount(total) })
+          : t("runtime.gatewayBalanceResultAll", { amount: formatDecimalAmount(total) });
       }
       return `Gateway online. Domains: ${(result?.domains ?? []).length}.`;
     }
 
     if (draft.command === "history") {
       const rows = Array.isArray(result) ? result : [];
-      if (!rows.length) return "Chưa có transaction history.";
-      return `Có ${rows.length} transaction. Gần nhất: ${rows[0].tx_type} ${rows[0].amount} trên ${rows[0].chain}.`;
+      if (!rows.length) return t("runtime.historyEmpty");
+      return t("runtime.historySummary", {
+        count: rows.length,
+        type: rows[0].tx_type,
+        amount: rows[0].amount,
+        chain: rows[0].chain,
+      });
     }
 
-    return "Command đã hoàn tất.";
+    return t("runtime.commandDone");
   }
 
   async function runForegroundCommand(draft: ParsedCommand) {
     if (draft.missingFields.length) return;
+    shouldAutoScrollRef.current = true;
 
     const execution = createExecution(draft);
+    const title =
+      draft.command === "bridge"
+        ? t("bridge.title", {
+            amount: draft.fields.amount,
+            source: draft.fields.sourceChain,
+            destination: draft.fields.destinationChain,
+          })
+        : draft.command === "transfer"
+          ? t("transfer.title", {
+              amount: draft.fields.amount,
+              source: draft.fields.sourceChain,
+              destination: draft.fields.destinationChain,
+            })
+          : execution.title;
     setActiveDraftId(null);
 
     const running = { ...execution, status: "running" as const };
@@ -1759,20 +2856,20 @@ export function PayCmdApp() {
 
     if (usesGatewayPipeline(draft)) {
       setExecutions((current) => [execution, ...current]);
-      await addSystemStatus(`${execution.title} đã được đưa vào hàng đợi.`, execution);
+      await addSystemStatus(t("runtime.queued", { title }), execution);
 
       setExecutions((current) =>
         current.map((item) => (item.id === execution.id ? running : item)),
       );
-      await addSystemStatus(`${execution.title} đang được xử lý.`, running);
+      await addSystemStatus(t("runtime.running", { title }), running);
 
       setExecutions((current) =>
         current.map((item) => (item.id === execution.id ? waiting : item)),
       );
-      await addSystemStatus(`${execution.title} đang gọi Circle Gateway.`, waiting);
+      await addSystemStatus(t("runtime.gateway", { title }), waiting);
     } else {
       setExecutions((current) => [running, ...current]);
-      await addSystemStatus(`${execution.title} đang kiểm tra.`, running);
+      await addSystemStatus(t("runtime.checking", { title }), running);
     }
 
     try {
@@ -1788,6 +2885,13 @@ export function PayCmdApp() {
         current.map((item) => (item.id === execution.id ? success : item)),
       );
       await addSystemStatus(resultText(draft, result), success);
+
+      if (usesGatewayPipeline(draft) || draft.command === "balance" || draft.command === "bridge" || draft.command === "swap") {
+        void refreshBalance();
+        window.setTimeout(() => void refreshBalance(), 5_000);
+        window.setTimeout(() => void refreshBalance(), 15_000);
+        window.dispatchEvent(new Event("ra:balance-changed"));
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Command failed";
       const errorCode = (error as { code?: string })?.code;
@@ -1815,7 +2919,7 @@ export function PayCmdApp() {
     if (!threadId || !userId) {
       await saveMessage({
         role: "assistant",
-        text: "Chat chưa sẵn sàng để chạy command nền. Đợi lịch sử tải xong rồi thử lại.",
+        text: t("runtime.chatNotReady"),
         provider: "paycmd",
       });
       return;
@@ -1893,14 +2997,149 @@ export function PayCmdApp() {
     setIsLoadingOlder(false);
   }
 
+  function mappedMessagesFromRows(rows: ChatMessageRow[]) {
+    return rows.map((row) => ({
+      ...mapRowToMessage(row),
+      createdAt: row.created_at,
+    }));
+  }
+
+  async function loadChatThreads(nextUserId = userId) {
+    if (!nextUserId) return;
+
+    setIsLoadingThreads(true);
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("chat_threads")
+      .select("id,user_id,title,status,created_at,updated_at,last_message_preview,last_message_at,last_message_role,last_message_kind,message_count")
+      .eq("user_id", nextUserId)
+      .eq("status", "active")
+      .order("last_message_at", { ascending: false, nullsFirst: false })
+      .order("updated_at", { ascending: false })
+      .limit(THREAD_LIST_PAGE_SIZE);
+
+    if (error) {
+      console.error("Failed to load chat threads", error);
+      setIsLoadingThreads(false);
+      return;
+    }
+
+    setChatThreads((data ?? []) as ChatThreadSummary[]);
+    setIsLoadingThreads(false);
+  }
+
+  async function loadThreadMessages(nextThreadId: string, nextUserId = userId) {
+    if (!nextUserId) return;
+
+    shouldAutoScrollRef.current = true;
+    setIsLoadingHistory(true);
+    setThreadId(nextThreadId);
+    setMessages([]);
+    setActiveDraftId(null);
+    previousScrollHeightRef.current = null;
+    skipNextAutoScrollRef.current = false;
+
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("chat_messages")
+      .select("*")
+      .eq("thread_id", nextThreadId)
+      .eq("user_id", nextUserId)
+      .order("created_at", { ascending: false })
+      .limit(MESSAGE_PAGE_SIZE);
+
+    if (error) {
+      console.error("Failed to load chat messages", error);
+      setIsLoadingHistory(false);
+      return;
+    }
+
+    const recentRows = ((data ?? []) as ChatMessageRow[]).reverse();
+    const mappedMessages = mappedMessagesFromRows(recentRows);
+    setHasOlderMessages(recentRows.length === MESSAGE_PAGE_SIZE);
+    setMessages(mappedMessages);
+    setActiveDraftId(
+      [...mappedMessages]
+        .reverse()
+        .find((message) => message.kind === "preview" && message.draftState === "active")
+        ?.id ?? null,
+    );
+    setIsLoadingHistory(false);
+
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.set("thread", nextThreadId);
+    window.history.replaceState(null, "", nextUrl.toString());
+  }
+
+  async function createNewChatThread() {
+    if (!userId || isLoadingThreads) return;
+
+    shouldAutoScrollRef.current = true;
+    setIsLoadingThreads(true);
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("chat_threads")
+      .insert({ user_id: userId, title: "New chat" })
+      .select("*")
+      .single();
+
+    if (error || !data) {
+      console.error("Failed to create chat thread", error);
+      setIsLoadingThreads(false);
+      return;
+    }
+
+    const createdThread = data as ChatThreadSummary;
+    setChatThreads((current) => [createdThread, ...current]);
+    setThreadId(createdThread.id);
+    setMessages([]);
+    setHasOlderMessages(false);
+    setActiveDraftId(null);
+    setIsLoadingHistory(false);
+    setIsThreadListOpen(false);
+    setIsLoadingThreads(false);
+
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.set("thread", createdThread.id);
+    window.history.replaceState(null, "", nextUrl.toString());
+  }
+
+  function updateScrollMetricsFromViewport(viewport: HTMLDivElement) {
+    const nextMetrics = {
+      top: Math.round(viewport.scrollTop),
+      height: viewport.scrollHeight,
+      client: viewport.clientHeight,
+    };
+    const previousMetrics = scrollMetricsRef.current;
+
+    if (
+      previousMetrics.top === nextMetrics.top &&
+      previousMetrics.height === nextMetrics.height &&
+      previousMetrics.client === nextMetrics.client
+    ) {
+      return;
+    }
+
+    scrollMetricsRef.current = nextMetrics;
+    setScrollMetrics(nextMetrics);
+  }
+
+  function scheduleScrollMetricsUpdate() {
+    if (scrollMetricsFrameRef.current !== null) return;
+
+    scrollMetricsFrameRef.current = window.requestAnimationFrame(() => {
+      scrollMetricsFrameRef.current = null;
+      const viewport = viewportRef.current;
+      if (!viewport) return;
+      updateScrollMetricsFromViewport(viewport);
+    });
+  }
+
   function handleViewportScroll() {
     const viewport = viewportRef.current;
     if (!viewport) return;
-    setScrollMetrics({
-      top: viewport.scrollTop,
-      height: viewport.scrollHeight,
-      client: viewport.clientHeight,
-    });
+    shouldAutoScrollRef.current = isNearViewportBottom(viewport);
+    scheduleScrollMetricsUpdate();
     if (viewport.scrollTop < 48) {
       void loadOlderMessages();
     }
@@ -1921,6 +3160,7 @@ export function PayCmdApp() {
   }
 
   async function submitValue(value: string, options?: { forceAskSurf?: boolean }) {
+    shouldAutoScrollRef.current = true;
     await saveMessage({ role: "user", text: value });
     setInput("");
     setHistoryIndex(null);
@@ -1932,7 +3172,7 @@ export function PayCmdApp() {
       text: message.text,
     }));
 
-    if (!value.startsWith("/") && (options?.forceAskSurf || chatMode === "asksurf")) {
+    if (!value.startsWith("/") && (options?.forceAskSurf || (chatMode === "asksurf" && !looksLikePayCmdAction(value)))) {
       await askCryptoResearch(value, recentMessages, {
         surfMode: selectedSurfMode,
         effort: selectedSurfEffort,
@@ -1945,12 +3185,12 @@ export function PayCmdApp() {
       return;
     }
 
-    const parsed = parsePayCmd(value);
+    const parsed = parsePayCmd(value, locale);
 
     if (parsed.missingFields.length) {
       await saveMessage({
         role: "assistant",
-        text: missingFieldQuestion(parsed.missingFields[0]),
+        text: missingFieldQuestion(parsed.missingFields[0], t),
         provider: "paycmd",
       });
       return;
@@ -2135,6 +3375,7 @@ export function PayCmdApp() {
       return;
     }
     if (previousScrollHeightRef.current !== null) return;
+    if (!shouldAutoScrollRef.current) return;
     window.requestAnimationFrame(scrollToLatest);
   }, [messages.length, activeAiProvider]);
 
@@ -2142,12 +3383,16 @@ export function PayCmdApp() {
     const viewport = viewportRef.current;
     if (!viewport) return;
 
-    setScrollMetrics({
-      top: viewport.scrollTop,
-      height: viewport.scrollHeight,
-      client: viewport.clientHeight,
-    });
+    updateScrollMetricsFromViewport(viewport);
   }, [messages.length]);
+
+  useEffect(() => {
+    return () => {
+      if (scrollMetricsFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollMetricsFrameRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     async function loadAiModels() {
@@ -2177,14 +3422,34 @@ export function PayCmdApp() {
 
       setUserId(user.id);
 
-      const { data: existingThread, error: threadError } = await supabase
-        .from("chat_threads")
-        .select("*")
-        .eq("user_id", user.id)
-        .eq("status", "active")
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const requestedThreadId = new URLSearchParams(window.location.search).get("thread");
+      let requestedThread: ChatThreadSummary | null = null;
+
+      if (requestedThreadId) {
+        const { data, error } = await supabase
+          .from("chat_threads")
+          .select("*")
+          .eq("id", requestedThreadId)
+          .eq("user_id", user.id)
+          .eq("status", "active")
+          .maybeSingle();
+
+        if (!error && data) {
+          requestedThread = data as ChatThreadSummary;
+        }
+      }
+
+      const { data: existingThread, error: threadError } = requestedThread
+        ? { data: requestedThread, error: null }
+        : await supabase
+            .from("chat_threads")
+            .select("*")
+            .eq("user_id", user.id)
+            .eq("status", "active")
+            .order("last_message_at", { ascending: false, nullsFirst: false })
+            .order("updated_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
 
       if (threadError) {
         console.error("Failed to load chat thread", threadError);
@@ -2197,7 +3462,7 @@ export function PayCmdApp() {
       if (!activeThreadId) {
         const { data: createdThread, error: createThreadError } = await supabase
           .from("chat_threads")
-          .insert({ user_id: user.id, title: "PayCMD main thread" })
+          .insert({ user_id: user.id, title: "Payna chat" })
           .select("*")
           .single();
 
@@ -2211,11 +3476,13 @@ export function PayCmdApp() {
       }
 
       setThreadId(activeThreadId);
+      void loadChatThreads(user.id);
 
       const { data: recentMessages, error: messagesError } = await supabase
         .from("chat_messages")
         .select("*")
         .eq("thread_id", activeThreadId)
+        .eq("user_id", user.id)
         .order("created_at", { ascending: false })
         .limit(MESSAGE_PAGE_SIZE);
 
@@ -2226,10 +3493,7 @@ export function PayCmdApp() {
       }
 
       const recentRows = ((recentMessages ?? []) as ChatMessageRow[]).reverse();
-      const mappedMessages = recentRows.map((row) => ({
-        ...mapRowToMessage(row),
-        createdAt: row.created_at,
-      }));
+      const mappedMessages = mappedMessagesFromRows(recentRows);
       setHasOlderMessages(recentRows.length === MESSAGE_PAGE_SIZE);
       setMessages(mappedMessages);
       setActiveDraftId(
@@ -2246,7 +3510,7 @@ export function PayCmdApp() {
 
   return (
     <PayCmdShell>
-      <div className="relative flex h-full min-h-0 flex-col bg-[radial-gradient(circle_at_top_left,oklch(0.96_0.035_168),transparent_32%),linear-gradient(180deg,oklch(0.99_0.006_84),oklch(0.965_0.012_240))] dark:bg-[radial-gradient(circle_at_top_left,oklch(0.28_0.07_166),transparent_30%),linear-gradient(180deg,oklch(0.16_0.018_250),oklch(0.11_0.012_250))]">
+      <div className="payna-shell-bg relative flex h-full min-h-0 flex-col">
         {showSlowAskSurfNotice ? (
           <SlowAskSurfNotice
             mode={activeAskSurfMode}
@@ -2255,31 +3519,62 @@ export function PayCmdApp() {
             onDismiss={() => setIsSlowAskSurfNoticeDismissed(true)}
           />
         ) : null}
-        <header className="flex shrink-0 items-center justify-between gap-3 border-b bg-card/92 px-4 py-3 backdrop-blur md:px-6">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Sparkles className="h-4 w-4 text-primary" />
-              Command chat
+        <div className="shrink-0 border-b border-border/50 bg-background/35 px-3 py-2 backdrop-blur-xl md:px-6">
+          <div className="relative mx-auto flex w-full max-w-6xl items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                {t("chat.workspace")}
+              </p>
+              <p className="truncate text-sm text-foreground">
+                {chatThreads.find((thread) => thread.id === threadId)?.title ?? t("chat.untitled")}
+              </p>
             </div>
-            <h1 className="truncate text-xl font-semibold tracking-normal md:text-2xl">Pay, budget, schedule</h1>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-2 rounded-full"
+                onClick={() => setIsThreadListOpen((current) => !current)}
+              >
+                <History className="h-4 w-4" />
+                {t("chat.history")}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="gap-2 rounded-full"
+                onClick={createNewChatThread}
+                disabled={!userId || isLoadingThreads}
+              >
+                <Plus className="h-4 w-4" />
+                {t("chat.newChat")}
+              </Button>
+            </div>
+            {isThreadListOpen ? (
+              <ChatThreadMenu
+                threads={chatThreads}
+                activeThreadId={threadId}
+                locale={locale}
+                isLoading={isLoadingThreads}
+                onSelect={(nextThreadId) => {
+                  setIsThreadListOpen(false);
+                  void loadThreadMessages(nextThreadId);
+                }}
+              />
+            ) : null}
           </div>
-          <div className="flex min-w-0 items-center gap-2">
-            {unreadCount > 0 ? <Badge>{unreadCount} new</Badge> : null}
-            <MetaMaskStatusPills />
-            <Badge variant="secondary">USDC V1</Badge>
-          </div>
-        </header>
-
+        </div>
         <div className="relative min-h-0 flex-1">
           <div
             ref={viewportRef}
             onScroll={handleViewportScroll}
             onWheel={handleViewportWheel}
-            className="paycmd-chat-scrollbar h-full overflow-y-scroll px-3 py-4 pr-6 md:px-6 md:pr-9"
+            className="paycmd-chat-scrollbar h-full overflow-y-scroll scroll-pb-44 px-3 py-5 pb-40 pr-6 md:px-6 md:pb-48 md:pr-9"
           >
-            <div className="mx-auto flex w-full max-w-6xl flex-col gap-3">
+            <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
               {isLoadingHistory ? (
-                <div className="mx-auto rounded-full border bg-card px-4 py-2 text-sm text-muted-foreground">
+                <div className="payna-glass mx-auto rounded-full px-4 py-2 text-sm text-muted-foreground">
                   Loading chat history...
                 </div>
               ) : messages.length ? (
@@ -2326,9 +3621,9 @@ export function PayCmdApp() {
             </div>
           </div>
 
-          <div className="pointer-events-none absolute bottom-3 right-2 top-3 w-2 rounded-full bg-border/80 dark:bg-border/70">
+          <div className="pointer-events-none absolute bottom-5 right-2 top-5 w-2 rounded-full bg-border/45 dark:bg-border/45">
             <div
-              className="absolute left-0 w-2 rounded-full bg-primary shadow-sm transition-[top,height]"
+              className="absolute left-0 w-2 rounded-full bg-primary shadow-[0_0_18px_rgba(99,244,200,.34)] transition-[top,height]"
               style={{
                 height: `${scrollThumbHeight}%`,
                 top: `${scrollThumbTop}%`,
@@ -2337,7 +3632,7 @@ export function PayCmdApp() {
           </div>
         </div>
 
-        <div className="shrink-0 border-t bg-card/94 px-3 py-3 backdrop-blur md:px-6">
+        <div className="shrink-0 border-t border-border/60 bg-card/65 px-3 py-3 backdrop-blur-xl md:px-6">
           <div className="mx-auto w-full max-w-3xl">
             {showPalette ? <CommandPalette query={input} onSelect={selectCommand} /> : null}
             {suggestionChips.length ? (
@@ -2346,7 +3641,7 @@ export function PayCmdApp() {
                   <button
                     key={suggestion}
                     type="button"
-                    className="rounded-full border bg-background px-3 py-1 text-xs text-muted-foreground transition hover:border-primary hover:text-foreground"
+                    className="payna-subtle-lift rounded-full border bg-background/75 px-3 py-1 text-xs text-muted-foreground backdrop-blur transition hover:border-primary hover:text-foreground"
                     onClick={() => selectCommand(suggestion)}
                   >
                     {suggestion}
@@ -2372,7 +3667,7 @@ export function PayCmdApp() {
             />
 
             <form
-              className="flex items-center gap-2 rounded-2xl border bg-background p-2 shadow-sm"
+              className="payna-composer flex items-center gap-2 rounded-[1.35rem] p-2"
               onSubmit={submitCommand}
             >
               <Button type="button" variant="ghost" size="icon" aria-label="Attach context">
@@ -2384,15 +3679,15 @@ export function PayCmdApp() {
                 onKeyDown={handleInputKeyDown}
                 placeholder={
                   activeAiProvider === "asksurf"
-                    ? "AskSurf đang tìm thông tin crypto..."
+                    ? t("chat.placeholderAskSurf")
                     : activeAiProvider === "openai"
-                      ? "OpenAI đang phân tích lệnh..."
-                      : "Message PayCMD or type /"
+                      ? t("chat.placeholderOpenAI")
+                      : t("chat.placeholderDefault")
                 }
-                className="h-11 border-0 bg-transparent shadow-none focus-visible:ring-0"
+                className="min-w-0 flex-1 border-0 bg-transparent text-[15px] shadow-none focus-visible:ring-0"
                 disabled={isInputBusy}
               />
-              <Button type="submit" size="icon" aria-label="Send command" disabled={isInputBusy || !input.trim()}>
+              <Button type="submit" size="icon" aria-label="Send command" disabled={isInputBusy || !input.trim()} className="h-11 w-11 shrink-0 rounded-2xl">
                 {isInputBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               </Button>
             </form>
@@ -2405,6 +3700,73 @@ export function PayCmdApp() {
 
 function normalizePaletteQuery(query: string) {
   return query.trim().replace(/^\/+/, "").toLowerCase();
+}
+
+function ChatThreadMenu({
+  threads,
+  activeThreadId,
+  locale,
+  isLoading,
+  onSelect,
+}: {
+  threads: ChatThreadSummary[];
+  activeThreadId: string | null;
+  locale: string;
+  isLoading: boolean;
+  onSelect: (threadId: string) => void;
+}) {
+  const { t } = useI18n();
+
+  return (
+    <div className="payna-glass absolute right-0 top-full z-30 mt-2 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-border/70 shadow-2xl">
+      <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <MessageCircle className="h-4 w-4 text-primary" />
+          {t("chat.history")}
+        </div>
+        <span className="text-xs text-muted-foreground">{threads.length}</span>
+      </div>
+      <div className="max-h-96 overflow-y-auto p-2">
+        {isLoading ? (
+          <div className="rounded-xl px-3 py-4 text-sm text-muted-foreground">{t("chat.loadingThreads")}</div>
+        ) : threads.length ? (
+          threads.map((thread) => {
+            const isActive = thread.id === activeThreadId;
+            return (
+              <button
+                key={thread.id}
+                type="button"
+                className={`w-full rounded-xl px-3 py-3 text-left transition ${
+                  isActive
+                    ? "bg-primary/15 text-foreground ring-1 ring-primary/40"
+                    : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                }`}
+                onClick={() => onSelect(thread.id)}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="min-w-0 truncate text-sm font-medium">
+                    {thread.title || t("chat.untitled")}
+                  </span>
+                  <span className="shrink-0 text-[11px] text-muted-foreground">
+                    {formatThreadTimestamp(thread.last_message_at ?? thread.updated_at, locale)}
+                  </span>
+                </div>
+                <div className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+                  {thread.last_message_preview || t("chat.emptyThread")}
+                </div>
+                <div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
+                  <span>{t("chat.messageCount", { count: thread.message_count ?? 0 })}</span>
+                  {isActive ? <span className="text-primary">{t("chat.currentThread")}</span> : null}
+                </div>
+              </button>
+            );
+          })
+        ) : (
+          <div className="rounded-xl px-3 py-4 text-sm text-muted-foreground">{t("chat.historyEmpty")}</div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function ComposerModeControls({
@@ -2434,27 +3796,27 @@ function ComposerModeControls({
 
   return (
     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-      <div className="inline-flex rounded-xl border bg-background p-1">
+      <div className="inline-flex rounded-2xl border bg-background/70 p-1 shadow-sm backdrop-blur">
         <button
           type="button"
           disabled={isBusy}
           onClick={() => onChatModeChange("paycmd")}
-          className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition ${
+          className={`inline-flex h-8 items-center gap-1.5 rounded-xl px-3 text-xs font-medium transition ${
             chatMode === "paycmd"
-              ? "bg-primary text-primary-foreground shadow-sm"
+              ? "bg-primary text-primary-foreground shadow-sm shadow-emerald-500/20"
               : "text-muted-foreground hover:bg-muted hover:text-foreground"
           }`}
         >
           <Bot className="h-3.5 w-3.5" />
-          PayCMD
+          Payna
         </button>
         <button
           type="button"
           disabled={isBusy}
           onClick={() => onChatModeChange("asksurf")}
-          className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition ${
+          className={`inline-flex h-8 items-center gap-1.5 rounded-xl px-3 text-xs font-medium transition ${
             chatMode === "asksurf"
-              ? "bg-emerald-600 text-white shadow-sm hover:bg-emerald-600"
+              ? "bg-emerald-600 text-white shadow-sm shadow-emerald-500/25 hover:bg-emerald-600"
               : "border border-emerald-400/45 bg-emerald-500/10 text-emerald-700 shadow-sm shadow-emerald-500/10 hover:bg-emerald-500/15 hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200"
           }`}
         >
@@ -2465,12 +3827,12 @@ function ComposerModeControls({
 
       {chatMode === "asksurf" ? (
         <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex rounded-xl border bg-background p-1">
+          <div className="inline-flex rounded-2xl border bg-background/70 p-1 shadow-sm backdrop-blur">
             <button
               type="button"
               disabled={isBusy}
               onClick={() => onSurfModeChange("instant")}
-              className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition ${
+              className={`inline-flex h-8 items-center gap-1.5 rounded-xl px-3 text-xs font-medium transition ${
                 surfMode === "instant"
                   ? "bg-emerald-600 text-white shadow-sm"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -2483,7 +3845,7 @@ function ComposerModeControls({
               type="button"
               disabled={isBusy}
               onClick={() => onSurfModeChange("research")}
-              className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition ${
+              className={`inline-flex h-8 items-center gap-1.5 rounded-xl px-3 text-xs font-medium transition ${
                 surfMode === "research"
                   ? "bg-emerald-600 text-white shadow-sm"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -2493,7 +3855,7 @@ function ComposerModeControls({
               Research 2.0
             </button>
           </div>
-          <label className="flex h-10 items-center gap-1 rounded-xl border bg-background px-2 text-xs text-muted-foreground">
+          <label className="flex h-10 items-center gap-1 rounded-2xl border bg-background/70 px-2 text-xs text-muted-foreground shadow-sm backdrop-blur">
             Effort
             <select
               value={surfEffort}
@@ -2511,7 +3873,7 @@ function ComposerModeControls({
           </label>
         </div>
       ) : (
-        <label className="flex h-10 items-center gap-1 rounded-xl border bg-background px-2 text-xs text-muted-foreground">
+        <label className="flex h-10 items-center gap-1 rounded-2xl border bg-background/70 px-2 text-xs text-muted-foreground shadow-sm backdrop-blur">
           <Bot className="h-3.5 w-3.5 text-primary" />
           <select
             value={selectedAiModel}
@@ -2539,6 +3901,7 @@ function CommandPalette({
   query: string;
   onSelect: (sample: string) => void;
 }) {
+  const { t } = useI18n();
   const normalizedQuery = normalizePaletteQuery(query);
   const filteredSections = commandTemplates
     .map((section) => ({
@@ -2548,7 +3911,7 @@ function CommandPalette({
 
         const sample = item.sample.replace(/^\/+/, "").toLowerCase();
         const firstToken = sample.split(/\s+/)[0] ?? "";
-        const searchable = `${sample} ${item.title} ${item.description}`.toLowerCase();
+        const searchable = `${sample} ${t(item.titleKey)} ${t(item.descriptionKey)}`.toLowerCase();
 
         return firstToken.startsWith(normalizedQuery) || searchable.includes(normalizedQuery);
       }),
@@ -2556,20 +3919,20 @@ function CommandPalette({
     .filter((section) => section.items.length > 0);
 
   return (
-    <div className="mb-2 overflow-hidden rounded-xl border bg-background shadow-sm">
-      <div className="flex items-center justify-between border-b px-3 py-2">
-        <div className="text-sm font-medium">Commands</div>
+    <div className="payna-glass mb-2 overflow-hidden rounded-2xl">
+      <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
+        <div className="text-sm font-medium">{t("commandPalette.commands")}</div>
         <div className="text-xs text-muted-foreground">
-          {normalizedQuery ? `Filter: ${normalizedQuery}` : "Click để điền mẫu"}
+          {normalizedQuery ? t("commandPalette.filter", { query: normalizedQuery }) : t("commandPalette.fillSample")}
         </div>
       </div>
       <div className="paycmd-command-palette-scrollbar max-h-[42vh] overflow-y-auto p-2">
         {filteredSections.length ? (
           <div className="grid gap-3">
             {filteredSections.map((section) => (
-            <section key={section.group} className="space-y-2">
+            <section key={section.groupKey} className="space-y-2">
               <div className="px-1 text-xs font-semibold uppercase text-muted-foreground">
-                {section.group}
+                {t(section.groupKey)}
               </div>
               <div className="grid gap-2 md:grid-cols-2">
                 {section.items.map((item) => {
@@ -2577,17 +3940,17 @@ function CommandPalette({
                   return (
                     <button
                       key={item.sample}
-                      className="group min-w-0 rounded-lg border bg-card p-3 text-left transition hover:border-primary hover:bg-accent"
+                      className="payna-subtle-lift group min-w-0 rounded-xl border bg-card/78 p-3 text-left backdrop-blur transition hover:border-primary hover:bg-accent/80"
                       onClick={() => onSelect(item.sample)}
                       type="button"
                     >
                       <div className="flex min-w-0 items-start gap-3">
-                        <span className="mt-0.5 rounded-md border bg-background p-1.5 text-primary">
+                        <span className="mt-0.5 rounded-lg border bg-background/80 p-1.5 text-primary">
                           <Icon className="h-4 w-4" />
                         </span>
                         <span className="min-w-0 flex-1 space-y-1">
                           <span className="flex min-w-0 items-center justify-between gap-2">
-                            <span className="truncate font-medium">{item.title}</span>
+                            <span className="truncate font-medium">{t(item.titleKey)}</span>
                             <Badge
                               variant={item.badge === "confirm" ? "default" : "secondary"}
                               className="shrink-0 text-[10px]"
@@ -2595,11 +3958,11 @@ function CommandPalette({
                               {item.badge}
                             </Badge>
                           </span>
-                          <code className="block break-words rounded-md bg-muted px-2 py-1 text-xs text-foreground">
+                          <code className="block break-words rounded-lg bg-muted/80 px-2 py-1 text-xs text-foreground">
                             {item.sample}
                           </code>
                           <span className="block text-xs leading-5 text-muted-foreground">
-                            {item.description}
+                            {t(item.descriptionKey)}
                           </span>
                         </span>
                         <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground transition group-hover:text-primary" />
@@ -2612,8 +3975,8 @@ function CommandPalette({
             ))}
           </div>
         ) : (
-          <div className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
-            Không có command khớp với “{normalizedQuery}”.
+          <div className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">
+            {t("commandPalette.noMatch", { query: normalizedQuery })}
           </div>
         )}
       </div>
@@ -2639,18 +4002,24 @@ function MessageBubble({
   const isUser = message.role === "user";
   const isSystem = message.role === "system";
   const isAskSurf = message.provider === "asksurf";
+  const statusTone =
+    message.kind === "status" && message.execution
+      ? executionStatusTone(message.execution, isLatestExecutionStatus)
+      : "";
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`${isAskSurf ? "max-w-[96%] md:max-w-[92%] lg:max-w-[88%]" : "max-w-[86%] md:max-w-[74%]"} rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm ${
+        className={`payna-message ${isAskSurf ? "max-w-[96%] md:max-w-[92%] lg:max-w-[88%]" : "max-w-[88%] md:max-w-[76%]"} rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm ${
           isUser
-            ? "rounded-br-md bg-primary text-primary-foreground"
+            ? "rounded-br-md bg-primary text-primary-foreground shadow-emerald-500/20"
             : isAskSurf
-              ? "rounded-bl-md border border-emerald-400/25 bg-[linear-gradient(135deg,hsl(var(--card))_0%,rgba(16,185,129,0.08)_48%,hsl(var(--card))_100%)]"
+              ? "rounded-bl-md border border-emerald-400/25 bg-card/82 shadow-[0_18px_60px_rgba(0,0,0,.16)] backdrop-blur-xl"
+            : statusTone
+              ? statusTone
             : isSystem
-              ? "rounded-bl-md border bg-accent text-accent-foreground"
-              : "rounded-bl-md border bg-card"
+              ? "rounded-bl-md border bg-accent/85 text-accent-foreground backdrop-blur"
+              : "rounded-bl-md border bg-card/82 backdrop-blur-xl"
         }`}
       >
         {!isUser && message.provider ? (
@@ -2689,7 +4058,7 @@ function MessageBubble({
                 onRelatedQuestion={onRelatedQuestion}
               />
             ) : (
-              <span className="block whitespace-pre-wrap">{message.text}</span>
+              <span className="block whitespace-pre-wrap break-words">{message.text}</span>
             )}
             {message.actions?.length ? (
               <AssistantActionBar actions={message.actions} onAskSurf={onRelatedQuestion} />
@@ -2700,6 +4069,22 @@ function MessageBubble({
       </div>
     </div>
   );
+}
+
+function executionStatusTone(execution: ExecutionItem, isLatest: boolean) {
+  if (execution.status === "failed") {
+    return "rounded-bl-md border border-destructive/40 bg-destructive/10 text-foreground";
+  }
+
+  if (execution.status === "success") {
+    return "rounded-bl-md border border-emerald-400/45 bg-emerald-500/12 text-foreground";
+  }
+
+  if (isLatest || execution.status === "running" || execution.status === "waiting_gateway") {
+    return "rounded-bl-md border border-border bg-muted/30 text-foreground";
+  }
+
+  return "rounded-bl-md border border-border bg-muted/20 text-foreground";
 }
 
 function AssistantActionBar({
@@ -2815,7 +4200,7 @@ function AskSurfResearchContent({
       <ResearchEntityRail text={bodyText} citations={citations} />
       <div
         data-research-id={researchId}
-        className={sections.length ? "grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]" : ""}
+        className={sections.length ? "grid gap-4 md:grid-cols-[minmax(0,1fr)_240px]" : ""}
       >
         <div className="min-w-0">
           <MarkdownContent researchId={researchId} text={bodyText} citations={citations} />
@@ -2935,10 +4320,15 @@ function extractRelatedQuestions(text: string) {
 
 function ResearchSectionNav({ researchId, sections }: { researchId: string; sections: ResearchSection[] }) {
   const [activeSectionId, setActiveSectionId] = useState(sections[0]?.id ?? "");
+  const activeSectionIdRef = useRef(sections[0]?.id ?? "");
+  const activeSectionFrameRef = useRef<number | null>(null);
+  const sectionSignature = sections.map((section) => section.id).join("|");
+  const firstSectionId = sections[0]?.id ?? "";
 
   useEffect(() => {
-    setActiveSectionId(sections[0]?.id ?? "");
-  }, [researchId, sections]);
+    activeSectionIdRef.current = firstSectionId;
+    setActiveSectionId((current) => (current === firstSectionId ? current : firstSectionId));
+  }, [researchId, firstSectionId]);
 
   useEffect(() => {
     const container = document.querySelector(`[data-research-id="${researchId}"]`);
@@ -2951,7 +4341,7 @@ function ResearchSectionNav({ researchId, sections }: { researchId: string; sect
 
     function updateActiveSection() {
       const rootTop = scrollRoot?.getBoundingClientRect().top ?? 0;
-      const offset = rootTop + 72;
+      const offset = rootTop + 96;
       let active = elements[0];
 
       for (const element of elements) {
@@ -2962,18 +4352,33 @@ function ResearchSectionNav({ researchId, sections }: { researchId: string; sect
         }
       }
 
+      if (activeSectionIdRef.current === active.id) return;
+      activeSectionIdRef.current = active.id;
       setActiveSectionId(active.id);
     }
 
+    function scheduleActiveSectionUpdate() {
+      if (activeSectionFrameRef.current !== null) return;
+
+      activeSectionFrameRef.current = window.requestAnimationFrame(() => {
+        activeSectionFrameRef.current = null;
+        updateActiveSection();
+      });
+    }
+
     updateActiveSection();
-    scrollRoot?.addEventListener("scroll", updateActiveSection, { passive: true });
-    window.addEventListener("resize", updateActiveSection);
+    scrollRoot?.addEventListener("scroll", scheduleActiveSectionUpdate, { passive: true });
+    window.addEventListener("resize", scheduleActiveSectionUpdate);
 
     return () => {
-      scrollRoot?.removeEventListener("scroll", updateActiveSection);
-      window.removeEventListener("resize", updateActiveSection);
+      scrollRoot?.removeEventListener("scroll", scheduleActiveSectionUpdate);
+      window.removeEventListener("resize", scheduleActiveSectionUpdate);
+      if (activeSectionFrameRef.current !== null) {
+        window.cancelAnimationFrame(activeSectionFrameRef.current);
+        activeSectionFrameRef.current = null;
+      }
     };
-  }, [researchId, sections]);
+  }, [researchId, sectionSignature]);
 
   function jumpToSection(id: string) {
     const container = document.querySelector(`[data-research-id="${researchId}"]`);
@@ -2990,11 +4395,11 @@ function ResearchSectionNav({ researchId, sections }: { researchId: string; sect
           key={section.id}
           type="button"
           onClick={() => jumpToSection(section.id)}
-          className={`block w-full rounded-md border px-2 py-1.5 text-left text-xs transition hover:bg-emerald-500/10 hover:text-foreground ${
+          className={`payna-subtle-lift block w-full rounded-lg border px-2.5 py-2 text-left text-xs leading-5 transition hover:bg-emerald-500/10 hover:text-foreground ${
             activeSectionId === section.id
-              ? `${section.level > 2 ? "pl-4" : ""} border-emerald-400/50 bg-emerald-500/15 font-semibold text-emerald-700 dark:text-emerald-300`
+              ? `${section.level > 2 ? "pl-5" : ""} border-emerald-400/60 bg-emerald-500/15 font-semibold text-emerald-700 shadow-[0_0_22px_rgba(16,185,129,.12)] dark:text-emerald-300`
               : section.level > 2
-                ? "border-transparent pl-4 text-muted-foreground"
+                ? "border-transparent pl-5 text-muted-foreground"
                 : "border-transparent font-medium text-foreground/80"
           }`}
         >
@@ -3006,13 +4411,13 @@ function ResearchSectionNav({ researchId, sections }: { researchId: string; sect
 
   return (
     <>
-      <details className="order-first rounded-xl border bg-background/70 p-3 md:hidden">
+      <details className="order-first rounded-2xl border bg-background/70 p-3 shadow-sm backdrop-blur md:hidden">
         <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
           Sections of Research
         </summary>
         <div className="mt-2">{items}</div>
       </details>
-      <nav className="hidden self-start rounded-xl border bg-background/70 p-3 md:sticky md:top-3 md:block">
+      <nav className="payna-glass hidden self-start rounded-2xl p-3 md:sticky md:top-5 md:block">
         <div className="mb-2 text-[11px] font-medium uppercase tracking-normal text-muted-foreground">
           Sections of Research
         </div>
@@ -3038,7 +4443,7 @@ function RelatedQuestions({
             key={question}
             type="button"
             onClick={() => onSelect(question)}
-            className="rounded-full border bg-background/80 px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-emerald-400/50 hover:bg-emerald-500/10"
+            className="payna-subtle-lift max-w-full rounded-full border bg-background/80 px-3 py-1.5 text-left text-xs font-medium text-foreground transition hover:border-emerald-400/50 hover:bg-emerald-500/10"
           >
             {question}
           </button>
@@ -3199,10 +4604,10 @@ function MarkdownContent({
       const id = nextHeadingId(heading.title, headingCounts, researchId);
       const className =
         level === 1
-          ? "scroll-mt-6 text-xl font-semibold tracking-normal"
+          ? "scroll-mt-24 text-xl font-semibold tracking-normal"
           : level === 2
-            ? "scroll-mt-6 text-lg font-semibold tracking-normal"
-            : "scroll-mt-6 text-base font-semibold tracking-normal";
+            ? "scroll-mt-24 text-lg font-semibold tracking-normal"
+            : "scroll-mt-24 text-base font-semibold tracking-normal";
 
       blocks.push(
         <div key={`heading_${index}`} id={id} className={className}>
@@ -3780,31 +5185,57 @@ function AiLoadingBubble({
   effort?: SurfEffort;
   elapsedMs?: number;
 }) {
-  const copy = aiLoadingCopy[provider];
-  const text = copy[step % copy.length];
+  const { t } = useI18n();
+  const copy = aiLoadingKeys[provider];
+  const text = t(copy[step % copy.length]);
   const elapsed = elapsedMs ? formatDuration(elapsedMs) : "";
+  const title =
+    provider === "asksurf"
+      ? surfMode === "instant"
+        ? "Surfing..."
+        : "Researching..."
+      : "Thinking...";
 
   return (
     <div className="flex justify-start">
-      <div className="max-w-[86%] rounded-2xl rounded-bl-md border bg-card px-4 py-3 text-sm leading-6 shadow-sm md:max-w-[74%]">
-        <ProviderBadge provider={provider} surfMode={surfMode} effort={effort} />
-        {provider === "asksurf" ? (
-          <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-            <span className="rounded-full bg-emerald-500/10 px-2 py-1 font-medium text-emerald-700 dark:text-emerald-300">
-              {surfModeLabel(surfMode)}
-            </span>
-            {surfMode !== "instant" ? <span>{surfEffortLabel(effort)} effort</span> : null}
-            {elapsed ? <span>Elapsed {elapsed}</span> : null}
+      <div className="w-full max-w-[96%] rounded-3xl rounded-bl-md border border-white/6 bg-transparent px-3 py-3 text-sm leading-6 md:max-w-[86%]">
+        <div className="flex items-start gap-4">
+          <div className="relative h-14 w-14 shrink-0">
+            <div className="payna-thinking-orbit absolute inset-0 rounded-full border border-white/22 border-t-emerald-400 border-r-white/50 shadow-[0_0_28px_rgba(99,244,200,.16)]" />
+            <div className="payna-logo-frame absolute inset-1.5 overflow-hidden rounded-full border border-white/10">
+              <Image src="/brand/antlers_transparent.png" alt="" fill className="object-contain p-1" />
+            </div>
           </div>
-        ) : null}
-        <div className="flex items-center gap-3 text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin text-primary" />
-          <span>{text}</span>
-          <span className="flex gap-1" aria-hidden="true">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary [animation-delay:160ms]" />
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary [animation-delay:320ms]" />
-          </span>
+
+          <div className="min-w-0 flex-1 pt-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="text-lg font-medium text-foreground">{title}</div>
+              <span className="flex gap-1" aria-hidden="true">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary [animation-delay:160ms]" />
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary [animation-delay:320ms]" />
+              </span>
+            </div>
+
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+              <ProviderBadge provider={provider} surfMode={surfMode} effort={effort} />
+              {provider === "asksurf" ? (
+                <>
+                  <span className="rounded-full bg-emerald-500/10 px-2 py-1 font-medium text-emerald-700 dark:text-emerald-300">
+                    {surfModeLabel(surfMode)}
+                  </span>
+                  {surfMode !== "instant" ? <span>{surfEffortLabel(effort)} {t("chat.effort")}</span> : null}
+                  {elapsed ? <span>{t("chat.elapsed", { duration: elapsed })}</span> : null}
+                </>
+              ) : null}
+            </div>
+
+            <div className="mt-4 space-y-3" aria-label={text}>
+              <div className="payna-skeleton-line h-3.5 w-[82%] rounded-full" />
+              <div className="payna-skeleton-line h-3.5 w-[55%] rounded-full [animation-delay:120ms]" />
+              <div className="payna-skeleton-line h-3.5 w-[94%] rounded-full [animation-delay:240ms]" />
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -3822,17 +5253,24 @@ function SlowAskSurfNotice({
   elapsedMs?: number;
   onDismiss: () => void;
 }) {
+  const { t } = useI18n();
+  const effortText = mode === "instant" ? "" : ` / ${surfEffortLabel(effort)}`;
+  const durationText = elapsedMs ? ` ${formatDuration(elapsedMs)}` : "";
+
   return (
     <div className="pointer-events-none absolute inset-x-3 bottom-24 z-20 flex justify-center md:bottom-28">
       <div className="pointer-events-auto flex max-w-md items-center gap-3 rounded-2xl border border-emerald-400/30 bg-card/95 px-4 py-3 text-sm shadow-xl shadow-emerald-950/10 backdrop-blur dark:shadow-black/30">
-        <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded-xl border bg-background">
-          <Image src="/brand/paycmd-login-mascot.svg" alt="" fill className="object-cover p-1" />
+        <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded-xl border border-emerald-400/30 bg-[#07090d]">
+          <Image src="/brand/antlers_transparent.png" alt="" fill className="object-contain p-1" />
         </div>
         <div className="min-w-0">
-          <div className="font-medium">AskSurf đang đọc hơi sâu</div>
+          <div className="font-medium">{t("asksurf.slowTitle")}</div>
           <div className="text-xs leading-5 text-muted-foreground">
-            {surfModeLabel(mode)}{mode === "instant" ? "" : ` / ${surfEffortLabel(effort)}`} đang chạy
-            {elapsedMs ? ` ${formatDuration(elapsedMs)}` : ""}. Bạn có thể đóng thông báo này.
+            {t("asksurf.slowBody", {
+              mode: surfModeLabel(mode),
+              effort: effortText,
+              duration: durationText,
+            })}
           </div>
         </div>
         <div className="flex shrink-0 gap-1" aria-hidden="true">
@@ -3846,7 +5284,7 @@ function SlowAskSurfNotice({
           size="icon"
           className="-mr-2 h-8 w-8 shrink-0"
           onClick={onDismiss}
-          aria-label="Ẩn thông báo AskSurf"
+          aria-label={t("asksurf.hideNotice")}
         >
           <X className="h-4 w-4" />
         </Button>
@@ -3856,20 +5294,22 @@ function SlowAskSurfNotice({
 }
 
 function OnboardingGuide({ onSelect }: { onSelect: (sample: string) => void }) {
+  const { t } = useI18n();
+
   return (
     <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
       <div className="flex flex-col gap-5 p-5 md:flex-row md:items-center">
-        <div className="relative mx-auto h-28 w-28 shrink-0 overflow-hidden rounded-2xl border bg-background md:mx-0">
-          <Image src="/brand/paycmd-login-mascot.svg" alt="PayCMD mascot" fill className="object-cover p-2" />
+        <div className="relative mx-auto h-28 w-28 shrink-0 overflow-hidden rounded-2xl border border-emerald-400/30 bg-[#07090d] md:mx-0">
+          <Image src="/brand/antlers_transparent.png" alt="Payna AI Copilot" fill className="object-contain p-2" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="mb-2 inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs text-muted-foreground">
             <Sparkles className="h-3.5 w-3.5 text-primary" />
-            First run guide
+            {t("onboarding.badge")}
           </div>
-          <h2 className="text-xl font-semibold tracking-normal">Bắt đầu với PayCMD chat</h2>
+          <h2 className="text-xl font-semibold tracking-normal">{t("onboarding.title")}</h2>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            Gõ lệnh trực tiếp bằng dấu / hoặc nói tự nhiên. PayCMD sẽ preview trước khi có giao dịch thật.
+            {t("onboarding.description")}
           </p>
         </div>
       </div>
@@ -3882,14 +5322,108 @@ function OnboardingGuide({ onSelect }: { onSelect: (sample: string) => void }) {
             onClick={() => onSelect(item.sample)}
           >
             <div className="flex items-center justify-between gap-3">
-              <div className="font-medium">{item.title}</div>
+              <div className="font-medium">{t(item.titleKey)}</div>
               <ChevronRight className="h-4 w-4 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-primary" />
             </div>
             <div className="mt-1 font-mono text-xs text-primary">{item.sample}</div>
-            <div className="mt-2 text-xs leading-5 text-muted-foreground">{item.description}</div>
+            <div className="mt-2 text-xs leading-5 text-muted-foreground">{t(item.descriptionKey)}</div>
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+type PreviewMetric = {
+  label: string;
+  value: ReactNode;
+  title?: string;
+  tone?: "default" | "success" | "warning";
+};
+
+function PreviewMetricPill({ metric }: { metric: PreviewMetric }) {
+  const toneClass =
+    metric.tone === "success"
+      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+      : metric.tone === "warning"
+        ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
+        : "border-border/80 bg-background/70 text-foreground";
+
+  return (
+    <div className={`min-w-0 rounded-md border px-3 py-2 ${toneClass}`} title={metric.title}>
+      <div className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        {metric.label}
+        {metric.title ? <Info className="h-3 w-3" aria-hidden="true" /> : null}
+      </div>
+      <div className="mt-1 truncate text-sm font-semibold">{metric.value}</div>
+    </div>
+  );
+}
+
+function TransactionPreviewSummary({
+  title,
+  subtitle,
+  route,
+  metrics,
+  details,
+  loading,
+  error,
+  footer,
+}: {
+  title: ReactNode;
+  subtitle?: ReactNode;
+  route?: ReactNode;
+  metrics: PreviewMetric[];
+  details: ReactNode[];
+  loading?: boolean;
+  error?: string;
+  footer?: ReactNode;
+}) {
+  const { t } = useI18n();
+
+  return (
+    <div className="rounded-md border border-border/80 bg-card/80 p-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-foreground">{title}</div>
+          {subtitle ? <div className="mt-1 text-[11px] leading-4 text-muted-foreground">{subtitle}</div> : null}
+        </div>
+        {route ? <div className="shrink-0">{route}</div> : null}
+      </div>
+
+      {loading ? (
+        <div className="mt-3 grid gap-2 sm:grid-cols-3" aria-live="polite">
+          <div className="h-12 rounded-md bg-muted/40" />
+          <div className="h-12 rounded-md bg-muted/30" />
+          <div className="h-12 rounded-md bg-muted/20" />
+        </div>
+      ) : null}
+
+      {error ? (
+        <div className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+          {error}
+        </div>
+      ) : null}
+
+      {!loading && metrics.length ? (
+        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+          {metrics.map((metric) => (
+            <PreviewMetricPill key={metric.label} metric={metric} />
+          ))}
+        </div>
+      ) : null}
+
+      {details.length || footer ? (
+        <details className="mt-3 rounded-md border border-border/70 bg-background/60 px-3 py-2 text-[11px] leading-5 text-muted-foreground">
+          <summary className="cursor-pointer select-none font-medium text-foreground">{t("receipt.details")}</summary>
+          <div className="mt-2 space-y-2">
+            {details.map((detail, index) => (
+              <div key={index}>{detail}</div>
+            ))}
+            {footer ? <div>{footer}</div> : null}
+          </div>
+        </details>
+      ) : null}
     </div>
   );
 }
@@ -3907,47 +5441,244 @@ function CommandPreviewCard({
   onConfirm: (draft: ParsedCommand) => void;
   onCancel: () => void;
 }) {
-  const statusLabel =
+  const { t } = useI18n();
+  const previewStatusLabel =
     state === "cancelled"
-      ? "Cancelled"
+      ? t("status.cancelled")
       : state === "confirmed"
-        ? "Confirmed"
+          ? t("status.confirmed")
         : state === "closed"
-          ? "Closed"
-          : "Ready";
+          ? t("preview.closed")
+          : t("preview.ready");
   const previewRail = inferRailFromCommand(draft.command);
   const previewSourceChain = draft.fields.sourceChain || draft.fields.chain;
   const previewDestinationChain = draft.fields.destinationChain;
   const hasMintGasChoice = draft.command === "transfer" || draft.command === "pay";
+  const isBridge = draft.command === "bridge";
+  const isSwap = draft.command === "swap";
   const [selectedMintGasMode, setSelectedMintGasMode] = useState(
-    draft.fields.mintGasMode === "manual" ? "manual" : "auto_forwarding",
+    draft.fields.mintGasMode === "manual" || (draft.command === "pay" && !draft.fields.mintGasMode)
+      ? "manual"
+      : "auto_forwarding",
   );
+  const [bridgeSourceChain, setBridgeSourceChain] = useState(
+    normalizeCctpBridgeChain(draft.fields.sourceChain) || "baseSepolia",
+  );
+  const [bridgeDestinationChain, setBridgeDestinationChain] = useState(
+    normalizeCctpBridgeChain(draft.fields.destinationChain) || "arcTestnet",
+  );
+  const [bridgeMintMode, setBridgeMintMode] = useState<CctpBridgeMintMode>(
+    (draft.fields.bridgeMintMode as CctpBridgeMintMode) || "auto_forwarding",
+  );
+  const [bridgeTransferSpeed, setBridgeTransferSpeed] = useState<CctpBridgeTransferSpeed>(
+    (draft.fields.transferSpeed as CctpBridgeTransferSpeed) || "FAST",
+  );
+  const [bridgeRecipientMode, setBridgeRecipientMode] = useState<"self" | "external">(
+    draft.fields.recipientMode === "external" ? "external" : "self",
+  );
+  const [bridgeRecipientAddress, setBridgeRecipientAddress] = useState(draft.fields.recipientAddress ?? "");
+  const [supportedBridgeChains, setSupportedBridgeChains] = useState<CctpBridgeRuntimeChain[]>([]);
+  const [bridgeEstimate, setBridgeEstimate] = useState<BridgeEstimateSummary | null>(null);
+  const [bridgeEstimateError, setBridgeEstimateError] = useState("");
+  const [bridgeEstimateLoading, setBridgeEstimateLoading] = useState(false);
+  const [swapEstimate, setSwapEstimate] = useState<SwapEstimate | null>(null);
+  const [swapEstimateError, setSwapEstimateError] = useState("");
+  const [swapEstimateLoading, setSwapEstimateLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isBridge) return;
+
+    let cancelled = false;
+    void getSupportedCctpBridgeChains()
+      .then((chains) => {
+        if (!cancelled) {
+          setSupportedBridgeChains(chains);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setBridgeEstimateError(error instanceof Error ? error.message : t("bridge.cctpLoadFailed"));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isBridge]);
+
+  useEffect(() => {
+    if (bridgeRecipientMode === "external" && bridgeMintMode === "manual_mint") {
+      setBridgeMintMode("auto_forwarding");
+    }
+  }, [bridgeRecipientMode, bridgeMintMode]);
+
+  useEffect(() => {
+    if (!isBridge || !supportedBridgeChains.length || !draft.fields.amount) return;
+
+    const bridgeDraft: ParsedCommand = {
+      ...draft,
+      fields: {
+        ...draft.fields,
+        sourceChain: bridgeSourceChain,
+        destinationChain: bridgeDestinationChain,
+        bridgeMintMode,
+        transferSpeed: bridgeTransferSpeed,
+        recipientMode: bridgeRecipientMode,
+        recipientAddress: bridgeRecipientMode === "external" ? bridgeRecipientAddress.trim() : "",
+      },
+    };
+
+    let cancelled = false;
+    setBridgeEstimateLoading(true);
+    setBridgeEstimateError("");
+
+    void estimateBridgeDraft(bridgeDraft)
+      .then((result) => {
+        if (!cancelled) {
+          setBridgeEstimate(result.summary);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setBridgeEstimate(null);
+          setBridgeEstimateError(error instanceof Error ? error.message : t("preview.bridgeEstimateFailed"));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setBridgeEstimateLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    bridgeDestinationChain,
+    bridgeMintMode,
+    bridgeRecipientAddress,
+    bridgeRecipientMode,
+    bridgeSourceChain,
+    bridgeTransferSpeed,
+    draft,
+    isBridge,
+    supportedBridgeChains,
+    t,
+  ]);
+
+  useEffect(() => {
+    if (!isSwap || !draft.fields.amount || !draft.fields.tokenIn || !draft.fields.tokenOut) return;
+
+    let cancelled = false;
+    setSwapEstimateLoading(true);
+    setSwapEstimateError("");
+
+    void estimateSwapDraft(draft)
+      .then((result) => {
+        if (!cancelled) {
+          setSwapEstimate(result);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setSwapEstimate(null);
+          setSwapEstimateError(error instanceof Error ? error.message : t("preview.swapEstimateFailed"));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSwapEstimateLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [draft, isSwap, t]);
   const mintGasModeText =
     selectedMintGasMode === "manual"
-      ? " · Mint gas: Manual; cần SCA/signer có native gas ở chain đích"
-      : " · Mint gas: Auto, pay in USDC; không cần gas ở chain đích";
+      ? ` · ${t("transfer.mintGasManual")}`
+      : ` · ${t("transfer.mintGasAuto")}`;
   const mintGasHelpText =
     hasMintGasChoice
       ? selectedMintGasMode === "manual"
-        ? "Manual: phí USDC thấp hơn, nhưng ví thực thi mint cần native gas ở chain đích."
-        : "Auto forwarding: phí USDC cao hơn vì gồm forwarding fee. Circle/forwarder mint hộ ở chain đích."
+        ? t("transfer.manualHelp")
+        : t("transfer.autoHelp")
       : "";
+  const previewTitle =
+    draft.command === "transfer"
+      ? t("transfer.title", {
+          amount: draft.fields.amount,
+          source: draft.fields.sourceChain,
+          destination: draft.fields.destinationChain,
+        })
+      : draft.summary;
   const confirmedDraft: ParsedCommand = {
     ...draft,
-    fields: hasMintGasChoice
+    summary: isBridge
+      ? bridgeRecipientMode === "external"
+        ? t("bridge.titleExternal", {
+            amount: draft.fields.amount,
+            source: bridgeSourceChain,
+            destination: bridgeDestinationChain,
+            recipient: bridgeRecipientAddress || "recipient",
+          })
+        : t("bridge.title", {
+            amount: draft.fields.amount,
+            source: bridgeSourceChain,
+            destination: bridgeDestinationChain,
+          })
+      : draft.summary,
+    fields: isBridge
       ? {
           ...draft.fields,
-          mintGasMode: selectedMintGasMode,
+          sourceChain: bridgeSourceChain,
+          destinationChain: bridgeDestinationChain,
+          bridgeMintMode,
+          transferSpeed: bridgeTransferSpeed,
+          recipientMode: bridgeRecipientMode,
+          recipientAddress: bridgeRecipientMode === "external" ? bridgeRecipientAddress.trim() : "",
         }
-      : draft.fields,
+      : hasMintGasChoice
+        ? {
+            ...draft.fields,
+            mintGasMode: selectedMintGasMode,
+          }
+        : draft.fields,
   };
+  const bridgeChainChoices = supportedBridgeChains.length ? supportedBridgeChains : Object.values(cctpBridgeChainMap).map((chain) => ({
+    ...chain,
+    canFastFromSource: true,
+    canForwardToDestination: true,
+  }));
+  const currentBridgeSource = bridgeChainChoices.find((chain) => chain.key === bridgeSourceChain);
+  const currentBridgeDestination = bridgeChainChoices.find((chain) => chain.key === bridgeDestinationChain);
+  const bridgeConfirmDisabled =
+    !isActive ||
+    !draft.fields.amount ||
+    !bridgeSourceChain ||
+    !bridgeDestinationChain ||
+    bridgeSourceChain === bridgeDestinationChain ||
+    bridgeEstimateLoading ||
+    (bridgeRecipientMode === "external" && !/^0x[a-fA-F0-9]{40}$/.test(bridgeRecipientAddress.trim()));
+  const swapConfirmDisabled =
+    !isActive ||
+    !swapEstimate ||
+    swapEstimateLoading ||
+    Boolean(swapEstimateError);
+  const hiddenFieldKeys = new Set([
+    "mintGasMode",
+    "bridgeMintMode",
+    "transferSpeed",
+    "recipientMode",
+  ]);
 
   return (
     <div className="min-w-[260px] space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-xs font-medium uppercase text-muted-foreground">Preview</div>
-          <div className="font-semibold">{draft.summary}</div>
+          <div className="text-xs font-medium uppercase text-muted-foreground">{t("chat.preview")}</div>
+          <div className="font-semibold">{previewTitle}</div>
         </div>
         {isActive ? (
           <Button
@@ -3956,26 +5687,28 @@ function CommandPreviewCard({
             size="icon"
             className="-mr-2 -mt-2 h-8 w-8 shrink-0"
             onClick={onCancel}
-            aria-label="Cancel command preview"
+            aria-label={t("common.cancel")}
           >
             <X className="h-4 w-4" />
           </Button>
         ) : (
           <Badge variant="secondary" className="shrink-0">
-            {statusLabel}
+            {previewStatusLabel}
           </Badge>
         )}
       </div>
       <div className="grid gap-2 text-xs">
-        <Row label="Command" value={`/${draft.command}`} />
+        <Row label={t("chat.command")} value={`/${draft.command}`} />
         {Object.entries(draft.fields).map(([key, value]) =>
-          value && key !== "mintGasMode" ? <Row key={key} label={key} value={value} /> : null,
+          value && !hiddenFieldKeys.has(key) ? <Row key={key} label={key} value={value} /> : null,
         )}
       </div>
       <div className="space-y-2 rounded-lg border bg-background p-2 text-xs text-muted-foreground">
         <div className="flex flex-wrap items-center gap-2">
           <RailBadge rail={previewRail} />
-          {previewSourceChain ? (
+          {isBridge ? (
+            <ChainRoute sourceChain={bridgeSourceChain} destinationChain={bridgeDestinationChain} compact />
+          ) : previewSourceChain ? (
             <ChainRoute
               sourceChain={previewSourceChain}
               destinationChain={previewDestinationChain}
@@ -3984,12 +5717,293 @@ function CommandPreviewCard({
           ) : null}
         </div>
         <div>
-          Mode: real
-          {draft.command === "transfer" ? " · Auto-deposit nếu Gateway balance thiếu" : ""}
+          {t("chat.modeReal")}
+          {draft.command === "transfer" ? ` · ${t("transfer.modeAutoDeposit")}` : ""}
+          {draft.command === "bridge" ? ` · ${t("bridge.metaMaskDirect")}` : ""}
           {hasMintGasChoice ? mintGasModeText : ""}
-          {draft.command === "withdraw" ? " · Rút Gateway balance về Circle SCA wallet cùng chain" : ""}
-          {draft.command === "fund" ? " · Giữ chat mở để ký MetaMask" : ""}
+          {draft.command === "withdraw" ? ` · ${t("withdraw.previewHint")}` : ""}
+          {draft.command === "fund" || draft.command === "bridge" ? ` · ${t("chat.keepOpenMetaMask")}` : ""}
         </div>
+        {isBridge ? (
+          <div className="space-y-3">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className="grid gap-1">
+                <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{t("bridge.from")}</span>
+                <select
+                  value={bridgeSourceChain}
+                  onChange={(event) => setBridgeSourceChain(event.target.value as CctpBridgeChainKey)}
+                  disabled={!isActive}
+                  className="h-9 rounded-md border bg-card px-2 text-sm text-foreground outline-none"
+                >
+                  {bridgeChainChoices.map((chain) => (
+                    <option key={chain.key} value={chain.key}>
+                      {chain.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="grid gap-1">
+                <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{t("bridge.to")}</span>
+                <select
+                  value={bridgeDestinationChain}
+                  onChange={(event) => setBridgeDestinationChain(event.target.value as CctpBridgeChainKey)}
+                  disabled={!isActive}
+                  className="h-9 rounded-md border bg-card px-2 text-sm text-foreground outline-none"
+                >
+                  {bridgeChainChoices
+                    .filter((chain) => chain.key !== bridgeSourceChain)
+                    .map((chain) => (
+                      <option key={chain.key} value={chain.key}>
+                        {chain.label}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                disabled={!isActive}
+                onClick={() => setBridgeRecipientMode("self")}
+                className={`rounded-md border px-3 py-2 text-left transition ${
+                  bridgeRecipientMode === "self"
+                    ? "border-sky-500/70 bg-sky-500/10"
+                    : "bg-card hover:border-primary/60"
+                } disabled:cursor-not-allowed disabled:opacity-60`}
+              >
+                <span className="block font-medium text-foreground">{t("bridge.myWallet")}</span>
+                <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">
+                  {t("bridge.myWalletHelp")}
+                </span>
+              </button>
+              <button
+                type="button"
+                disabled={!isActive}
+                onClick={() => setBridgeRecipientMode("external")}
+                className={`rounded-md border px-3 py-2 text-left transition ${
+                  bridgeRecipientMode === "external"
+                    ? "border-sky-500/70 bg-sky-500/10"
+                    : "bg-card hover:border-primary/60"
+                } disabled:cursor-not-allowed disabled:opacity-60`}
+              >
+                <span className="block font-medium text-foreground">{t("bridge.anotherAddress")}</span>
+                <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">
+                  {t("bridge.anotherAddressHelp")}
+                </span>
+              </button>
+            </div>
+            {bridgeRecipientMode === "external" ? (
+              <label className="grid gap-1">
+                <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{t("bridge.recipient")}</span>
+                <Input
+                  value={bridgeRecipientAddress}
+                  onChange={(event) => setBridgeRecipientAddress(event.target.value)}
+                  placeholder="0xRecipient"
+                  disabled={!isActive}
+                  className="h-9"
+                />
+              </label>
+            ) : null}
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                disabled={!isActive || !currentBridgeDestination?.canForwardToDestination}
+                onClick={() => setBridgeMintMode("auto_forwarding")}
+                className={`rounded-md border px-3 py-2 text-left transition ${
+                  bridgeMintMode === "auto_forwarding"
+                    ? "border-emerald-500/70 bg-emerald-500/10"
+                    : "bg-card hover:border-primary/60"
+                } disabled:cursor-not-allowed disabled:opacity-60`}
+              >
+                <span className="block font-medium text-foreground">{t("bridge.autoForwarding")}</span>
+                <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">
+                  {t("bridge.autoForwardingHelp")}
+                </span>
+              </button>
+              <button
+                type="button"
+                disabled={!isActive || bridgeRecipientMode === "external"}
+                onClick={() => setBridgeMintMode("manual_mint")}
+                className={`rounded-md border px-3 py-2 text-left transition ${
+                  bridgeMintMode === "manual_mint"
+                    ? "border-amber-500/70 bg-amber-500/10"
+                    : "bg-card hover:border-primary/60"
+                } disabled:cursor-not-allowed disabled:opacity-60`}
+              >
+                <span className="block font-medium text-foreground">{t("bridge.manualMint")}</span>
+                <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">
+                  {t("bridge.manualMintHelp")}
+                </span>
+              </button>
+            </div>
+            {bridgeRecipientMode === "external" ? (
+              <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-4 text-amber-200">
+                {t("bridge.externalAutoOnly")}
+              </div>
+            ) : null}
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                disabled={!isActive || !currentBridgeSource?.canFastFromSource}
+                onClick={() => setBridgeTransferSpeed("FAST")}
+                className={`rounded-md border px-3 py-2 text-left transition ${
+                  bridgeTransferSpeed === "FAST"
+                    ? "border-indigo-500/70 bg-indigo-500/10"
+                    : "bg-card hover:border-primary/60"
+                } disabled:cursor-not-allowed disabled:opacity-60`}
+              >
+                <span className="block font-medium text-foreground">{t("bridge.fast")}</span>
+                <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">
+                  {t("bridge.fastHelp")}
+                </span>
+              </button>
+              <button
+                type="button"
+                disabled={!isActive}
+                onClick={() => setBridgeTransferSpeed("SLOW")}
+                className={`rounded-md border px-3 py-2 text-left transition ${
+                  bridgeTransferSpeed === "SLOW"
+                    ? "border-indigo-500/70 bg-indigo-500/10"
+                    : "bg-card hover:border-primary/60"
+                } disabled:cursor-not-allowed disabled:opacity-60`}
+              >
+                <span className="block font-medium text-foreground">{t("bridge.standard")}</span>
+                <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">
+                  {t("bridge.standardHelp")}
+                </span>
+              </button>
+            </div>
+            {!currentBridgeSource?.canFastFromSource ? (
+              <div className="rounded-md border border-border/80 bg-muted/20 px-3 py-2 text-[11px] leading-4 text-muted-foreground">
+                {t("bridge.standardOnly")}
+              </div>
+            ) : null}
+            <TransactionPreviewSummary
+              title={
+                bridgeEstimate
+                  ? t("preview.bridgeReceive", { amount: formatDecimalAmount(bridgeEstimate.amount) })
+                  : t("bridge.feePreview")
+              }
+              subtitle={
+                bridgeEstimate
+                  ? t("preview.bridgeSpend", {
+                      amount: formatDecimalAmount(bridgeEstimate.sourceDebit),
+                      chain: currentBridgeSource?.label ?? bridgeSourceChain,
+                    })
+                  : undefined
+              }
+              route={<ChainRoute sourceChain={bridgeSourceChain} destinationChain={bridgeDestinationChain} compact />}
+              loading={bridgeEstimateLoading}
+              error={bridgeEstimateError}
+              metrics={
+                bridgeEstimate
+                  ? [
+                      {
+                        label: t("preview.fee"),
+                        value: Number(bridgeEstimate.estimatedFeeTotal) === 0
+                          ? t("preview.noProtocolFee")
+                          : `~${formatDecimalAmount(bridgeEstimate.estimatedFeeTotal)} USDC`,
+                        tone: Number(bridgeEstimate.estimatedFeeTotal) === 0 ? "success" : "default",
+                        title: t("bridge.zeroFeeNote"),
+                      },
+                      {
+                        label: t("preview.sourceGas"),
+                        value: currentBridgeSource?.viemChain.nativeCurrency.symbol ?? "ETH",
+                        title: t("bridge.sourceGas", {
+                          symbol: currentBridgeSource?.viemChain.nativeCurrency.symbol ?? "ETH",
+                          chain: currentBridgeSource?.label ?? bridgeSourceChain,
+                        }),
+                      },
+                      {
+                        label: t("preview.destinationGas"),
+                        value: bridgeMintMode === "manual_mint" ? t("preview.youPay") : t("preview.forwarderPays"),
+                        title:
+                          bridgeMintMode === "manual_mint"
+                            ? t("bridge.destinationGasManual", {
+                                symbol: currentBridgeDestination?.viemChain.nativeCurrency.symbol ?? "native",
+                                chain: currentBridgeDestination?.label ?? bridgeDestinationChain,
+                              })
+                            : t("bridge.destinationGasForwarder"),
+                      },
+                    ]
+                  : []
+              }
+              details={[
+                t("bridge.approveAllowanceNote"),
+                t("bridge.raProofNote"),
+                t("bridge.usesMetaMask"),
+              ]}
+              footer={
+                <>
+                  {t("bridge.needFunds")}{" "}
+                  <a href={CIRCLE_TESTNET_FAUCET_URL} target="_blank" rel="noreferrer" className="text-primary underline">
+                    {t("bridge.circleFaucet")}
+                  </a>
+                </>
+              }
+            />
+          </div>
+        ) : null}
+        {isSwap ? (
+          <TransactionPreviewSummary
+            title={
+              swapEstimate
+                ? `${draft.fields.amount} ${swapEstimate.tokenIn} -> ~${formatDecimalAmount(
+                    formatUnits(swapEstimate.amountOut, paynaSwapTokens[swapEstimate.tokenOut].decimals),
+                    8,
+                  )} ${swapEstimate.tokenOut}`
+                : t("preview.swapTitle")
+            }
+            subtitle={t("preview.swapSubtitle")}
+            route={
+              swapEstimate ? (
+                <div className="flex max-w-full flex-wrap items-center gap-1">
+                  {swapEstimate.route.map((token, index) => (
+                    <span key={`${token}-${index}`} className="inline-flex items-center gap-1">
+                      <span className="rounded-md border bg-background px-2 py-1 text-[11px] font-medium text-foreground">
+                        {token}
+                      </span>
+                      {index < swapEstimate.route.length - 1 ? (
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                      ) : null}
+                    </span>
+                  ))}
+                </div>
+              ) : null
+            }
+            loading={swapEstimateLoading}
+            error={swapEstimateError}
+            metrics={
+              swapEstimate
+                ? [
+                    {
+                      label: t("receipt.minimum"),
+                      value: `${formatDecimalAmount(
+                        formatUnits(swapEstimate.amountOutMin, paynaSwapTokens[swapEstimate.tokenOut].decimals),
+                        8,
+                      )} ${swapEstimate.tokenOut}`,
+                      title: t("preview.swapMinimumTitle"),
+                    },
+                    {
+                      label: t("receipt.slippage"),
+                      value: `${(PAYNA_SWAP_SLIPPAGE_BPS / 100).toFixed(2)}%`,
+                      tone: "warning",
+                      title: t("preview.swapSlippageTitle"),
+                    },
+                    {
+                      label: t("receipt.route"),
+                      value: swapEstimate.route.length > 2 ? t("preview.hops", { count: swapEstimate.route.length - 1 }) : t("preview.direct"),
+                      title: swapEstimate.route.join(" -> "),
+                    },
+                  ]
+                : []
+            }
+            details={[
+              t("preview.swapReserveNote"),
+              t("preview.swapApproveNote"),
+            ]}
+          />
+        ) : null}
         {hasMintGasChoice ? (
           <div className="grid gap-2 sm:grid-cols-2">
             <button
@@ -4002,9 +6016,9 @@ function CommandPreviewCard({
                   : "bg-card hover:border-primary/60"
               } disabled:cursor-not-allowed disabled:opacity-60`}
             >
-              <span className="block font-medium text-foreground">Auto forwarding</span>
+              <span className="block font-medium text-foreground">{t("transfer.autoForwarding")}</span>
               <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">
-                Trả thêm USDC fee. Không cần gas ở chain đích.
+                {t("transfer.autoForwardingHelp")}
               </span>
             </button>
             <button
@@ -4017,18 +6031,22 @@ function CommandPreviewCard({
                   : "bg-card hover:border-primary/60"
               } disabled:cursor-not-allowed disabled:opacity-60`}
             >
-              <span className="block font-medium text-foreground">Manual gas</span>
+              <span className="block font-medium text-foreground">{t("transfer.manualGas")}</span>
               <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">
-                Phí USDC thấp hơn. SCA/signer cần native gas ở chain đích.
+                {t("transfer.manualGasHelp")}
               </span>
             </button>
           </div>
         ) : null}
         {mintGasHelpText ? <div>{mintGasHelpText}</div> : null}
       </div>
-      <Button className="w-full" disabled={!isActive} onClick={() => onConfirm(confirmedDraft)}>
+      <Button
+        className="w-full"
+        disabled={isBridge ? bridgeConfirmDisabled : isSwap ? swapConfirmDisabled : !isActive}
+        onClick={() => onConfirm(confirmedDraft)}
+      >
         <Check className="mr-2 h-4 w-4" />
-        {isActive ? "Confirm command" : statusLabel}
+        {isActive ? t("common.confirmCommand") : previewStatusLabel}
       </Button>
     </div>
   );
@@ -4043,29 +6061,37 @@ function ExecutionStatus({
   text: string;
   isLatest: boolean;
 }) {
+  const { t } = useI18n();
   const done = execution.status === "success";
   const failed = execution.status === "failed";
   const active = isLatest && !done && !failed;
   const sourceChain = executionSourceChain(execution);
   const destinationChain = executionDestinationChain(execution);
-  const txLinks = executionTxLinks(execution);
+  const txLinks = executionTxLinks(execution, t);
   const rail = inferRailFromCommand(execution.command);
+  const receipt = buildExecutionReceipt(execution, t);
 
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 font-medium">
         {done ? (
-          <Check className="h-4 w-4 text-primary" />
+          <Check className="h-4 w-4 text-emerald-500" />
         ) : failed ? (
           <Clock3 className="h-4 w-4 text-destructive" />
         ) : active ? (
-          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
         ) : (
-          <Check className="h-4 w-4 text-muted-foreground" />
+          <Clock3 className="h-4 w-4 text-muted-foreground" />
         )}
-        {statusLabel(execution.status)}
+        <span className={active ? "text-muted-foreground" : done ? "text-emerald-600 dark:text-emerald-300" : ""}>
+          {statusLabel(execution.status, t)}
+        </span>
       </div>
-      <div className="whitespace-pre-wrap leading-7">{text}</div>
+      {receipt ? (
+        <ExecutionReceiptCard receipt={receipt} rail={rail} />
+      ) : (
+        <div className="whitespace-pre-wrap leading-7">{text}</div>
+      )}
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <RailBadge rail={rail} />
         {sourceChain ? (
@@ -4077,7 +6103,7 @@ function ExecutionStatus({
           </span>
         )}
       </div>
-      {txLinks.length ? (
+      {!receipt && txLinks.length ? (
         <div className="space-y-1 rounded-lg bg-background p-2 text-xs text-muted-foreground">
           {txLinks.map((link) => (
             <div key={`${link.label}-${link.txHash}`} className="grid grid-cols-[84px_minmax(0,1fr)] gap-2">
@@ -4087,6 +6113,77 @@ function ExecutionStatus({
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function ExecutionReceiptCard({
+  receipt,
+  rail,
+}: {
+  receipt: ExecutionReceipt;
+  rail: ReturnType<typeof inferRailFromCommand>;
+}) {
+  const { t } = useI18n();
+  const hasDetails = receipt.details.length > 0;
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl border border-emerald-400/25 bg-background/55 p-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            <div className="flex items-center gap-2 text-sm font-semibold text-emerald-600 dark:text-emerald-300">
+              <ReceiptText className="h-4 w-4" />
+              <span>{receipt.title}</span>
+            </div>
+            <div className="break-words text-lg font-semibold leading-7">{receipt.primary}</div>
+            {receipt.secondary ? (
+              <div className="text-xs leading-5 text-muted-foreground">{receipt.secondary}</div>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+          <RailBadge rail={rail} />
+          <ChainRoute sourceChain={receipt.sourceChain} destinationChain={receipt.destinationChain} compact />
+        </div>
+
+        {receipt.metrics.length ? (
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {receipt.metrics.map((item) => (
+              <div key={`${item.label}-${item.value}`} className="rounded-lg border border-border/70 bg-muted/25 px-3 py-2">
+                <div className="text-[11px] uppercase tracking-normal text-muted-foreground">{item.label}</div>
+                <div className="mt-0.5 truncate text-sm font-semibold">{item.value}</div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {receipt.links.length ? (
+          <div className="mt-3 space-y-1.5 rounded-lg bg-background p-2 text-xs text-muted-foreground">
+            {receipt.links.map((link) => (
+              <div key={`${link.label}-${link.txHash}`} className="grid grid-cols-[92px_minmax(0,1fr)] items-center gap-2">
+                <span>{link.label}</span>
+                <ExplorerTxLink chain={link.chain} txHash={link.txHash} compact />
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {hasDetails ? (
+          <details className="mt-3 rounded-lg border border-border/70 bg-muted/15 px-3 py-2 text-xs">
+            <summary className="cursor-pointer text-muted-foreground">{t("receipt.details")}</summary>
+            <div className="mt-2 space-y-1.5">
+              {receipt.details.map((item) => (
+                <div key={`${item.label}-${item.value}`} className="grid grid-cols-[104px_minmax(0,1fr)] gap-2">
+                  <span className="text-muted-foreground">{item.label}</span>
+                  <span className="break-all font-medium">{item.value}</span>
+                </div>
+              ))}
+            </div>
+          </details>
+        ) : null}
+      </div>
     </div>
   );
 }

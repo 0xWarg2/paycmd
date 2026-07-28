@@ -18,20 +18,31 @@
 
 import type { Metadata } from "next";
 import { ThemeProvider } from "next-themes";
+import { I18nProvider } from "@/lib/i18n";
 import { PayCmdRuntimeProvider } from "@/components/paycmd-runtime";
 import { Toaster } from "@/components/ui/sonner";
 import { WagmiProvider } from "@/components/wagmi-provider";
 import "./globals.css";
 
-const defaultUrl = process.env.VERCEL_URL
+const defaultUrl = process.env.NEXT_PUBLIC_SITE_URL
+  ? process.env.NEXT_PUBLIC_SITE_URL
+  : process.env.VERCEL_URL
   ? `https://${process.env.VERCEL_URL}`
   : "http://localhost:3000";
 
 export const metadata: Metadata = {
   metadataBase: new URL(defaultUrl),
-  title: "PayCMD - Stablecoin payments by command",
+  title: "Payna - Stablecoin payments by command",
   description:
     "Chatbox-first demo for agentic stablecoin payments on Arc and Circle Gateway.",
+  icons: {
+    icon: [
+      { url: "/brand/payna-favicon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/brand/payna-icon-192.png", sizes: "192x192", type: "image/png" },
+    ],
+    apple: [{ url: "/brand/payna-apple-icon.png", sizes: "180x180", type: "image/png" }],
+  },
+  manifest: "/manifest.webmanifest",
 };
 
 export default function RootLayout({
@@ -49,10 +60,12 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <WagmiProvider>
-            <PayCmdRuntimeProvider>
-              {children}
-              <Toaster toastOptions={{ style: { width: "450px", maxWidth: "90vw" } }} />
-            </PayCmdRuntimeProvider>
+            <I18nProvider>
+              <PayCmdRuntimeProvider>
+                {children}
+                <Toaster toastOptions={{ style: { width: "450px", maxWidth: "90vw" } }} />
+              </PayCmdRuntimeProvider>
+            </I18nProvider>
           </WagmiProvider>
         </ThemeProvider>
       </body>

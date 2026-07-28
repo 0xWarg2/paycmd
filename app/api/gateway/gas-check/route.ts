@@ -2,13 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 
 import {
   CIRCLE_CHAIN_NAMES,
+  GATEWAY_CHAIN_CONFIGS,
   checkWalletGasBalance,
+  supportedGatewayChains,
   type SupportedChain,
 } from "@/lib/circle/gateway-sdk";
 import { getGatewayEOAWalletId } from "@/lib/circle/create-gateway-eoa-wallets";
 import { createClient } from "@/lib/supabase/server";
 
-const validChains: SupportedChain[] = ["arcTestnet", "baseSepolia", "avalancheFuji"];
+const validChains = supportedGatewayChains;
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
@@ -60,7 +62,11 @@ export async function POST(req: NextRequest) {
   let gatewaySignerError: string | undefined;
 
   try {
-    const signer = await getGatewayEOAWalletId(user.id, CIRCLE_CHAIN_NAMES[chain]);
+    const blockchain = CIRCLE_CHAIN_NAMES[chain];
+    if (!blockchain) {
+      throw new Error(`${GATEWAY_CHAIN_CONFIGS[chain].label} is listed by Circle Gateway, but the current Circle wallet SDK cannot check signer gas on it yet.`);
+    }
+    const signer = await getGatewayEOAWalletId(user.id, blockchain);
     const signerGas = await checkWalletGasBalance(signer.walletId, chain);
     gatewaySigner = {
       walletId: signer.walletId,

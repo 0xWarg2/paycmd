@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
       user_id: user.id,
       auth_provider: authProvider,
       handle: hasExternalWallet ? externalWalletAddress : user.email ?? user.id,
-      display_name: hasExternalWallet ? shortAddress(externalWalletAddress) : user.email ?? "PayCMD user",
+      display_name: hasExternalWallet ? shortAddress(externalWalletAddress) : user.email ?? "Payna user",
       default_chain: "arcTestnet",
       primary_external_wallet_address: hasExternalWallet ? externalWalletAddress : null,
       updated_at: new Date().toISOString(),

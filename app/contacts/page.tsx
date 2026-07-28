@@ -1,11 +1,14 @@
 import { Contact } from "lucide-react";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { PayCmdSectionPage } from "@/components/paycmd-section-page";
 import { Badge } from "@/components/ui/badge";
+import { localeFromCookieStore, tr } from "@/lib/i18n/server";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function ContactsPage() {
+  const locale = localeFromCookieStore(await cookies());
   const supabase = await createClient();
   const {
     data: { user },
@@ -23,7 +26,7 @@ export default async function ContactsPage() {
     <PayCmdSectionPage
       eyebrow="Directory"
       title="Contacts"
-      description="Danh bạ người nhận và contributor. Khi user gõ /pay to Minh, PayCMD sẽ lookup contact này để lấy wallet address thật."
+      description={tr(locale, "pages.contacts.description")}
     >
       <div className="divide-y rounded-lg border bg-card shadow-sm">
         {(contacts ?? []).map((contact) => (
@@ -45,7 +48,7 @@ export default async function ContactsPage() {
         ))}
         {contacts?.length ? null : (
           <div className="p-4 text-sm text-muted-foreground">
-            Chưa có contact. Thử /contacts add Minh 0x... on arc trong chat.
+            {tr(locale, "pages.contacts.empty")}
           </div>
         )}
       </div>

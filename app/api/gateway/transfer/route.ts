@@ -29,11 +29,19 @@ import {
   type SupportedChain,
   CIRCLE_CHAIN_NAMES,
   CHAIN_BY_DOMAIN,
+  DOMAIN_IDS,
+  GATEWAY_CHAIN_CONFIGS,
+  GATEWAY_MINTER_ADDRESS,
+  GATEWAY_WALLET_ADDRESS,
+  USDC_ADDRESSES,
+  supportedGatewayChains,
 } from "@/lib/circle/gateway-sdk";
 import { createClient } from "@/lib/supabase/server";
 import { maxUint256, type Address } from "viem";
 import { Transaction } from "@circle-fin/developer-controlled-wallets";
 import { circleDeveloperSdk } from "@/lib/circle/sdk";
+import { requestLocale, tr, type PayCmdLocale } from "@/lib/i18n/server";
+import { recordRaReceipt, updateRaProofColumns } from "@/lib/ra/receipt-registry";
 
 function decimalUsdcToAtomic(value: string | number) {
   const [wholeRaw, fractionRaw = ""] = String(value).split(".");
@@ -81,28 +89,12 @@ function buildBurnIntentPreview(params: {
     maxFee,
     spec: {
       version: 1,
-      sourceDomain: {
-        avalancheFuji: 1,
-        baseSepolia: 6,
-        arcTestnet: 26,
-      }[params.sourceChain],
-      destinationDomain: {
-        avalancheFuji: 1,
-        baseSepolia: 6,
-        arcTestnet: 26,
-      }[params.destinationChain],
-      sourceContract: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9" as Address,
-      destinationContract: "0x0022222ABE238Cc2C7Bb1f21003F0a260052475B" as Address,
-      sourceToken: {
-        avalancheFuji: "0x5425890298aed601595a70ab815c96711a31bc65",
-        baseSepolia: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-        arcTestnet: "0x3600000000000000000000000000000000000000",
-      }[params.sourceChain] as Address,
-      destinationToken: {
-        avalancheFuji: "0x5425890298aed601595a70ab815c96711a31bc65",
-        baseSepolia: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-        arcTestnet: "0x3600000000000000000000000000000000000000",
-      }[params.destinationChain] as Address,
+      sourceDomain: DOMAIN_IDS[params.sourceChain],
+      destinationDomain: DOMAIN_IDS[params.destinationChain],
+      sourceContract: GATEWAY_WALLET_ADDRESS as Address,
+      destinationContract: GATEWAY_MINTER_ADDRESS as Address,
+      sourceToken: USDC_ADDRESSES[params.sourceChain] as Address,
+      destinationToken: USDC_ADDRESSES[params.destinationChain] as Address,
       sourceDepositor: params.sourceDepositor,
       destinationRecipient: params.recipient,
       sourceSigner: params.sourceSigner,
@@ -122,17 +114,23 @@ function chainCommandAlias(chain: SupportedChain) {
       : "avalanche";
 }
 
-function finalityHint(chain: SupportedChain) {
+function finalityHint(chain: SupportedChain, locale: PayCmdLocale) {
   if (chain === "baseSepolia") {
-    return "Base Sepolia cần chờ Circle Gateway nhận finality, thường khoảng 13-19 phút.";
+    return tr(locale, "gateway.finality.base");
   }
 
-  return "Đợi Gateway index xong deposit/delegate rồi chạy lại command.";
+  return tr(locale, "gateway.finality.generic");
 }
 
 function isSignerNotAuthorizedError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes("Signer is not authorized to spend funds from sourceDepositor");
+}
+
+function parseForwardingFailure(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(/^Forwarded transfer failed:\s*(.+)$/i);
+  return match?.[1]?.trim();
 }
 
 async function waitForGatewayBalanceAtLeast(
@@ -220,25 +218,35 @@ function gatewayFinalityPendingResponse(params: {
   currentGatewayBalance?: bigint;
   requiredGatewayBalance?: bigint;
   stage: "auto_deposit" | "delegate" | "burn_intent";
+  locale: PayCmdLocale;
 }) {
   const retryCommand = `/transfer ${params.amount} from ${chainCommandAlias(params.sourceChain)} to ${chainCommandAlias(params.destinationChain)}`;
   const actionText =
     params.stage === "auto_deposit"
       ? params.pendingAmount
-        ? `Đang chờ Gateway finality ${formatUsdc(params.pendingAmount)} USDC trên ${params.sourceChain}.`
-        : `Đã gửi auto-deposit ${params.autoDepositedAmount ?? params.amount} USDC vào Gateway trên ${params.sourceChain}.`
+        ? tr(params.locale, "gateway.finality.autoDeposit", {
+            amount: formatUsdc(params.pendingAmount),
+            chain: params.sourceChain,
+          })
+        : tr(params.locale, "gateway.finality.autoDepositSubmitted", {
+            amount: params.autoDepositedAmount ?? params.amount,
+            chain: params.sourceChain,
+          })
       : params.stage === "delegate"
-        ? `Đã gửi giao dịch authorize Gateway signer trên ${params.sourceChain}.`
-        : `Gateway signer/deposit trên ${params.sourceChain} chưa được Gateway API ghi nhận.`;
+        ? tr(params.locale, "gateway.finality.delegate", { chain: params.sourceChain })
+        : tr(params.locale, "gateway.finality.burnIntent", { chain: params.sourceChain });
   const balanceText =
     params.currentGatewayBalance !== undefined && params.requiredGatewayBalance !== undefined
-      ? ` Gateway ready hiện ${formatUsdc(params.currentGatewayBalance)} USDC, cần ${formatUsdc(params.requiredGatewayBalance)} USDC gồm amount + fee.`
+      ? ` ${tr(params.locale, "gateway.finality.balance", {
+          current: formatUsdc(params.currentGatewayBalance),
+          required: formatUsdc(params.requiredGatewayBalance),
+        })}`
       : "";
 
   return NextResponse.json(
     {
       error: "GATEWAY_FINALITY_PENDING",
-      message: `${actionText}${balanceText} ${finalityHint(params.sourceChain)} Không auto-deposit thêm lúc này. Sau đó chạy lại: ${retryCommand}.`,
+      message: `${actionText}${balanceText} ${finalityHint(params.sourceChain, params.locale)} ${tr(params.locale, "gateway.finality.noAutoDeposit")} ${tr(params.locale, "gateway.finality.retry", { command: retryCommand })}`,
       status: "pending_gateway_finality",
       sourceChain: params.sourceChain,
       destinationChain: params.destinationChain,
@@ -258,6 +266,7 @@ function gatewayFinalityPendingResponse(params: {
 }
 
 export async function POST(req: NextRequest) {
+  const locale = requestLocale(req);
   const supabase = await createClient();
   const {
     data: { user },
@@ -274,6 +283,7 @@ export async function POST(req: NextRequest) {
     recipientAddress,
     autoDeposit = true,
     mintGasMode = "auto_forwarding",
+    skipReceipt = false,
   } =
     await req.json();
 
@@ -289,11 +299,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Validate chains
-    const validChains: SupportedChain[] = [
-      "baseSepolia",
-      "avalancheFuji",
-      "arcTestnet"
-    ];
+    const validChains = supportedGatewayChains;
     if (
       !validChains.includes(sourceChain) ||
       !validChains.includes(destinationChain)
@@ -392,12 +398,11 @@ export async function POST(req: NextRequest) {
 
         if (isExternalRecipient) {
           // For external recipients, EOA wallet will execute mint
-          const chainMap: Record<SupportedChain, string> = {
-            baseSepolia: 'BASE-SEPOLIA',
-            avalancheFuji: 'AVAX-FUJI',
-            arcTestnet: 'ARC-TESTNET',
-          };
-          const { walletId: eoaWalletId } = await getGatewayEOAWalletId(user.id, chainMap[destinationChainKey]);
+          const destinationBlockchain = GATEWAY_CHAIN_CONFIGS[destinationChainKey].eoaWalletBlockchain;
+          if (!destinationBlockchain) {
+            throw new Error(`${GATEWAY_CHAIN_CONFIGS[destinationChainKey].label} cannot use the Circle EOA signing wallet with the current SDK version.`);
+          }
+          const { walletId: eoaWalletId } = await getGatewayEOAWalletId(user.id, destinationBlockchain);
           minterWalletId = eoaWalletId;
         } else {
           // For own wallet, SCA wallet will execute mint
@@ -416,7 +421,7 @@ export async function POST(req: NextRequest) {
               walletId: minterWalletId,
               walletAddress: gasCheck.address,
               walletRole,
-              blockchain: CIRCLE_CHAIN_NAMES[destinationChainKey],
+              blockchain: CIRCLE_CHAIN_NAMES[destinationChainKey] ?? GATEWAY_CHAIN_CONFIGS[destinationChainKey].label,
               chain: destinationChain,
               stage: "mint",
               message:
@@ -459,6 +464,7 @@ export async function POST(req: NextRequest) {
             currentGatewayBalance: gatewayBalance,
             requiredGatewayBalance,
             stage: "auto_deposit",
+            locale,
           });
         }
 
@@ -489,7 +495,7 @@ export async function POST(req: NextRequest) {
               walletId,
               walletAddress: sourceGasCheck.address,
               walletRole: "sca",
-              blockchain: CIRCLE_CHAIN_NAMES[sourceChainKey],
+              blockchain: CIRCLE_CHAIN_NAMES[sourceChainKey] ?? GATEWAY_CHAIN_CONFIGS[sourceChainKey].label,
               chain: sourceChain,
               stage: "auto_deposit",
               message: `Auto-deposit requires native gas on ${sourceChain}. The Circle wallet has USDC, but it needs native gas to approve and deposit into Gateway.`,
@@ -530,6 +536,7 @@ export async function POST(req: NextRequest) {
             currentGatewayBalance: gatewayBalance,
             requiredGatewayBalance,
             stage: "auto_deposit",
+            locale,
           });
         }
       }
@@ -558,7 +565,7 @@ export async function POST(req: NextRequest) {
             walletId,
             walletAddress: sourceGasCheck.address,
             walletRole: "sca",
-            blockchain: CIRCLE_CHAIN_NAMES[sourceChainKey],
+            blockchain: CIRCLE_CHAIN_NAMES[sourceChainKey] ?? GATEWAY_CHAIN_CONFIGS[sourceChainKey].label,
             chain: sourceChain,
             stage: "delegate",
             message: `Transfer requires native gas on ${sourceChain} to authorize the Gateway signer before burning Gateway balance.`,
@@ -581,6 +588,7 @@ export async function POST(req: NextRequest) {
         recipient: recipient as Address,
         txHash: delegateTxHash,
         stage: "delegate",
+        locale,
       });
     }
 
@@ -617,23 +625,67 @@ export async function POST(req: NextRequest) {
 
     const attestationHash = attestation;
 
-    // Store transaction in database
-    await supabase.from("transaction_history").insert([
-      {
-        user_id: user.id,
-        chain: sourceChain,
-        tx_type: "transfer",
-        amount: parseFloat(amount),
-        tx_hash: mintTxHash ?? transferId,
-        gateway_wallet_address: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9",
-        destination_chain: destinationChain,
-        status: "success",
-        created_at: new Date().toISOString(),
-      },
-    ]);
+    const { data: transaction, error: transactionError } = await supabase
+      .from("transaction_history")
+      .insert([
+        {
+          user_id: user.id,
+          chain: sourceChain,
+          tx_type: "transfer",
+          amount: parseFloat(amount),
+          tx_hash: mintTxHash ?? transferId,
+          gateway_wallet_address: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9",
+          destination_chain: destinationChain,
+          status: "success",
+          created_at: new Date().toISOString(),
+        },
+      ])
+      .select("*")
+      .single();
+
+    if (transactionError) {
+      console.error("Failed to record transfer transaction", transactionError);
+    }
+
+    let proof:
+      | Awaited<ReturnType<typeof recordRaReceipt>>
+      | undefined;
+
+    if (!skipReceipt && transaction?.id) {
+      try {
+        proof = await recordRaReceipt({
+          action: "transfer",
+          userAddress: walletAddress,
+          recipientAddress: recipient,
+          amount,
+          sourceChain,
+          destinationChain,
+          sourceTxHash: autoDepositTxHash,
+          destinationTxHash: mintTxHash,
+          metadata: {
+            transactionHistoryId: transaction.id,
+            transferId,
+            forwarding: useForwarding,
+            forwardingDetails: forwardingDetails ?? null,
+            mintGasMode: effectiveMintGasMode,
+            autoDepositTxHash: autoDepositTxHash ?? null,
+          },
+        });
+        await updateRaProofColumns({ supabase, transactionId: transaction.id, result: proof });
+      } catch (proofError) {
+        console.warn("Failed to record Payna transfer proof.", proofError);
+        await updateRaProofColumns({
+          supabase,
+          transactionId: transaction.id,
+          result: { enabled: false, status: "skipped", reason: "proof write failed" },
+          error: proofError,
+        });
+      }
+    }
 
     return NextResponse.json({
       success: true,
+      transactionId: transaction?.id,
       attestation: attestationHash,
       mintTxHash,
       transferId,
@@ -650,9 +702,43 @@ export async function POST(req: NextRequest) {
       destinationChain,
       amount: parseFloat(amount),
       recipient,
+      sourceWalletAddress: walletAddress,
+      proofTxHash: proof?.enabled ? proof.txHash : null,
+      proofStatus: proof?.status ?? (skipReceipt ? "skipped" : undefined),
+      proofContractAddress: proof?.enabled ? proof.contractAddress : process.env.RA_RECEIPT_REGISTRY_ADDRESS ?? null,
+      transaction: transaction
+        ? {
+            ...transaction,
+            proof_chain: proof?.enabled ? proof.chain : transaction.proof_chain,
+            proof_contract_address: proof?.enabled
+              ? proof.contractAddress
+              : transaction.proof_contract_address ?? process.env.RA_RECEIPT_REGISTRY_ADDRESS ?? null,
+            proof_tx_hash: proof?.enabled ? proof.txHash : transaction.proof_tx_hash,
+            proof_status: proof?.status ?? transaction.proof_status,
+          }
+        : null,
     });
   } catch (error: any) {
     console.error("Error in transfer:", error);
+
+    const forwardingFailureReason = parseForwardingFailure(error);
+    if (forwardingFailureReason) {
+      return NextResponse.json(
+        {
+          error: "GATEWAY_FORWARDING_FAILED",
+          reason: forwardingFailureReason,
+          message:
+            `Circle Forwarding Service failed on-chain (${forwardingFailureReason}). ` +
+            "For pay-to-recipient flows, choose Manual gas and Payna will mint from your Gateway signer instead of relying on the forwarder. " +
+            "If this transfer already submitted, check the transfer status before retrying to avoid sending twice.",
+          sourceChain,
+          destinationChain,
+          recipient: recipientAddress,
+          retryMintGasMode: "manual",
+        },
+        { status: 502 },
+      );
+    }
 
     if (isSignerNotAuthorizedError(error)) {
       return gatewayFinalityPendingResponse({
@@ -661,6 +747,7 @@ export async function POST(req: NextRequest) {
         destinationChain: destinationChain as SupportedChain,
         recipient: recipientAddress as Address,
         stage: "burn_intent",
+        locale,
       });
     }
 

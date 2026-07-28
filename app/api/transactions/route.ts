@@ -39,6 +39,8 @@ export async function GET(req: NextRequest) {
 
     if (
       txType === "fund" ||
+      txType === "bridge" ||
+      txType === "swap" ||
       txType === "deposit" ||
       txType === "withdraw" ||
       txType === "transfer" ||

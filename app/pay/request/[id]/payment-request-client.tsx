@@ -81,7 +81,7 @@ export function PaymentRequestClient({ requestId }: { requestId: string }) {
         <section className="w-full max-w-xl rounded-xl border bg-card p-5 shadow-sm">
           <Link href="/app" className="mb-4 inline-flex items-center gap-2 text-sm text-muted-foreground">
             <ArrowLeft className="h-4 w-4" />
-            Back to PayCMD
+            Back to Payna
           </Link>
 
           <div className="mb-5 flex items-center gap-3">

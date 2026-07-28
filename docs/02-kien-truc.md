@@ -42,4 +42,4 @@ Các bảng chính:
 
 RLS được bật cho từng bảng và dữ liệu thuộc về `auth.uid()`.
 
-Chat history được lưu theo user trong Supabase. Khi mở app, PayCMD tải 10 message mới nhất; khi scroll lên đầu chat box, app tải thêm 10 message cũ hơn.
+Chat history được lưu theo user trong Supabase. Khi mở app, Ra tải 10 message mới nhất; khi scroll lên đầu chat box, app tải thêm 10 message cũ hơn.

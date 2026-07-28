@@ -1,6 +1,6 @@
 # Payment Copilot MVP
 
-PayCMD V1 mở rộng từ Gateway command console sang USDC payment copilot. Scope hiện tại là Circle-first: user đăng nhập, tạo Circle Developer-Controlled Wallet, fund wallet bằng testnet USDC/gas, rồi dùng chat command để trả tiền, tạo payment request hoặc chạy payroll batch.
+Ra V1 mở rộng từ Gateway command console sang USDC payment copilot. Scope hiện tại là Circle-first: user đăng nhập, tạo Circle Developer-Controlled Wallet, fund wallet bằng testnet USDC/gas, rồi dùng chat command để trả tiền, tạo payment request hoặc chạy payroll batch.
 
 ## Commands
 
@@ -18,11 +18,11 @@ PayCMD V1 mở rộng từ Gateway command console sang USDC payment copilot. Sc
 
 ## Runtime Flow
 
-PayCMD không tự custody tiền ngoài chain. Tiền nằm ở Circle wallet address trên từng testnet chain. Khi user confirm payment, PayCMD backend gọi Circle Gateway transfer flow hiện có: check balance, auto-deposit nếu cần, ký burn intent, lấy attestation, mint/receive ở destination chain, rồi lưu history/notification.
+Ra không tự custody tiền ngoài chain. Tiền nằm ở Circle wallet address trên từng testnet chain. Khi user confirm payment, Ra backend gọi Circle Gateway transfer flow hiện có: check balance, auto-deposit nếu cần, ký burn intent, lấy attestation, mint/receive ở destination chain, rồi lưu history/notification.
 
 ## Limitations
 
-- V1 chưa dùng MetaMask-first. User cần fund PayCMD/Circle wallet.
+- V1 chưa dùng MetaMask-first. User cần fund Ra/Circle wallet.
 - Payroll chạy tuần tự trong request để demo nhanh, chưa có queue/cron.
 - QR dùng link request và external QR image URL; payment source of truth vẫn là `payment_requests`.
 - Notification cho requester khi B trả request cần service-role hoặc worker ở bản sau; hiện route ghi notification cho payer.

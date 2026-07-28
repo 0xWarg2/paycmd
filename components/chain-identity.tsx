@@ -1,12 +1,29 @@
 "use client";
 
-import { ChevronRight, ExternalLink } from "lucide-react";
+import { ChevronRight, ExternalLink, Orbit } from "lucide-react";
+import NetworkArbitrumSepolia from "@web3icons/react/icons/networks/NetworkArbitrumSepolia";
 import NetworkArc from "@web3icons/react/icons/networks/NetworkArc";
 import NetworkAvalancheFuji from "@web3icons/react/icons/networks/NetworkAvalancheFuji";
 import NetworkBaseSepolia from "@web3icons/react/icons/networks/NetworkBaseSepolia";
+import NetworkCodex from "@web3icons/react/icons/networks/NetworkCodex";
+import NetworkEdgeless from "@web3icons/react/icons/networks/NetworkEdgeless";
+import NetworkEthereum from "@web3icons/react/icons/networks/NetworkEthereum";
+import NetworkHyperEvm from "@web3icons/react/icons/networks/NetworkHyperEvm";
+import NetworkInk from "@web3icons/react/icons/networks/NetworkInk";
+import NetworkLineaSepolia from "@web3icons/react/icons/networks/NetworkLineaSepolia";
+import NetworkMonadTestnet from "@web3icons/react/icons/networks/NetworkMonadTestnet";
+import NetworkOptimismSepolia from "@web3icons/react/icons/networks/NetworkOptimismSepolia";
+import NetworkPlume from "@web3icons/react/icons/networks/NetworkPlume";
+import NetworkPolygonAmoy from "@web3icons/react/icons/networks/NetworkPolygonAmoy";
+import NetworkSeiNetwork from "@web3icons/react/icons/networks/NetworkSeiNetwork";
+import NetworkSonic from "@web3icons/react/icons/networks/NetworkSonic";
+import NetworkUnichain from "@web3icons/react/icons/networks/NetworkUnichain";
+import NetworkWorld from "@web3icons/react/icons/networks/NetworkWorld";
+import NetworkXdcNetwork from "@web3icons/react/icons/networks/NetworkXdcNetwork";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { cctpBridgeChainMap, type CctpBridgeChainKey } from "@/lib/paycmd/cctp-bridge";
 import { isSupportedChain, type PayCmdChain } from "@/lib/paycmd/chains";
 import { web3Chains } from "@/lib/paycmd/web3-chains";
 import { cn } from "@/lib/utils";
@@ -21,13 +38,23 @@ type Web3IconComponent = ComponentType<
 export type PayCmdRail = "metamask" | "circle_sca" | "circle_gateway";
 
 export type PayCmdChainMeta = {
-  key: PayCmdChain;
+  key: string;
   label: string;
   shortLabel: string;
   explorerUrl: string;
   nativeSymbol: string;
   Icon: Web3IconComponent;
 };
+
+function GenericChainIcon({
+  size = 18,
+  className,
+}: SVGProps<SVGSVGElement> & {
+  size?: string | number;
+  variant?: "branded" | "mono" | "background";
+}) {
+  return <Orbit aria-hidden="true" className={className} size={size} />;
+}
 
 export const payCmdChainMeta: Record<PayCmdChain, PayCmdChainMeta> = {
   arcTestnet: {
@@ -38,6 +65,14 @@ export const payCmdChainMeta: Record<PayCmdChain, PayCmdChainMeta> = {
     nativeSymbol: web3Chains.arcTestnet.nativeCurrency.symbol,
     Icon: NetworkArc,
   },
+  arbitrumSepolia: {
+    key: "arbitrumSepolia",
+    label: web3Chains.arbitrumSepolia.name,
+    shortLabel: "Arbitrum",
+    explorerUrl: web3Chains.arbitrumSepolia.blockExplorerUrl,
+    nativeSymbol: web3Chains.arbitrumSepolia.nativeCurrency.symbol,
+    Icon: NetworkArbitrumSepolia,
+  },
   baseSepolia: {
     key: "baseSepolia",
     label: web3Chains.baseSepolia.name,
@@ -45,6 +80,14 @@ export const payCmdChainMeta: Record<PayCmdChain, PayCmdChainMeta> = {
     explorerUrl: web3Chains.baseSepolia.blockExplorerUrl,
     nativeSymbol: web3Chains.baseSepolia.nativeCurrency.symbol,
     Icon: NetworkBaseSepolia,
+  },
+  sepolia: {
+    key: "sepolia",
+    label: web3Chains.sepolia.name,
+    shortLabel: "Ethereum",
+    explorerUrl: web3Chains.sepolia.blockExplorerUrl,
+    nativeSymbol: web3Chains.sepolia.nativeCurrency.symbol,
+    Icon: NetworkEthereum,
   },
   avalancheFuji: {
     key: "avalancheFuji",
@@ -54,7 +97,116 @@ export const payCmdChainMeta: Record<PayCmdChain, PayCmdChainMeta> = {
     nativeSymbol: web3Chains.avalancheFuji.nativeCurrency.symbol,
     Icon: NetworkAvalancheFuji,
   },
+  hyperEvmTestnet: {
+    key: "hyperEvmTestnet",
+    label: web3Chains.hyperEvmTestnet.name,
+    shortLabel: "HyperEVM",
+    explorerUrl: web3Chains.hyperEvmTestnet.blockExplorerUrl,
+    nativeSymbol: web3Chains.hyperEvmTestnet.nativeCurrency.symbol,
+    Icon: NetworkHyperEvm,
+  },
+  optimismSepolia: {
+    key: "optimismSepolia",
+    label: web3Chains.optimismSepolia.name,
+    shortLabel: "OP",
+    explorerUrl: web3Chains.optimismSepolia.blockExplorerUrl,
+    nativeSymbol: web3Chains.optimismSepolia.nativeCurrency.symbol,
+    Icon: NetworkOptimismSepolia,
+  },
+  polygonAmoy: {
+    key: "polygonAmoy",
+    label: web3Chains.polygonAmoy.name,
+    shortLabel: "Polygon",
+    explorerUrl: web3Chains.polygonAmoy.blockExplorerUrl,
+    nativeSymbol: web3Chains.polygonAmoy.nativeCurrency.symbol,
+    Icon: NetworkPolygonAmoy,
+  },
+  seiAtlantic: {
+    key: "seiAtlantic",
+    label: web3Chains.seiAtlantic.name,
+    shortLabel: "Sei",
+    explorerUrl: web3Chains.seiAtlantic.blockExplorerUrl,
+    nativeSymbol: web3Chains.seiAtlantic.nativeCurrency.symbol,
+    Icon: NetworkSeiNetwork,
+  },
+  sonicTestnet: {
+    key: "sonicTestnet",
+    label: web3Chains.sonicTestnet.name,
+    shortLabel: "Sonic",
+    explorerUrl: web3Chains.sonicTestnet.blockExplorerUrl,
+    nativeSymbol: web3Chains.sonicTestnet.nativeCurrency.symbol,
+    Icon: NetworkSonic,
+  },
+  unichainSepolia: {
+    key: "unichainSepolia",
+    label: web3Chains.unichainSepolia.name,
+    shortLabel: "Unichain",
+    explorerUrl: web3Chains.unichainSepolia.blockExplorerUrl,
+    nativeSymbol: web3Chains.unichainSepolia.nativeCurrency.symbol,
+    Icon: NetworkUnichain,
+  },
+  worldChainSepolia: {
+    key: "worldChainSepolia",
+    label: web3Chains.worldChainSepolia.name,
+    shortLabel: "World",
+    explorerUrl: web3Chains.worldChainSepolia.blockExplorerUrl,
+    nativeSymbol: web3Chains.worldChainSepolia.nativeCurrency.symbol,
+    Icon: NetworkWorld,
+  },
 };
+
+const cctpBridgeChainMeta = Object.fromEntries(
+  Object.values(cctpBridgeChainMap).map((config) => [
+    config.key,
+    {
+      key: config.key,
+      label: config.label,
+      shortLabel: config.shortLabel,
+      explorerUrl: config.viemChain.blockExplorers?.default.url ?? "",
+      nativeSymbol: config.viemChain.nativeCurrency.symbol,
+      Icon:
+        config.key === "arcTestnet"
+          ? NetworkArc
+          : config.key === "arbitrumSepolia"
+            ? NetworkArbitrumSepolia
+            : config.key === "avalancheFuji"
+              ? NetworkAvalancheFuji
+              : config.key === "baseSepolia"
+                ? NetworkBaseSepolia
+                : config.key === "codexTestnet"
+                  ? NetworkCodex
+                  : config.key === "edgeTestnet"
+                    ? NetworkEdgeless
+                    : config.key === "ethereumSepolia"
+                      ? NetworkEthereum
+                      : config.key === "hyperEvmTestnet"
+                        ? NetworkHyperEvm
+                        : config.key === "inkTestnet"
+                          ? NetworkInk
+                          : config.key === "lineaSepolia"
+                            ? NetworkLineaSepolia
+                            : config.key === "monadTestnet"
+                              ? NetworkMonadTestnet
+                              : config.key === "optimismSepolia"
+                                ? NetworkOptimismSepolia
+                                : config.key === "plumeTestnet"
+                                  ? NetworkPlume
+                                  : config.key === "polygonAmoy"
+                                    ? NetworkPolygonAmoy
+                                    : config.key === "seiTestnet"
+                                      ? NetworkSeiNetwork
+                                      : config.key === "sonicTestnet"
+                                        ? NetworkSonic
+                                        : config.key === "unichainSepolia"
+                                          ? NetworkUnichain
+                                          : config.key === "worldChainSepolia"
+                                            ? NetworkWorld
+                                            : config.key === "xdcApothem"
+                                              ? NetworkXdcNetwork
+                                              : GenericChainIcon,
+    } satisfies PayCmdChainMeta,
+  ]),
+) as Record<CctpBridgeChainKey, PayCmdChainMeta>;
 
 const railLabels: Record<PayCmdRail, string> = {
   metamask: "MetaMask",
@@ -68,6 +220,46 @@ const railClassNames: Record<PayCmdRail, string> = {
   circle_gateway: "border-primary/30 bg-primary/10 text-primary",
 };
 
+function normalizeChainLookupValue(chain?: string | null) {
+  return (chain ?? "").trim().toLowerCase().replace(/[_\s-]+/g, "");
+}
+
+function resolveChainKey(chain?: string | null) {
+  if (!chain) {
+    return null;
+  }
+
+  if (isSupportedChain(chain)) {
+    return chain;
+  }
+
+  if (chain in cctpBridgeChainMeta) {
+    return chain as CctpBridgeChainKey;
+  }
+
+  const lookup = normalizeChainLookupValue(chain);
+  const payCmdMatch = Object.values(payCmdChainMeta).find(
+    (meta) =>
+      normalizeChainLookupValue(meta.key) === lookup ||
+      normalizeChainLookupValue(meta.label) === lookup ||
+      normalizeChainLookupValue(meta.shortLabel) === lookup,
+  );
+
+  if (payCmdMatch) {
+    return payCmdMatch.key;
+  }
+
+  const cctpMatch = Object.values(cctpBridgeChainMap).find(
+    (config) =>
+      normalizeChainLookupValue(config.key) === lookup ||
+      normalizeChainLookupValue(config.label) === lookup ||
+      normalizeChainLookupValue(config.shortLabel) === lookup ||
+      config.aliases.some((alias) => normalizeChainLookupValue(alias) === lookup),
+  );
+
+  return cctpMatch?.key ?? null;
+}
+
 export function normalizePayCmdChain(chain?: string | null): PayCmdChain | null {
   if (!chain || !isSupportedChain(chain)) {
     return null;
@@ -77,8 +269,21 @@ export function normalizePayCmdChain(chain?: string | null): PayCmdChain | null 
 }
 
 export function getChainMeta(chain?: string | null) {
-  const normalizedChain = normalizePayCmdChain(chain);
-  return normalizedChain ? payCmdChainMeta[normalizedChain] : null;
+  const key = resolveChainKey(chain);
+
+  if (!key) {
+    return null;
+  }
+
+  if (isSupportedChain(key)) {
+    return payCmdChainMeta[key];
+  }
+
+  if (key in cctpBridgeChainMeta) {
+    return cctpBridgeChainMeta[key as CctpBridgeChainKey];
+  }
+
+  return null;
 }
 
 export function getExplorerTxUrl(chain?: string | null, txHash?: string | null) {
@@ -105,7 +310,7 @@ export function getTransactionExplorerChain(transaction: {
 }
 
 export function inferRailFromTransactionType(type?: string | null): PayCmdRail {
-  if (type === "fund") {
+  if (type === "fund" || type === "bridge" || type === "swap") {
     return "metamask";
   }
 
@@ -117,7 +322,7 @@ export function inferRailFromTransactionType(type?: string | null): PayCmdRail {
 }
 
 export function inferRailFromCommand(command?: string | null): PayCmdRail {
-  if (command === "link" || command === "fund") {
+  if (command === "link" || command === "fund" || command === "bridge" || command === "swap") {
     return "metamask";
   }
 

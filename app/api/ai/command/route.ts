@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { cctpBridgeChainConfigs, normalizeCctpBridgeChain } from "@/lib/paycmd/cctp-bridge";
 import { getAiModelOption } from "@/lib/paycmd/ai/models";
 import { aiCommandJsonSchema, aiCommandResponseSchema } from "@/lib/paycmd/ai/schema";
+import { requestLocale, tr, type PayCmdLocale } from "@/lib/i18n/server";
 import { commandRegistry, parsePayCmd } from "@/lib/paycmd/commands";
 import { createClient } from "@/lib/supabase/server";
 
@@ -71,6 +73,7 @@ function latestContactAddress(messages: { role: string; text: string }[]) {
 function deterministicContactCommand(
   input: string,
   recentMessages: { role: string; text: string }[],
+  locale: PayCmdLocale,
 ) {
   const directAddress = input.match(evmAddressPattern)?.[0] ?? "";
 
@@ -83,8 +86,8 @@ function deterministicContactCommand(
     return {
       canonicalCommand,
       assistantText: displayName
-        ? `Lưu contact ${displayName}.`
-        : "Đang lấy display name từ PayCMD profile của địa chỉ này.",
+        ? tr(locale, "ai.saveContact", { name: displayName })
+        : tr(locale, "ai.fetchProfileName"),
     };
   }
 
@@ -94,7 +97,7 @@ function deterministicContactCommand(
   if (wantsProfileDisplayName(input)) {
     return {
       canonicalCommand: `/contacts add ${recentAddress}`,
-      assistantText: "Đang lấy display name từ PayCMD profile của địa chỉ này.",
+      assistantText: tr(locale, "ai.fetchProfileName"),
     };
   }
 
@@ -103,7 +106,7 @@ function deterministicContactCommand(
 
   return {
     canonicalCommand: `/contacts add ${displayName} ${recentAddress}`,
-    assistantText: `Lưu contact ${displayName}.`,
+    assistantText: tr(locale, "ai.saveContact", { name: displayName }),
   };
 }
 
@@ -130,7 +133,69 @@ function cleanRecipientName(value: string) {
     .slice(0, 60);
 }
 
-function deterministicPaymentCommand(input: string) {
+function isSelfRecipient(value: string) {
+  return /^(?:tôi|toi|mình|minh|me|myself|my wallet|ví tôi|vi toi)$/i.test(value.trim());
+}
+
+function deterministicBridgeCommand(input: string, locale: PayCmdLocale) {
+  const value = input.trim();
+  if (!/\b(bridge|cctp)\b/i.test(value)) return null;
+
+  const amount = value.match(/\b\d+(?:\.\d{1,6})?\b/)?.[0] ?? "";
+  if (!amount) return null;
+
+  const sourceChain = normalizeCctpBridgeChain(
+    value.match(/\b(?:từ|tu|from)\s+(.+?)(?=\s+(?:sang|đến|den|to)\b)/i)?.[1] ?? "",
+  );
+  const destinationChain = normalizeCctpBridgeChain(
+    value.match(
+      /\b(?:sang|đến|den|to)\s+(.+?)(?=\s+(?:\d+(?:\.\d{1,6})?|USDC|EURC|USYC|to\s+0x[a-fA-F0-9]{40}|on\s+my\s+metamask|metamask|manual|no forwarding|without forwarding|slow|standard|fast)\b|$)/i,
+    )?.[1] ?? "",
+  );
+  const recipientAddress = value.match(/\bto\s+(0x[a-fA-F0-9]{40})\b/i)?.[1] ?? "";
+  const mode = /\b(manual|no forwarding|without forwarding)\b/i.test(value) ? " manual" : "";
+  const speed = /\b(slow|standard)\b/i.test(value) ? " standard" : "";
+
+  if (!sourceChain || !destinationChain) return null;
+
+  const canonicalCommand = `/bridge ${amount} USDC from ${sourceChain} to ${destinationChain}${recipientAddress ? ` to ${recipientAddress}` : ""}${mode}${speed}`;
+  const parsedCommand = parsePayCmd(canonicalCommand, locale);
+
+  return {
+    canonicalCommand,
+    assistantText: parsedCommand.summary,
+    suggestions: [parsedCommand.sample],
+    parsedCommand,
+  };
+}
+
+function deterministicSwapCommand(input: string, locale: PayCmdLocale) {
+  const value = input.trim();
+  if (!/\b(swap|đổi|doi|convert)\b/i.test(value)) return null;
+
+  const amount = value.match(/\b\d+(?:\.\d{1,8})?\b/)?.[0] ?? "";
+  if (!amount) return null;
+
+  const direct = value.match(
+    /\b(?:swap|đổi|doi|convert)\s+\d+(?:\.\d{1,8})?\s+([a-zA-Z][a-zA-Z0-9]*)\s+(?:to|sang|ra|for|lấy|lay)\s+([a-zA-Z][a-zA-Z0-9]*)\b/i,
+  );
+  const tokenIn = direct?.[1] ?? value.match(/\b\d+(?:\.\d{1,8})?\s+([a-zA-Z][a-zA-Z0-9]*)\b/i)?.[1] ?? "";
+  const tokenOut = direct?.[2] ?? value.match(/\b(?:to|sang|ra|for|lấy|lay)\s+([a-zA-Z][a-zA-Z0-9]*)\b/i)?.[1] ?? "";
+
+  if (!tokenIn || !tokenOut) return null;
+
+  const canonicalCommand = `/swap ${amount} ${tokenIn} to ${tokenOut}`;
+  const parsedCommand = parsePayCmd(canonicalCommand, locale);
+
+  return {
+    canonicalCommand,
+    assistantText: parsedCommand.summary,
+    suggestions: [parsedCommand.sample],
+    parsedCommand,
+  };
+}
+
+function deterministicPaymentCommand(input: string, locale: PayCmdLocale) {
   const value = input.trim();
   if (!/\b(chuyển|chuyen|gửi|gui|trả|tra|pay|send|transfer)\b/i.test(value)) return null;
 
@@ -143,13 +208,17 @@ function deterministicPaymentCommand(input: string) {
   const destinationChain = normalizeChainToken(
     value.match(/\b(?:sang|đến|den|to|on)\s+(arc(?:-?testnet)?|base(?:-?sepolia)?|avalanche(?:-?fuji)?|avax|fuji)\b/i)?.[1] ?? "",
   );
+  const recipientAfterDestination = value.match(
+    /\b(?:sang|đến|den|to|on)\s+(?:arc(?:-?testnet)?|base(?:-?sepolia)?|avalanche(?:-?fuji)?|avax|fuji)\s+(?:cho|sang|to)\s+(.+)$/i,
+  )?.[1] ?? "";
   const recipient = cleanRecipientName(
-    value.match(/\b(?:cho|to)\s+(.+?)(?:\s+(?:trên|tren|on|từ|tu|from|sang|đến|den|to)\s+|$)/i)?.[1] ?? "",
+    value.match(/\b(?:cho|to)\s+(.+?)(?:\s+(?:trên|tren|on|từ|tu|from|sang|đến|den|to)\s+|$)/i)?.[1] ??
+      recipientAfterDestination,
   );
 
-  if (recipient && destinationChain) {
+  if (recipient && !isSelfRecipient(recipient) && destinationChain) {
     const canonicalCommand = `/pay ${amount} to ${recipient} on ${destinationChain}${sourceChain ? ` from ${sourceChain}` : ""}`;
-    const parsedCommand = parsePayCmd(canonicalCommand);
+    const parsedCommand = parsePayCmd(canonicalCommand, locale);
 
     return {
       canonicalCommand,
@@ -161,7 +230,7 @@ function deterministicPaymentCommand(input: string) {
 
   if (sourceChain && destinationChain) {
     const canonicalCommand = `/transfer ${amount} from ${sourceChain} to ${destinationChain}`;
-    const parsedCommand = parsePayCmd(canonicalCommand);
+    const parsedCommand = parsePayCmd(canonicalCommand, locale);
 
     return {
       canonicalCommand,
@@ -185,6 +254,31 @@ function extractOutputText(response: any) {
   return parts.join("\n").trim();
 }
 
+function parseJsonObject(value: string) {
+  const trimmed = value
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/```$/i, "")
+    .trim();
+
+  try {
+    return JSON.parse(trimmed || "{}");
+  } catch {
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+
+    if (start !== -1 && end > start) {
+      try {
+        return JSON.parse(trimmed.slice(start, end + 1));
+      } catch {
+        return {};
+      }
+    }
+
+    return {};
+  }
+}
+
 function openAiResponsesUrl() {
   const baseUrl = (process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1").replace(/\/+$/, "");
   return `${baseUrl}/responses`;
@@ -193,6 +287,36 @@ function openAiResponsesUrl() {
 function promptCacheRetention() {
   const retention = process.env.OPENAI_PROMPT_CACHE_RETENTION;
   return retention === "24h" || retention === "in_memory" ? retention : null;
+}
+
+function surfBaseUrl() {
+  return (process.env.SURF_API_BASE_URL ?? "https://api.asksurf.ai/gateway/v1").replace(/\/+$/, "");
+}
+
+function surfChatCompletionUrls() {
+  const configured = surfBaseUrl();
+  const urls = [`${configured}/chat/completions`];
+
+  if (/^https:\/\/api\.asksurf\.ai\/v1$/i.test(configured)) {
+    urls.push("https://api.asksurf.ai/gateway/v1/chat/completions");
+  }
+
+  return [...new Set(urls)];
+}
+
+function extractSurfOutputText(response: any) {
+  if (typeof response.output_text === "string") return response.output_text.trim();
+
+  const choices = Array.isArray(response.choices) ? response.choices : [];
+  const chatText = choices
+    .map((choice: any) => choice.message?.content ?? choice.text ?? "")
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+
+  if (chatText) return chatText;
+
+  return extractOutputText(response).trim();
 }
 
 function commandCatalog() {
@@ -240,8 +364,8 @@ async function getAppContext(userId: string) {
   };
 }
 
-function fallbackClarify(input: string) {
-  const parsed = parsePayCmd(input);
+function fallbackClarify(input: string, locale: PayCmdLocale) {
+  const parsed = parsePayCmd(input, locale);
 
   if (!parsed.missingFields.length && parsed.status === "draft_ready") {
     return {
@@ -257,14 +381,187 @@ function fallbackClarify(input: string) {
   return {
     intent: "clarify" as const,
     canonicalCommand: "",
-    assistantText: "Mình chưa chắc nên dùng command nào. Gõ / để xem command hoặc nói rõ số tiền, người nhận và chain.",
+    assistantText: tr(locale, "ai.unknownCommand"),
     missingFields: parsed.missingFields,
     suggestions: ["/balance", "/link metamask", "/fund 10 from metamask on base"],
     parsedCommand: null,
   };
 }
 
+function deterministicCommandFallback(
+  input: string,
+  locale: PayCmdLocale,
+  recentMessages: { role: string; text: string }[] = [],
+) {
+  const deterministicContact = deterministicContactCommand(input, recentMessages, locale);
+  if (deterministicContact) {
+    const parsedCommand = parsePayCmd(deterministicContact.canonicalCommand, locale);
+
+    return {
+      intent: "command" as const,
+      ...deterministicContact,
+      missingFields: [],
+      suggestions: [parsedCommand.sample],
+      parsedCommand,
+      modelProfile: "paycmd-rules-fallback",
+    };
+  }
+
+  const deterministicPayment = deterministicPaymentCommand(input, locale);
+  if (deterministicPayment && !deterministicPayment.parsedCommand.missingFields.length) {
+    return {
+      intent: "command" as const,
+      ...deterministicPayment,
+      missingFields: [],
+      modelProfile: "paycmd-rules-fallback",
+    };
+  }
+
+  const deterministicBridge = deterministicBridgeCommand(input, locale);
+  if (deterministicBridge && !deterministicBridge.parsedCommand.missingFields.length) {
+    return {
+      intent: "command" as const,
+      ...deterministicBridge,
+      missingFields: [],
+      modelProfile: "paycmd-rules-fallback",
+    };
+  }
+
+  const deterministicSwap = deterministicSwapCommand(input, locale);
+  if (deterministicSwap && !deterministicSwap.parsedCommand.missingFields.length) {
+    return {
+      intent: "command" as const,
+      ...deterministicSwap,
+      missingFields: [],
+      modelProfile: "paycmd-rules-fallback",
+    };
+  }
+
+  return {
+    ...fallbackClarify(input, locale),
+    modelProfile: "paycmd-rules-fallback",
+  };
+}
+
+function commandRouterResult(aiResult: any, modelProfile: string, locale: PayCmdLocale) {
+  if (aiResult.intent !== "command") {
+    return {
+      ...aiResult,
+      parsedCommand: null,
+      modelProfile,
+    };
+  }
+
+  const parsedCommand = parsePayCmd(aiResult.canonicalCommand, locale);
+
+  if (parsedCommand.missingFields.length || parsedCommand.status !== "draft_ready") {
+    return {
+      intent: "clarify",
+      canonicalCommand: aiResult.canonicalCommand,
+      assistantText:
+        aiResult.assistantText ||
+        tr(locale, "ai.missingFields", { fields: parsedCommand.missingFields.join(", ") }),
+      missingFields: parsedCommand.missingFields,
+      suggestions: aiResult.suggestions,
+      parsedCommand,
+      modelProfile,
+    };
+  }
+
+  return {
+    ...aiResult,
+    parsedCommand,
+    modelProfile,
+  };
+}
+
+async function askSurfCommandRouter(prompt: string) {
+  if (!process.env.SURF_API_KEY) {
+    throw Object.assign(new Error("SURF_API_KEY is not configured"), { status: 500 });
+  }
+
+  const messages = [
+    {
+      role: "system",
+      content: [
+        "You are Payna's fallback command router.",
+        "Return JSON only. No Markdown. No commentary.",
+        "Your JSON must match this exact TypeScript shape:",
+        '{ "intent": "command" | "answer" | "clarify" | "crypto_research", "canonicalCommand": string, "assistantText": string, "missingFields": string[], "suggestions": string[] }',
+      ].join("\n"),
+    },
+    { role: "user", content: prompt },
+  ];
+  const requestBody = JSON.stringify({
+    model: process.env.SURF_COMMAND_ROUTER_MODEL ?? "surf-1.5-instant",
+    messages,
+    stream: false,
+    reasoning_effort: "low",
+    max_tokens: 900,
+  });
+
+  let response: Response | null = null;
+  let data: any = {};
+
+  for (const url of surfChatCompletionUrls()) {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.SURF_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: requestBody,
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    data = await response.json().catch(() => ({}));
+
+    if (response.ok || response.status !== 404) {
+      break;
+    }
+  }
+
+  if (!response?.ok) {
+    throw Object.assign(
+      new Error(data?.error?.message ?? data?.message ?? "AskSurf command router failed"),
+      { status: response?.status ?? 502 },
+    );
+  }
+
+  const parsedOutput = aiCommandResponseSchema.safeParse(parseJsonObject(extractSurfOutputText(data)));
+
+  if (!parsedOutput.success) {
+    throw Object.assign(new Error("AskSurf command router returned invalid JSON"), { status: 502 });
+  }
+
+  return parsedOutput.data;
+}
+
+async function commandRouterFallback(
+  input: string,
+  recentMessages: { role: string; text: string }[],
+  prompt: string,
+  locale: PayCmdLocale,
+) {
+  try {
+    const surfResult = await askSurfCommandRouter(prompt);
+    return commandRouterResult(
+      surfResult,
+      process.env.SURF_COMMAND_ROUTER_MODEL ?? "surf-1.5-instant",
+      locale,
+    );
+  } catch (error) {
+    console.error("AskSurf command router fallback failed:", error);
+    return deterministicCommandFallback(input, locale, recentMessages);
+  }
+}
+
 export async function POST(req: NextRequest) {
+  const locale = requestLocale(req);
+  let fallbackInput = "";
+  let fallbackRecentMessages: { role: string; text: string }[] = [];
+  let fallbackPrompt = "";
+
   try {
     const supabase = await createClient();
     const {
@@ -277,55 +574,29 @@ export async function POST(req: NextRequest) {
 
     const body = (await req.json().catch(() => ({}))) as AiCommandRequest;
     const input = body.input?.trim() ?? "";
+    fallbackInput = input;
 
     if (!input) {
       return NextResponse.json({ error: "input is required" }, { status: 400 });
     }
 
     const recentMessages = (body.recentMessages ?? []).slice(-8);
-    const deterministicContact = deterministicContactCommand(input, recentMessages);
-    if (deterministicContact) {
-      const parsedCommand = parsePayCmd(deterministicContact.canonicalCommand);
-
-      return NextResponse.json({
-        intent: "command",
-        ...deterministicContact,
-        missingFields: [],
-        suggestions: [parsedCommand.sample],
-        parsedCommand,
-        modelProfile: "paycmd-rules",
-      });
-    }
-
-    const deterministicPayment = deterministicPaymentCommand(input);
-    if (deterministicPayment && !deterministicPayment.parsedCommand.missingFields.length) {
-      return NextResponse.json({
-        intent: "command",
-        ...deterministicPayment,
-        missingFields: [],
-        modelProfile: "paycmd-rules",
-      });
-    }
-
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json(
-        { error: "OPENAI_API_KEY is not configured" },
-        { status: 500 },
-      );
-    }
-
+    fallbackRecentMessages = recentMessages;
     const modelOption = getAiModelOption(body.modelProfile);
     const appContext = await getAppContext(user.id);
     const prompt = [
-      "You are PayCMD's AI command router for a stablecoin payment dapp.",
+      "You are Payna's AI command router for a stablecoin payment dapp.",
       "Return only JSON matching the schema.",
       "Do not execute commands. Convert natural language into one canonical slash command when safe.",
-      "If the user asks crypto research, market, token, chain, protocol, news, or conceptual questions that are not PayCMD actions, intent must be crypto_research.",
+      "The user may write in Vietnamese, English, Chinese, or mixed-language shorthand. Infer the intended Payna command from meaning, not exact keywords.",
+      "If the user asks crypto research, market, token, chain, protocol, news, or conceptual questions that are not Payna actions, intent must be crypto_research.",
       "If the user asks general product/help questions, intent must be answer.",
       "If required information is missing, intent must be clarify and assistantText must ask one concise question.",
-      "If the message could be a PayCMD action such as pay, transfer, fund, deposit, withdraw, balance, wallet, contact, gas, payroll, or payment request, prefer command or clarify over crypto_research.",
+      "If the message could be a Payna action such as pay, transfer, swap, fund, deposit, withdraw, balance, wallet, contact, gas, payroll, or payment request, prefer command or clarify over crypto_research.",
       "All payment/fund/deposit/withdraw/transfer/payroll commands will be previewed and confirmed by the user later.",
-      "Supported chains: arc -> arcTestnet, base -> baseSepolia, avalanche/avax/fuji -> avalancheFuji.",
+      `Gateway chains: arc -> arcTestnet, base -> baseSepolia, avalanche/avax/fuji -> avalancheFuji.`,
+      `Bridge chains (testnet MetaMask rail): ${cctpBridgeChainConfigs.map((chain) => `${chain.aliases[0]} -> ${chain.key}`).join(", ")}.`,
+      "Swap is Arc Testnet only and supports USDC, EURC, and cirBTC. Canonical swap format: /swap <amount> <tokenIn> to <tokenOut>.",
       "Supported commands:",
       JSON.stringify(commandCatalog()),
       "Current app context:",
@@ -334,6 +605,11 @@ export async function POST(req: NextRequest) {
       JSON.stringify(recentMessages),
       `User input: ${input}`,
     ].join("\n\n");
+    fallbackPrompt = prompt;
+
+    if (!process.env.OPENAI_API_KEY) {
+      return NextResponse.json(await commandRouterFallback(input, recentMessages, prompt, locale));
+    }
 
     const payload: Record<string, unknown> = {
       model: modelOption.model,
@@ -370,57 +646,22 @@ export async function POST(req: NextRequest) {
     const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-      return NextResponse.json(
-        { error: data?.error?.message ?? "OpenAI request failed" },
-        { status: response.status },
-      );
+      console.error("OpenAI command router failed:", data?.error?.message ?? data?.error ?? response.status);
+      return NextResponse.json(await commandRouterFallback(input, recentMessages, prompt, locale));
     }
 
     const outputText = extractOutputText(data);
-    const parsedOutput = aiCommandResponseSchema.safeParse(JSON.parse(outputText || "{}"));
+    const parsedOutput = aiCommandResponseSchema.safeParse(parseJsonObject(outputText));
 
     if (!parsedOutput.success) {
-      return NextResponse.json(fallbackClarify(input));
+      return NextResponse.json(await commandRouterFallback(input, recentMessages, prompt, locale));
     }
 
-    const aiResult = parsedOutput.data;
-
-    if (aiResult.intent !== "command") {
-      return NextResponse.json({
-        ...aiResult,
-        parsedCommand: null,
-        modelProfile: modelOption.id,
-      });
-    }
-
-    const parsedCommand = parsePayCmd(aiResult.canonicalCommand);
-
-    if (parsedCommand.missingFields.length || parsedCommand.status !== "draft_ready") {
-      return NextResponse.json({
-        intent: "clarify",
-        canonicalCommand: aiResult.canonicalCommand,
-        assistantText:
-          aiResult.assistantText ||
-          `Mình cần thêm: ${parsedCommand.missingFields.join(", ")}.`,
-        missingFields: parsedCommand.missingFields,
-        suggestions: aiResult.suggestions,
-        parsedCommand,
-        modelProfile: modelOption.id,
-      });
-    }
-
-    return NextResponse.json({
-      ...aiResult,
-      parsedCommand,
-      modelProfile: modelOption.id,
-    });
+    return NextResponse.json(commandRouterResult(parsedOutput.data, modelOption.id, locale));
   } catch (error: any) {
     console.error("AI command route failed:", error);
-    if (error?.name === "TimeoutError") {
-      return NextResponse.json(
-        { error: "OpenAI proxy timed out" },
-        { status: 504 },
-      );
+    if (fallbackInput && fallbackPrompt) {
+      return NextResponse.json(await commandRouterFallback(fallbackInput, fallbackRecentMessages, fallbackPrompt, locale));
     }
 
     return NextResponse.json(

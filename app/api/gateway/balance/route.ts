@@ -17,7 +17,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { fetchGatewayBalance, getUsdcBalance, CHAIN_BY_DOMAIN, type SupportedChain } from "@/lib/circle/gateway-sdk";
+import { fetchGatewayBalance, getUsdcBalance, CHAIN_BY_DOMAIN, supportedGatewayChains } from "@/lib/circle/gateway-sdk";
 import { createClient } from "@/lib/supabase/server";
 import type { Address } from "viem";
 
@@ -59,11 +59,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const supportedChains: SupportedChain[] = [
-      "arcTestnet",
-      "baseSepolia",
-      "avalancheFuji",
-    ];
+    const supportedChains = supportedGatewayChains;
 
     // Fetch balances for all addresses
     const balancePromises = addresses.map(async (address: string) => {

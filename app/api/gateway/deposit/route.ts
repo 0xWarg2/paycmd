@@ -19,12 +19,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   initiateDepositFromCustodialWallet,
+  supportedGatewayChains,
   type SupportedChain,
 } from "@/lib/circle/gateway-sdk";
+import { requestLocale, tr } from "@/lib/i18n/server";
 import { createClient } from "@/lib/supabase/server";
 
 export async function POST(req: NextRequest) {
   let requestBody: any = {};
+  const locale = requestLocale(req);
   
   try {
     const supabase = await createClient();
@@ -47,7 +50,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Validate chain
-    const validChains: SupportedChain[] = ["arcTestnet", "baseSepolia", "avalancheFuji"];
+    const validChains = supportedGatewayChains;
     if (!validChains.includes(chain)) {
       return NextResponse.json(
         { error: `Invalid chain. Must be one of: ${validChains.join(", ")}` },
@@ -137,7 +140,7 @@ export async function POST(req: NextRequest) {
       txHash,
       chain,
       amount: parseFloat(amount),
-      message: `Đã gửi deposit ${parseFloat(amount)} USDC vào Gateway trên ${chain}. Đang chờ Circle Gateway finality/indexing trước khi có thể dùng để transfer.`,
+      message: tr(locale, "gateway.depositPending", { amount: parseFloat(amount), chain }),
     });
   } catch (error: any) {
     console.error("Error in deposit:", error);

@@ -2,11 +2,11 @@
 
 ## Tên Và Định Vị
 
-Tên sản phẩm: **PayCMD**.
+Tên sản phẩm: **Ra**.
 
 Định vị: **Command layer for stablecoin payments**.
 
-PayCMD giúp người dùng vận hành thanh toán stablecoin bằng chat và slash command thay vì mở ví, sao chép địa chỉ, ký từng giao dịch, tự theo dõi ngân sách và tự quản lý lịch trả tiền.
+Ra giúp người dùng vận hành thanh toán stablecoin bằng chat và slash command thay vì mở ví, sao chép địa chỉ, ký từng giao dịch, tự theo dõi ngân sách và tự quản lý lịch trả tiền.
 
 ## Trạng Thái V1
 

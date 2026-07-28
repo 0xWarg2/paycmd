@@ -24,6 +24,8 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { circleDeveloperSdk } from "@/lib/circle/sdk";
+import { GATEWAY_CHAIN_CONFIGS } from "@/lib/circle/gateway-sdk";
+import { Blockchain } from "@circle-fin/developer-controlled-wallets";
 
 export interface GatewayEOAWallet {
   chain: string;
@@ -38,11 +40,18 @@ export interface GatewayEOAWallet {
  * Circle SDK automatically derives the same address across all chains
  */
 export async function generateGatewayEOAWallet(walletSetId: string): Promise<GatewayEOAWallet> {
+  const blockchains: Blockchain[] = [];
+  for (const config of Object.values(GATEWAY_CHAIN_CONFIGS)) {
+    if (config.circleBlockchain) {
+      blockchains.push(config.circleBlockchain);
+    }
+  }
+
   // Create EOA wallet on ALL supported chains so Circle SDK recognizes it everywhere
   const response = await circleDeveloperSdk.createWallets({
     walletSetId,
     accountType: "EOA",
-    blockchains: ["ARC-TESTNET", "BASE-SEPOLIA", "AVAX-FUJI"],
+    blockchains,
     count: 1,
   });
 

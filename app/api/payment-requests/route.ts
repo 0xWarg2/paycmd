@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { requestLocale } from "@/lib/i18n/server";
 import { normalizeChain } from "@/lib/paycmd/chains";
 import { resolveRecipient } from "@/lib/paycmd/recipients";
 import { createClient } from "@/lib/supabase/server";
@@ -50,6 +51,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const locale = requestLocale(req);
   const supabase = await createClient();
   const {
     data: { user },
@@ -77,7 +79,7 @@ export async function POST(req: NextRequest) {
     let payerLabel = payerInput;
 
     try {
-      const payer = await resolveRecipient(supabase, user.id, payerInput, destinationChain);
+      const payer = await resolveRecipient(supabase, user.id, payerInput, destinationChain, locale);
       payerContactId = payer.contactId;
       payerLabel = payer.label;
     } catch {

@@ -2,7 +2,7 @@
 
 ## Nguyên Tắc
 
-PayCMD là chatbox-first. Chat phải giống một app nhắn tin hơn dashboard. Browser không scroll khi hội thoại dài; chỉ vùng message bên trong chat box scroll.
+Ra là chatbox-first. Chat phải giống một app nhắn tin hơn dashboard. Browser không scroll khi hội thoại dài; chỉ vùng message bên trong chat box scroll.
 
 ## Desktop
 

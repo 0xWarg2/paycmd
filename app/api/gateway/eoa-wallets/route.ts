@@ -18,8 +18,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { circleDeveloperSdk } from "@/lib/circle/sdk";
-import type { SupportedChain } from "@/lib/circle/gateway-sdk";
+import { GATEWAY_CHAIN_CONFIGS, type SupportedChain } from "@/lib/circle/gateway-sdk";
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient();
@@ -34,19 +33,20 @@ export async function GET(req: NextRequest) {
   try {
     const { getGatewayEOAWalletId } = await import("@/lib/circle/create-gateway-eoa-wallets");
     
-    const chains = ["BASE-SEPOLIA", "AVAX-FUJI", "ARC-TESTNET"];
-    const chainMap: Record<string, SupportedChain> = {
-      "BASE-SEPOLIA": "baseSepolia",
-      "AVAX-FUJI": "avalancheFuji",
-      "ARC-TESTNET": "arcTestnet",
-    };
+    const chains: Array<{ chain: SupportedChain; blockchain: string }> = [];
+    for (const chain of Object.keys(GATEWAY_CHAIN_CONFIGS) as SupportedChain[]) {
+      const blockchain = GATEWAY_CHAIN_CONFIGS[chain].eoaWalletBlockchain;
+      if (blockchain) {
+        chains.push({ chain, blockchain });
+      }
+    }
     
     const wallets = await Promise.all(
-      chains.map(async (blockchain) => {
+      chains.map(async ({ chain, blockchain }) => {
         try {
           const { walletId, address } = await getGatewayEOAWalletId(user.id, blockchain);
           return {
-            chain: chainMap[blockchain],
+            chain,
             blockchain,
             walletId,
             address,

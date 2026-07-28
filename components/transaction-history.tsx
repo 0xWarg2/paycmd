@@ -56,7 +56,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-type TransactionType = "fund" | "deposit" | "withdraw" | "transfer" | "unify";
+type TransactionType = "fund" | "deposit" | "withdraw" | "transfer" | "unify" | "bridge" | "swap";
 type TransactionStatus = "pending" | "pending_gateway_finality" | "success" | "failed";
 
 interface Transaction {
@@ -79,6 +79,8 @@ const transactionTypeLabels: Record<TransactionType, string> = {
   withdraw: "Withdraw",
   transfer: "Transfer",
   unify: "Unify",
+  bridge: "Bridge",
+  swap: "Swap",
 };
 
 function formatAmount(value: number | string) {
@@ -92,6 +94,27 @@ function formatAmount(value: number | string) {
     minimumFractionDigits: 0,
     maximumFractionDigits: 6,
   }).format(amount)} USDC`;
+}
+
+function swapReason(tx: Transaction) {
+  if (tx.tx_type !== "swap" || !tx.reason) return null;
+  try {
+    const parsed = JSON.parse(tx.reason) as { tokenIn?: string; tokenOut?: string; amountOut?: string };
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function formatTransactionAmount(tx: Transaction) {
+  const reason = swapReason(tx);
+  if (!reason?.tokenIn) return formatAmount(tx.amount);
+
+  const amount = Number(tx.amount ?? 0);
+  const formatted = Number.isFinite(amount)
+    ? new Intl.NumberFormat("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 8 }).format(amount)
+    : "0";
+  return `${formatted} ${reason.tokenIn}`;
 }
 
 function formatDate(value: string) {
@@ -269,6 +292,8 @@ export function TransactionHistory() {
                   <SelectItem value="deposit">Deposit</SelectItem>
                   <SelectItem value="withdraw">Withdraw</SelectItem>
                   <SelectItem value="transfer">Transfer</SelectItem>
+                  <SelectItem value="bridge">Bridge</SelectItem>
+                  <SelectItem value="swap">Swap</SelectItem>
                   <SelectItem value="unify">Unify</SelectItem>
                 </SelectContent>
               </Select>
@@ -334,7 +359,7 @@ export function TransactionHistory() {
                           <TableCell>
                             <ChainRoute sourceChain={tx.chain} destinationChain={tx.destination_chain} />
                           </TableCell>
-                          <TableCell className="font-mono">{formatAmount(tx.amount)}</TableCell>
+                          <TableCell className="font-mono">{formatTransactionAmount(tx)}</TableCell>
                           <TableCell>
                             {tx.reason ? (
                               <Tooltip>

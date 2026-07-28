@@ -8,6 +8,7 @@ type CryptoResearchRequest = {
   recentMessages?: { role: string; text: string }[];
   surfMode?: "instant" | "research";
   effort?: "standard" | "extended" | "maximum";
+  locale?: "vi" | "en";
 };
 
 export const maxDuration = 300;
@@ -35,6 +36,7 @@ export async function POST(req: NextRequest) {
       recentMessages: body.recentMessages ?? [],
       surfMode: body.surfMode,
       effort: body.effort,
+      locale: body.locale,
     });
 
     return NextResponse.json({

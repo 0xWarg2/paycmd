@@ -9,11 +9,14 @@ import {
   ExternalLink,
   Fingerprint,
   Globe2,
+  KeyRound,
   Loader2,
   Mail,
+  Network,
   ShieldCheck,
   Sparkles,
   Wallet,
+  WalletCards,
 } from "lucide-react";
 import {
   ChangeEvent,
@@ -37,6 +40,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { createClient } from "@/lib/supabase/client";
+import { localeRequestHeaders, useI18n } from "@/lib/i18n";
 
 type ProfileRecord = {
   user_id: string;
@@ -91,9 +95,14 @@ function initials(displayName: string) {
   return letters.toUpperCase();
 }
 
-function shortAddress(address?: string | null) {
-  if (!address) return "Not connected";
+function shortAddress(address?: string | null, fallback = "") {
+  if (!address) return fallback;
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
+function compactHandle(value: string) {
+  if (value.length <= 24) return value;
+  return `${value.slice(0, 10)}...${value.slice(-8)}`;
 }
 
 function storageExtension(file: File) {
@@ -108,6 +117,7 @@ async function requestJson(path: string, init?: RequestInit) {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...localeRequestHeaders(),
       ...(init?.headers ?? {}),
     },
   });
@@ -129,10 +139,12 @@ export function ProfileEditor({
   externalWallet,
   contactsCount,
 }: ProfileEditorProps) {
+  const { t } = useI18n();
   const scaAddress = scaWallet?.address ?? scaWallet?.wallet_address ?? "";
   const gatewaySignerAddress = gatewaySigner?.address ?? gatewaySigner?.wallet_address ?? "";
   const externalWalletAddress = externalWallet?.wallet_address ?? "";
-  const defaultName = initialProfile?.display_name || userEmail || "PayCMD user";
+  const notConnected = t("profile.notConnected");
+  const defaultName = initialProfile?.display_name || userEmail || t("profile.defaultName");
   const [displayName, setDisplayName] = useState(defaultName);
   const [handle, setHandle] = useState(
     initialProfile?.handle?.toLowerCase() || fallbackHandle(userEmail, userId),
@@ -153,6 +165,13 @@ export function ProfileEditor({
   }, [avatarUrl, bio, defaultChain, displayName, handle, scaAddress]);
 
   const paycmdId = `@${handle || "handle"}`;
+  const displayPaycmdId = `@${compactHandle(handle || "handle")}`;
+  const readinessLabel =
+    profileCompleteness >= 85
+      ? t("profile.readiness.payReady")
+      : profileCompleteness >= 55
+        ? t("profile.readiness.almost")
+        : t("profile.readiness.needsSetup");
 
   async function uploadAvatar(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -162,13 +181,13 @@ export function ProfileEditor({
 
     if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(file.type)) {
       setSaveState("error");
-      setMessage("Avatar phải là PNG, JPEG, WEBP hoặc GIF.");
+      setMessage(t("profile.avatarTypeError"));
       return;
     }
 
     if (file.size > 2 * 1024 * 1024) {
       setSaveState("error");
-      setMessage("Avatar tối đa 2MB.");
+      setMessage(t("profile.avatarSizeError"));
       return;
     }
 
@@ -188,13 +207,13 @@ export function ProfileEditor({
       const { data } = supabase.storage.from("profile-avatars").getPublicUrl(path);
       setAvatarUrl(data.publicUrl);
       setSaveState("idle");
-      setMessage("Avatar đã tải lên. Bấm Save profile để lưu.");
+      setMessage(t("profile.avatarUploaded"));
     } catch (error) {
       setSaveState("error");
       setMessage(
         error instanceof Error
           ? error.message
-          : "Upload avatar thất bại. Kiểm tra bucket profile-avatars.",
+          : t("profile.avatarUploadFailed"),
       );
     } finally {
       setUploadingAvatar(false);
@@ -228,10 +247,10 @@ export function ProfileEditor({
       setAvatarUrl(profile.avatar_url ?? "");
       setDefaultChain(profile.default_chain ?? "arcTestnet");
       setSaveState("saved");
-      setMessage("Profile đã lưu.");
+      setMessage(t("profile.saved"));
     } catch (error) {
       setSaveState("error");
-      setMessage(error instanceof Error ? error.message : "Không lưu được profile.");
+      setMessage(error instanceof Error ? error.message : t("profile.saveFailed"));
     }
   }
 
@@ -243,21 +262,44 @@ export function ProfileEditor({
   }
 
   return (
-    <div className="min-h-full overflow-y-auto bg-background">
-      <div className="mx-auto w-full max-w-6xl px-4 py-5 md:px-8 md:py-8">
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,0.92fr)_minmax(420px,1.08fr)]">
+    <div className="payna-shell-bg h-full min-h-0 overflow-y-auto overscroll-contain">
+      <div className="mx-auto w-full max-w-6xl px-4 py-4 md:px-6 md:pb-8 md:pt-14">
+        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border bg-card/70 px-3 py-1 text-xs text-primary shadow-sm backdrop-blur">
+              <Sparkles className="h-3.5 w-3.5" />
+              {t("profile.console")}
+            </div>
+            <h1 className="mt-3 text-2xl font-semibold tracking-normal md:text-3xl">{t("profile.title")}</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+              {t("profile.description")}
+            </p>
+          </div>
+          <div className="rounded-2xl border bg-card/75 px-4 py-3 shadow-sm backdrop-blur-xl md:px-3 md:py-2.5">
+            <div className="text-xs text-muted-foreground">{t("profile.readiness")}</div>
+            <div className="mt-1 flex items-center gap-3">
+              <div className="text-xl font-semibold">{profileCompleteness}%</div>
+              <Badge variant={profileCompleteness >= 85 ? "default" : "outline"}>{readinessLabel}</Badge>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(420px,0.95fr)]">
           <section className="space-y-4">
-            <div className="overflow-hidden rounded-md border bg-card shadow-sm">
-              <div className="border-b bg-gradient-to-r from-primary/15 via-accent/30 to-transparent p-5">
+            <div className="overflow-hidden rounded-2xl border bg-card/82 shadow-sm backdrop-blur-xl">
+              <div className="relative border-b bg-[radial-gradient(circle_at_15%_15%,rgba(16,185,129,0.24),transparent_30%),radial-gradient(circle_at_85%_10%,rgba(14,165,233,0.16),transparent_32%),linear-gradient(135deg,rgba(15,23,42,0.3),transparent_55%)] p-4">
+                <div className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-primary/60 to-transparent" />
                 <div className="flex items-center justify-between gap-3">
                   <Badge variant="secondary" className="gap-1">
                     <Sparkles className="h-3.5 w-3.5 text-primary" />
-                    Identity pass
+                    {t("profile.paymentIdentity")}
                   </Badge>
-                  <Badge variant="outline">{profileCompleteness}% ready</Badge>
+                  <Badge variant={profileCompleteness >= 85 ? "default" : "outline"}>
+                    {readinessLabel}
+                  </Badge>
                 </div>
-                <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-end">
-                  <div className="relative h-28 w-28 shrink-0 overflow-hidden rounded-md border bg-background shadow-sm">
+                <div className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-center">
+                  <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-2xl border border-primary/20 bg-background shadow-[0_20px_80px_rgba(16,185,129,0.12)]">
                     {avatarUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={avatarUrl} alt={displayName} className="h-full w-full object-cover" />
@@ -268,52 +310,64 @@ export function ProfileEditor({
                     )}
                     <button
                       type="button"
-                      className="absolute bottom-2 right-2 flex h-8 w-8 items-center justify-center rounded-md border bg-card text-foreground shadow-sm transition hover:bg-accent"
+                      className="absolute bottom-2 right-2 flex h-9 w-9 items-center justify-center rounded-2xl border bg-card/95 text-foreground shadow-sm transition hover:bg-accent"
                       onClick={() => fileInputRef.current?.click()}
-                      aria-label="Upload avatar"
+                      aria-label={t("profile.uploadAvatar")}
                     >
                       {uploadingAvatar ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
                     </button>
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm text-muted-foreground">PayCMD ID</div>
-                    <div className="mt-1 break-words text-3xl font-semibold tracking-normal md:text-4xl">
+                    <div className="text-sm text-muted-foreground">{t("profile.primaryIdentity")}</div>
+                    <div className="mt-1 truncate text-3xl font-semibold tracking-normal md:text-4xl" title={displayName}>
                       {displayName}
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                      <span className="inline-flex items-center gap-1">
+                      <span className="inline-flex max-w-full items-center gap-1 rounded-full border bg-background/60 px-2.5 py-1" title={paycmdId}>
                         <AtSign className="h-4 w-4 text-primary" />
-                        {paycmdId}
+                        <span className="truncate">{displayPaycmdId}</span>
                       </span>
-                      <span className="inline-flex items-center gap-1">
+                      <span className="inline-flex items-center gap-1 rounded-full border bg-background/60 px-2.5 py-1">
                         <ShieldCheck className="h-4 w-4 text-primary" />
                         {chainLabels[defaultChain] ?? defaultChain}
                       </span>
+                    </div>
+                    <div className="mt-4 max-w-md">
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>{t("profile.profileReadiness")}</span>
+                        <span>{profileCompleteness}%</span>
+                      </div>
+                      <div className="mt-2 h-2.5 rounded-full bg-background/80">
+                        <div
+                          className="h-2.5 rounded-full bg-gradient-to-r from-emerald-400 to-sky-400 transition-all"
+                          style={{ width: `${profileCompleteness}%` }}
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
 
               <div className="grid gap-px bg-border md:grid-cols-3">
-                <Metric label="Circle wallet" value={shortAddress(scaAddress)} />
-                <Metric label="Contacts" value={contactsCount.toString()} />
-                <Metric label="Default rail" value={chainLabels[defaultChain] ?? defaultChain} />
+                <Metric label={t("profile.circleWallet")} value={shortAddress(scaAddress, notConnected)} />
+                <Metric label={t("profile.contacts")} value={contactsCount.toString()} />
+                <Metric label={t("profile.defaultRail")} value={chainLabels[defaultChain] ?? defaultChain} />
               </div>
             </div>
 
-            <div className="rounded-md border bg-card p-4 shadow-sm">
+            <div className="rounded-2xl border bg-card/82 p-4 shadow-sm backdrop-blur-xl">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-sm font-medium">Contact preview</div>
-                  <div className="text-xs text-muted-foreground">Cách người khác sẽ nhận ra bạn trong PayCMD</div>
+                  <div className="text-sm font-medium">{t("profile.contactCard")}</div>
+                  <div className="text-xs text-muted-foreground">{t("profile.contactPreviewHelp")}</div>
                 </div>
                 <Badge className="gap-1">
                   <BadgeCheck className="h-3.5 w-3.5" />
-                  Pay-ready
+                  {t("profile.payReady")}
                 </Badge>
               </div>
-              <div className="mt-4 flex items-center gap-3 rounded-md border bg-background p-3">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-md bg-primary text-sm font-semibold text-primary-foreground">
+              <div className="mt-4 flex items-center gap-3 rounded-2xl border bg-background/70 p-3">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-primary text-sm font-semibold text-primary-foreground">
                   {avatarUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
@@ -323,67 +377,82 @@ export function ProfileEditor({
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{displayName}</div>
-                  <div className="truncate text-xs text-muted-foreground">{paycmdId}</div>
-                  <div className="mt-1 truncate text-xs text-muted-foreground">{bio || "Stablecoin payments by command."}</div>
+                  <div className="truncate text-xs text-muted-foreground" title={paycmdId}>{displayPaycmdId}</div>
+                  <div className="mt-1 truncate text-xs text-muted-foreground">{bio || t("profile.defaultBio")}</div>
                 </div>
                 <Button
                   type="button"
                   size="icon"
                   variant="outline"
                   onClick={() => copyValue("paycmd-id", paycmdId)}
-                  aria-label="Copy PayCMD ID"
+                  aria-label={t("profile.copyPaynaId")}
                 >
                   {copiedKey === "paycmd-id" ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                 </Button>
               </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="rounded-2xl border bg-card/82 p-4 shadow-sm backdrop-blur-xl">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium">{t("profile.walletRails")}</div>
+                  <div className="text-xs text-muted-foreground">{t("profile.walletRailsHelp")}</div>
+                </div>
+                <Badge variant="outline" className="gap-1">
+                  <Network className="h-3.5 w-3.5" />
+                  {t("profile.testnet")}
+                </Badge>
+              </div>
+              <div className="grid gap-3">
               <InfoPanel
                 icon={Wallet}
-                label="Circle Gateway address"
-                value={shortAddress(scaAddress)}
-                detail="Cùng địa chỉ Circle SCA, dùng để nhận/fund/deposit."
+                label={t("profile.circleGatewayAddress")}
+                value={shortAddress(scaAddress, notConnected)}
+                detail={t("profile.circleGatewayDetail")}
                 copyValue={scaAddress}
                 copied={copiedKey === "circle-gateway"}
                 onCopy={() => copyValue("circle-gateway", scaAddress)}
               />
               <InfoPanel
                 icon={Fingerprint}
-                label="MetaMask wallet"
-                value={shortAddress(externalWalletAddress)}
-                detail={externalWallet?.wallet_type ? `Primary ${externalWallet.wallet_type}` : "Link MetaMask from chat"}
+                label={t("profile.metamaskWallet")}
+                value={shortAddress(externalWalletAddress, notConnected)}
+                detail={externalWallet?.wallet_type ? t("profile.primaryWallet", { wallet: externalWallet.wallet_type }) : t("profile.linkMetamask")}
                 copyValue={externalWalletAddress}
                 copied={copiedKey === "metamask"}
                 onCopy={() => copyValue("metamask", externalWalletAddress)}
               />
               <InfoPanel
                 icon={ShieldCheck}
-                label="Gateway signer EOA"
-                value={shortAddress(gatewaySignerAddress)}
-                detail={gatewaySignerAddress ? "Ký burn intent, không dùng để nạp USDC." : "Tự tạo khi cần Gateway transfer."}
+                label={t("profile.gatewaySignerEoa")}
+                value={shortAddress(gatewaySignerAddress, notConnected)}
+                detail={gatewaySignerAddress ? t("profile.gatewaySignerDetail") : t("profile.gatewaySignerPending")}
                 copyValue={gatewaySignerAddress}
                 copied={copiedKey === "gateway-signer"}
                 onCopy={() => copyValue("gateway-signer", gatewaySignerAddress)}
               />
+              </div>
             </div>
           </section>
 
-          <section className="rounded-md border bg-card shadow-sm">
-            <form onSubmit={saveProfile} className="space-y-5 p-5">
-              <div className="flex items-start justify-between gap-4 border-b pb-4">
+          <section className="rounded-2xl border bg-card/82 shadow-sm backdrop-blur-xl">
+            <form onSubmit={saveProfile} className="space-y-4 p-4">
+              <div className="flex items-start justify-between gap-4 border-b pb-3">
                 <div>
-                  <div className="text-sm text-muted-foreground">Profile controls</div>
-                  <h1 className="mt-1 text-2xl font-semibold tracking-normal">Edit profile</h1>
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <KeyRound className="h-4 w-4 text-primary" />
+                    {t("profile.commandProfile")}
+                  </div>
+                  <h1 className="mt-1 text-xl font-semibold tracking-normal">{t("profile.editProfile")}</h1>
                 </div>
                 <Badge variant={saveState === "saved" ? "default" : saveState === "error" ? "destructive" : "secondary"}>
                   {saveState === "saving"
-                    ? "Saving"
+                    ? t("profile.saveState.saving")
                     : saveState === "saved"
-                      ? "Saved"
+                      ? t("profile.saveState.saved")
                       : saveState === "error"
-                        ? "Needs review"
-                        : "Draft"}
+                        ? t("profile.saveState.error")
+                        : t("profile.saveState.draft")}
                 </Badge>
               </div>
 
@@ -396,16 +465,17 @@ export function ProfileEditor({
               />
 
               <div className="grid gap-4 md:grid-cols-2">
-                <Field label="Display name" htmlFor="displayName">
+                <Field label={t("profile.displayNameLabel")} htmlFor="displayName">
                   <Input
                     id="displayName"
                     value={displayName}
                     maxLength={60}
                     onChange={(event) => setDisplayName(event.target.value)}
-                    placeholder="Minh Nguyen"
+                    className="h-11 rounded-2xl"
+                    placeholder={t("profile.placeholderName")}
                   />
                 </Field>
-                <Field label="Handle" htmlFor="handle">
+                <Field label={t("profile.handleLabel")} htmlFor="handle">
                   <div className="relative">
                     <AtSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
@@ -413,40 +483,40 @@ export function ProfileEditor({
                       value={handle}
                       maxLength={32}
                       onChange={(event) => setHandle(event.target.value.toLowerCase())}
-                      className="pl-9"
+                      className="h-11 rounded-2xl pl-9"
                       placeholder="minh"
                     />
                   </div>
                 </Field>
               </div>
 
-              <Field label="Bio" htmlFor="bio">
+              <Field label={t("profile.bioLabel")} htmlFor="bio">
                 <textarea
                   id="bio"
                   value={bio}
                   maxLength={180}
                   onChange={(event) => setBio(event.target.value)}
-                  placeholder="Stablecoin operator, contributor, builder..."
-                  className="min-h-24 w-full resize-none rounded-md border bg-background px-3 py-2 text-sm shadow-xs outline-none transition focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  placeholder={t("profile.placeholderBio")}
+                  className="min-h-24 w-full resize-none rounded-2xl border bg-background px-3 py-2 text-sm shadow-xs outline-none transition focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 />
               </Field>
 
               <div className="grid gap-4 md:grid-cols-2">
-                <Field label="Website" htmlFor="websiteUrl">
+                <Field label={t("profile.websiteLabel")} htmlFor="websiteUrl">
                   <div className="relative">
                     <Globe2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       id="websiteUrl"
                       value={websiteUrl}
                       onChange={(event) => setWebsiteUrl(event.target.value)}
-                      className="pl-9"
+                      className="h-11 rounded-2xl pl-9"
                       placeholder="https://paycmd.xyz"
                     />
                   </div>
                 </Field>
-                <Field label="Default receiving chain" htmlFor="defaultChain">
+                <Field label={t("profile.defaultReceivingChain")} htmlFor="defaultChain">
                   <Select value={defaultChain} onValueChange={setDefaultChain}>
-                    <SelectTrigger id="defaultChain" className="w-full bg-background">
+                    <SelectTrigger id="defaultChain" className="h-11 w-full rounded-2xl bg-background">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -458,19 +528,25 @@ export function ProfileEditor({
                 </Field>
               </div>
 
-              <Field label="Avatar URL" htmlFor="avatarUrl">
-                <Input
-                  id="avatarUrl"
-                  value={avatarUrl}
-                  onChange={(event) => setAvatarUrl(event.target.value)}
-                  placeholder="Upload ảnh hoặc paste URL"
-                />
-              </Field>
+              <details className="rounded-2xl border bg-background/55 px-3 py-2 text-sm">
+                <summary className="cursor-pointer select-none font-medium text-foreground">{t("profile.advancedFields")}</summary>
+                <div className="mt-3">
+                  <Field label={t("profile.avatarUrlLabel")} htmlFor="avatarUrl">
+                    <Input
+                      id="avatarUrl"
+                      value={avatarUrl}
+                      onChange={(event) => setAvatarUrl(event.target.value)}
+                      className="h-11 rounded-2xl"
+                      placeholder={t("profile.avatarPlaceholder")}
+                    />
+                  </Field>
+                </div>
+              </details>
 
-              <div className="rounded-md border bg-background p-3 text-sm">
+              <div className="rounded-2xl border bg-background/70 p-3 text-sm">
                 <div className="flex flex-wrap items-center gap-2">
                   <Mail className="h-4 w-4 text-primary" />
-                  <span className="font-medium">{userEmail || "Signed in"}</span>
+                  <span className="font-medium">{userEmail || t("common.signedIn")}</span>
                   {websiteUrl ? (
                     <a
                       href={websiteUrl}
@@ -478,7 +554,7 @@ export function ProfileEditor({
                       rel="noreferrer"
                       className="ml-auto inline-flex items-center gap-1 text-xs text-primary hover:underline"
                     >
-                      Website
+                      {t("profile.website")}
                       <ExternalLink className="h-3.5 w-3.5" />
                     </a>
                   ) : null}
@@ -499,11 +575,11 @@ export function ProfileEditor({
 
               <div className="flex flex-col gap-2 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-xs text-muted-foreground">
-                  Handle này sẽ là nền tảng cho contact discovery ở các bước sau.
+                  {t("profile.handleHelp")}
                 </div>
                 <Button type="submit" disabled={saveState === "saving" || uploadingAvatar}>
                   {saveState === "saving" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                  Save profile
+                  {t("profile.saveProfile")}
                 </Button>
               </div>
             </form>
@@ -533,7 +609,7 @@ function Field({
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-card p-4">
+    <div className="bg-card/70 p-4">
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="mt-1 truncate text-sm font-semibold">{value}</div>
     </div>
@@ -560,9 +636,9 @@ function InfoPanel({
   const canCopy = Boolean(copyValue);
 
   return (
-    <div className="rounded-md border bg-card p-4 shadow-sm">
+    <div className="rounded-2xl border bg-background/65 p-4">
       <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-md bg-accent text-accent-foreground">
+        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
           <Icon className="h-4 w-4" />
         </div>
         <div className="min-w-0 flex-1">
@@ -581,7 +657,12 @@ function InfoPanel({
           {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
         </Button>
       </div>
-      <div className="mt-3 truncate text-xs text-muted-foreground">{detail}</div>
+      {copyValue ? (
+        <div className="mt-3 overflow-hidden rounded-xl border bg-card/70 px-3 py-2 font-mono text-[11px] text-muted-foreground">
+          <div className="truncate" title={copyValue}>{copyValue}</div>
+        </div>
+      ) : null}
+      <div className="mt-3 text-xs leading-5 text-muted-foreground">{detail}</div>
     </div>
   );
 }

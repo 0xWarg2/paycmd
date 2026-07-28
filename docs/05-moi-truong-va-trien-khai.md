@@ -15,7 +15,7 @@ Sau khi tạo project, áp migration bằng Supabase MCP hoặc Supabase CLI.
 
 ## Vercel
 
-PayCMD dùng Vercel Git Integration để deploy tự động từ GitHub.
+Ra dùng Vercel Git Integration để deploy tự động từ GitHub.
 
 - Vercel project: `paycmd`.
 - Vercel project id: `prj_OoE5yuJ12FN6WjdRsHAoeObaPNSh`.
@@ -70,7 +70,7 @@ SURF_API_BASE_URL=https://api.asksurf.ai/gateway/v1
 SURF_TIMEOUT_MS=600000
 ```
 
-OpenAI dùng để route câu tự nhiên trong mode `PayCMD` thành command hoặc intent `crypto_research`. Khi user chọn mode `AskSurf`, câu hỏi không bắt đầu bằng `/` đi thẳng tới `/api/ai/crypto` để tránh route nhầm. Slash command luôn chạy PayCMD.
+OpenAI dùng để route câu tự nhiên trong mode `Ra` thành command hoặc intent `crypto_research`. Khi user chọn mode `AskSurf`, câu hỏi không bắt đầu bằng `/` đi thẳng tới `/api/ai/crypto` để tránh route nhầm. Slash command luôn chạy Ra.
 
 AskSurf public docs hiện liệt kê model Chat Completions chính thức trong family `surf-1.5`, không dùng public model tên `surf-2.0`. UI vẫn gọi gói research là `Research 2.0`, nhưng request thật map như sau:
 

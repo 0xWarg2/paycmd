@@ -17,10 +17,10 @@ export function PayCmdSectionPage({
 }) {
   return (
     <PayCmdShell>
-      <div className="h-full overflow-y-auto bg-background">
+      <div className="payna-shell-bg h-full overflow-y-auto">
         <div className="mx-auto w-full max-w-5xl px-4 py-6 md:px-8">
-          <div className="mb-6">
-            <div className="text-sm text-muted-foreground">{eyebrow}</div>
+          <div className="mb-6 rounded-2xl border border-border/60 bg-card/55 p-5 shadow-sm backdrop-blur-xl">
+            <div className="text-sm font-medium text-primary">{eyebrow}</div>
             <h1 className="mt-1 text-2xl font-semibold tracking-normal md:text-3xl">{title}</h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">{description}</p>
           </div>

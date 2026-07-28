@@ -23,6 +23,7 @@ import {
   zeroAddress,
   pad,
   createPublicClient,
+  defineChain,
   erc20Abi,
   type Address,
   type Hash,
@@ -49,54 +50,205 @@ export const arcTestnet = {
     default: { http: [`https://rpc.testnet.arc.network/${arcRpcKey}`] },
   },
   blockExplorers: {
-    default: { name: 'Explorer', url: 'https://explorer.arc.testnet.circle.com' },
+    default: { name: 'ArcScan', url: 'https://testnet.arcscan.app' },
   },
   testnet: true,
 } as const satisfies Chain;
 
-export const USDC_ADDRESSES = {
-  arcTestnet: "0x3600000000000000000000000000000000000000",
-  avalancheFuji: "0x5425890298aed601595a70ab815c96711a31bc65",
-  baseSepolia: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+const hyperEvmTestnet = defineChain({
+  id: 998,
+  name: "HyperEVM Testnet",
+  nativeCurrency: { name: "Hype", symbol: "HYPE", decimals: 18 },
+  rpcUrls: {
+    default: { http: ["https://rpc.hyperliquid-testnet.xyz/evm"] },
+  },
+  blockExplorers: {
+    default: { name: "HyperEVM Testnet Explorer", url: "https://app.hyperliquid-testnet.xyz/explorer" },
+  },
+  testnet: true,
+});
+
+const seiAtlantic = defineChain({
+  id: 1328,
+  name: "Sei Atlantic",
+  nativeCurrency: { name: "Sei", symbol: "SEI", decimals: 18 },
+  rpcUrls: {
+    default: { http: ["https://evm-rpc-testnet.sei-apis.com"] },
+  },
+  blockExplorers: {
+    default: { name: "Seitrace", url: "https://seitrace.com" },
+  },
+  testnet: true,
+});
+
+const sonicTestnet = defineChain({
+  id: 14601,
+  name: "Sonic Testnet",
+  nativeCurrency: { name: "Sonic", symbol: "S", decimals: 18 },
+  rpcUrls: {
+    default: { http: ["https://rpc.testnet.soniclabs.com"] },
+  },
+  blockExplorers: {
+    default: { name: "SonicScan", url: "https://testnet.sonicscan.org" },
+  },
+  testnet: true,
+});
+
+export const GATEWAY_CHAIN_CONFIGS = {
+  arcTestnet: {
+    domain: 26,
+    label: "Arc Testnet",
+    usdcAddress: "0x3600000000000000000000000000000000000000",
+    viemChain: arcTestnet,
+    circleBlockchain: Blockchain.ArcTestnet,
+    eoaWalletBlockchain: "ARC-TESTNET",
+  },
+  arbitrumSepolia: {
+    domain: 3,
+    label: "Arbitrum Sepolia",
+    usdcAddress: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
+    viemChain: chains.arbitrumSepolia,
+    circleBlockchain: Blockchain.ArbSepolia,
+    eoaWalletBlockchain: "ARB-SEPOLIA",
+  },
+  avalancheFuji: {
+    domain: 1,
+    label: "Avalanche Fuji",
+    usdcAddress: "0x5425890298aed601595a70AB815c96711a31Bc65",
+    viemChain: chains.avalancheFuji,
+    circleBlockchain: Blockchain.AvaxFuji,
+    eoaWalletBlockchain: "AVAX-FUJI",
+  },
+  baseSepolia: {
+    domain: 6,
+    label: "Base Sepolia",
+    usdcAddress: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    viemChain: chains.baseSepolia,
+    circleBlockchain: Blockchain.BaseSepolia,
+    eoaWalletBlockchain: "BASE-SEPOLIA",
+  },
+  sepolia: {
+    domain: 0,
+    label: "Ethereum Sepolia",
+    usdcAddress: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+    viemChain: chains.sepolia,
+    circleBlockchain: Blockchain.EthSepolia,
+    eoaWalletBlockchain: "ETH-SEPOLIA",
+  },
+  hyperEvmTestnet: {
+    domain: 19,
+    label: "HyperEVM Testnet",
+    usdcAddress: "0x2B3370eE501B4a559b57D449569354196457D8Ab",
+    viemChain: hyperEvmTestnet,
+    circleBlockchain: null,
+    eoaWalletBlockchain: null,
+  },
+  optimismSepolia: {
+    domain: 2,
+    label: "OP Sepolia",
+    usdcAddress: "0x5fd84259d66Cd46123540766Be93DFE6D43130D7",
+    viemChain: chains.optimismSepolia,
+    circleBlockchain: Blockchain.OpSepolia,
+    eoaWalletBlockchain: "OP-SEPOLIA",
+  },
+  polygonAmoy: {
+    domain: 7,
+    label: "Polygon Amoy",
+    usdcAddress: "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582",
+    viemChain: chains.polygonAmoy,
+    circleBlockchain: Blockchain.MaticAmoy,
+    eoaWalletBlockchain: "MATIC-AMOY",
+  },
+  seiAtlantic: {
+    domain: 16,
+    label: "Sei Atlantic",
+    usdcAddress: "0x4fCF1784B31630811181f670Aea7A7bEF803eaED",
+    viemChain: seiAtlantic,
+    circleBlockchain: null,
+    eoaWalletBlockchain: null,
+  },
+  sonicTestnet: {
+    domain: 13,
+    label: "Sonic Testnet",
+    usdcAddress: "0x0BA304580ee7c9a980CF72e55f5Ed2E9fd30Bc51",
+    viemChain: sonicTestnet,
+    circleBlockchain: null,
+    eoaWalletBlockchain: null,
+  },
+  unichainSepolia: {
+    domain: 10,
+    label: "Unichain Sepolia",
+    usdcAddress: "0x31d0220469e10c4E71834a79b1f276d740d3768F",
+    viemChain: chains.unichainSepolia,
+    circleBlockchain: Blockchain.UniSepolia,
+    eoaWalletBlockchain: "UNI-SEPOLIA",
+  },
+  worldChainSepolia: {
+    domain: 14,
+    label: "World Chain Sepolia",
+    usdcAddress: "0x66145f38cBAC35Ca6F1Dfb4914dF98F1614aeA88",
+    viemChain: chains.worldchainSepolia,
+    circleBlockchain: null,
+    eoaWalletBlockchain: null,
+  },
 } as const;
+
+export type SupportedChain = keyof typeof GATEWAY_CHAIN_CONFIGS;
+
+export const supportedGatewayChains = Object.keys(GATEWAY_CHAIN_CONFIGS) as SupportedChain[];
+
+export const USDC_ADDRESSES = supportedGatewayChains.reduce(
+  (acc, chain) => {
+    acc[chain] = GATEWAY_CHAIN_CONFIGS[chain].usdcAddress;
+    return acc;
+  },
+  {} as Record<SupportedChain, Address>,
+);
 
 export const TOKEN_IDS = {
   arcTestnet: "15dc2b5d-0994-58b0-bf8c-3a0501148ee8",
   sepolia: "d2177333-b33a-5263-b699-2a6a52722214",
 } as const;
 
-export const DOMAIN_IDS = {
-  avalancheFuji: 1,
-  baseSepolia: 6,
-  arcTestnet: 26,
-} as const;
-
-export type SupportedChain = keyof typeof USDC_ADDRESSES;
+export const DOMAIN_IDS = supportedGatewayChains.reduce(
+  (acc, chain) => {
+    acc[chain] = GATEWAY_CHAIN_CONFIGS[chain].domain;
+    return acc;
+  },
+  {} as Record<SupportedChain, number>,
+);
 
 // Mapping for Circle API "blockchain" parameter
-export const CIRCLE_CHAIN_NAMES: Record<SupportedChain, Blockchain> = {
-  avalancheFuji: Blockchain.AvaxFuji,
-  baseSepolia: Blockchain.BaseSepolia,
-  arcTestnet: Blockchain.ArcTestnet,
-};
+export const CIRCLE_CHAIN_NAMES = Object.fromEntries(
+  Object.entries(GATEWAY_CHAIN_CONFIGS)
+    .filter((entry): entry is [SupportedChain, (typeof GATEWAY_CHAIN_CONFIGS)[SupportedChain] & { circleBlockchain: Blockchain }] =>
+      Boolean(entry[1].circleBlockchain),
+    )
+    .map(([chain, config]) => [chain, config.circleBlockchain]),
+) as Partial<Record<SupportedChain, Blockchain>>;
 
-export const CHAIN_BY_DOMAIN: Record<number, SupportedChain> = {
-  [DOMAIN_IDS.avalancheFuji]: "avalancheFuji",
-  [DOMAIN_IDS.baseSepolia]: "baseSepolia",
-  [DOMAIN_IDS.arcTestnet]: "arcTestnet",
-} as const;
+export const CHAIN_BY_DOMAIN = supportedGatewayChains.reduce(
+  (acc, chain) => {
+    acc[GATEWAY_CHAIN_CONFIGS[chain].domain] = chain;
+    return acc;
+  },
+  {} as Record<number, SupportedChain>,
+);
+
+export function isSupportedGatewayChain(value: string): value is SupportedChain {
+  return value in GATEWAY_CHAIN_CONFIGS;
+}
+
+function requireCircleBlockchain(chain: SupportedChain): Blockchain {
+  const blockchain = CIRCLE_CHAIN_NAMES[chain];
+  if (!blockchain) {
+    throw new Error(`${GATEWAY_CHAIN_CONFIGS[chain].label} is listed by Circle Gateway, but this Circle wallet SDK version cannot sign transactions on it yet.`);
+  }
+  return blockchain;
+}
 
 function getChainConfig(chain: SupportedChain): Chain {
-  switch (chain) {
-    case "arcTestnet":
-      return arcTestnet;
-    case "avalancheFuji":
-      return chains.avalancheFuji;
-    case "baseSepolia":
-      return chains.baseSepolia;
-    default:
-      throw new Error(`Unsupported chain: ${chain}`);
-  }
+  return GATEWAY_CHAIN_CONFIGS[chain].viemChain;
 }
 
 const gatewayWalletAbi = [
@@ -404,7 +556,7 @@ export async function initiateDepositFromCustodialWallet(
   delegateAddress?: Address
 ): Promise<string> {
   const usdcAddress = USDC_ADDRESSES[chain];
-  const blockchain = CIRCLE_CHAIN_NAMES[chain];
+  const blockchain = requireCircleBlockchain(chain);
   let lastTxHash: string | undefined = undefined;
 
   // Step 1: Add delegate if provided (allows EOA to sign burn intents)
@@ -469,7 +621,7 @@ export async function withdrawFromCustodialWallet(
   amountInAtomicUnits: bigint
 ): Promise<string> {
   const usdcAddress = USDC_ADDRESSES[chain];
-  const blockchain = CIRCLE_CHAIN_NAMES[chain];
+  const blockchain = requireCircleBlockchain(chain);
 
   console.log(`Step 1: Calling initiateWithdrawal function on Gateway for wallet ${walletId} on ${blockchain}...`);
   const initiateWithdrawalChallengeId = await initiateContractInteraction(
@@ -630,8 +782,7 @@ export async function executeMintCircle(
   signature: string,
   isUserId: boolean = false
 ): Promise<Transaction> {
-  const blockchain = CIRCLE_CHAIN_NAMES[destinationChain];
-  if (!blockchain) throw new Error(`No Circle blockchain mapping for ${destinationChain}`);
+  const blockchain = requireCircleBlockchain(destinationChain);
 
   let response;
   let walletAddress: string;
@@ -706,13 +857,10 @@ async function getSignerWalletIdForUser(
 ): Promise<{ walletId: string; address: string }> {
   const { getGatewayEOAWalletId } = await import("@/lib/circle/create-gateway-eoa-wallets");
   
-  const chainMap: Record<SupportedChain, string> = {
-    baseSepolia: 'BASE-SEPOLIA',
-    avalancheFuji: 'AVAX-FUJI',
-    arcTestnet: 'ARC-TESTNET',
-  };
-
-  const blockchain = chainMap[chain];
+  const blockchain = GATEWAY_CHAIN_CONFIGS[chain].eoaWalletBlockchain;
+  if (!blockchain) {
+    throw new Error(`${GATEWAY_CHAIN_CONFIGS[chain].label} cannot use the Circle EOA signing wallet with the current SDK version.`);
+  }
   return await getGatewayEOAWalletId(userId, blockchain);
 }
 
@@ -1102,11 +1250,10 @@ export async function fetchGatewayBalance(address: Address): Promise<{
   token: string;
   balances: Array<{ domain: number; depositor: string; balance: string }>;
 }> {
-  const sources = [
-    { domain: DOMAIN_IDS.arcTestnet, depositor: address },
-    { domain: DOMAIN_IDS.avalancheFuji, depositor: address },
-    { domain: DOMAIN_IDS.baseSepolia, depositor: address },
-  ];
+  const sources = supportedGatewayChains.map((chain) => ({
+    domain: DOMAIN_IDS[chain],
+    depositor: address,
+  }));
 
   const requestBody = {
     token: "USDC",

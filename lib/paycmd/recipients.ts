@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { tr, type PayCmdLocale } from "@/lib/i18n/server";
 import { normalizeChain } from "@/lib/paycmd/chains";
 
 const EVM_ADDRESS_PATTERN = /^0x[a-fA-F0-9]{40}$/;
@@ -49,6 +50,7 @@ function walletAddressFromLookup(wallet: InternalWalletLookup | null | undefined
 export async function resolveInternalWalletOwner(
   supabase: SupabaseClient,
   walletAddress: string,
+  locale: PayCmdLocale = "vi",
 ) {
   const normalizedWalletAddress = normalizeEvmAddress(walletAddress).toLowerCase();
   const { data, error } = await supabase.rpc("lookup_internal_wallet_by_address", {
@@ -77,7 +79,7 @@ export async function resolveInternalWalletOwner(
       if (walletLookupError) {
         throw new PayCmdRecipientError(
           "CONTACT_LOOKUP_UNAVAILABLE",
-          "Không kiểm tra được địa chỉ ví này trong PayCMD lúc này. Thử lại sau hoặc lưu như ví ngoài.",
+          tr(locale, "contacts.lookupUnavailable"),
           503,
         );
       }
@@ -87,7 +89,7 @@ export async function resolveInternalWalletOwner(
 
     throw new PayCmdRecipientError(
       "CONTACT_LOOKUP_UNAVAILABLE",
-      "Không kiểm tra được địa chỉ ví này trong PayCMD lúc này. Thử lại sau hoặc lưu như ví ngoài.",
+      tr(locale, "contacts.lookupUnavailable"),
       503,
     );
   }
@@ -100,6 +102,7 @@ export async function resolveRecipient(
   userId: string,
   recipient: string,
   requestedChain?: string,
+  locale: PayCmdLocale = "vi",
 ): Promise<ResolvedRecipient> {
   const trimmed = recipient.trim();
   const normalizedRecipient = normalizeEvmAddress(trimmed);
@@ -152,7 +155,7 @@ export async function resolveRecipient(
     const address = walletAddressFromLookup(internalWallet);
 
     if (!isEvmAddress(address)) {
-      throw new Error(`Internal contact ${contact.display_name} does not have an active Circle wallet.`);
+      throw new Error(tr(locale, "contacts.internalNoWallet", { displayName: contact.display_name }));
     }
 
     return {
