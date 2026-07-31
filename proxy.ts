@@ -27,14 +27,27 @@ export async function proxy(request: NextRequest) {
     },
   });
 
-  const supabase = createSupabaseReqResClient(request, response);
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
+  // Bail out *before* touching Supabase. These paths never read `user` below, but the
+  // auth call used to run first — so every request to them paid a full round-trip to
+  // Supabase auth and then threw the answer away. Under load that tax was measured at
+  // 23.7s in `proxy.ts` on a single `/api/notifications` call, and it landed on every
+  // API request in flight, including the `/api/user/fund` call that `fund` waits on
+  // before it can open MetaMask.
+  //
+  // This is security-neutral, not a relaxation: the `/api` branch already returned before
+  // reaching the `!user` redirect below, so middleware never gated API routes. The auth
+  // call's result was computed and discarded. Route handlers build their own client and
+  // authenticate independently (`app/api/gateway/balance/route.ts` returns its own 401).
+  //
+  // Session refresh is also unaffected: `createBrowserClient` runs with `autoRefreshToken`
+  // on and persists to cookies, so the client refreshes its own token and route handlers
+  // read the fresh one.
   if (
     pathname.startsWith("/api") ||
+    // Framework internals, never a page that could need an auth redirect. The matcher below
+    // only excludes `_next/static` and `_next/image`, so `_next/webpack-hmr` and `_next/data`
+    // were reaching the auth call — and HMR polls constantly while the dev server is running.
+    pathname.startsWith("/_next") ||
     pathname.startsWith("/auth") ||
     pathname === "/docs" ||
     pathname.startsWith("/docs/") ||
@@ -44,6 +57,12 @@ export async function proxy(request: NextRequest) {
   ) {
     return response;
   }
+
+  const supabase = createSupabaseReqResClient(request, response);
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   if (!user) {
     const url = request.nextUrl.clone();

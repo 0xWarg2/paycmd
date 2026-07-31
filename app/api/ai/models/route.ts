@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 
-import { aiModelOptions, defaultAiModelProfile } from "@/lib/paycmd/ai/models";
+import { commandRouterModelLabel, commandRouterModelProfile } from "@/lib/paycmd/ai/models";
 
 export async function GET() {
   return NextResponse.json({
-    defaultModelProfile: defaultAiModelProfile,
-    models: aiModelOptions.map(({ id, label, description }) => ({ id, label, description })),
+    defaultModelProfile: commandRouterModelProfile,
+    models: [{ id: commandRouterModelProfile, label: commandRouterModelLabel, description: "Default command router" }],
   });
 }

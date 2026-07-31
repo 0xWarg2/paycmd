@@ -28,6 +28,8 @@ const dictionaries: Record<Locale, TranslationMap> = {
     "common.system": "Theo hệ thống",
     "common.switchNetwork": "Đổi network",
     "common.unifiedBalance": "Unified balance",
+    "common.balancePartial": "tối thiểu — không đọc được: {sources}",
+    "common.balanceUnavailable": "không đọc được",
     "common.usdc": "USDC",
 
     "nav.chat": "Chat",
@@ -41,6 +43,8 @@ const dictionaries: Record<Locale, TranslationMap> = {
     "shell.aiCopilot": "AI stablecoin copilot",
     "shell.gatewayNetworks": "Arc Testnet · Circle Gateway",
     "shell.appearanceHelp": "Sáng, tối, theo hệ thống",
+    "shell.gatewayDepositsPendingOne": "1 deposit chờ finality",
+    "shell.gatewayDepositsPendingMany": "{count} deposit chờ finality",
 
     "onboarding.badge": "Hướng dẫn lần đầu",
     "onboarding.title": "Bắt đầu với Payna chat",
@@ -60,7 +64,7 @@ const dictionaries: Record<Locale, TranslationMap> = {
 
     "status.queued": "Queued",
     "status.running": "Running",
-    "status.waiting_gateway": "Gateway",
+    "status.waiting_gateway": "Chờ Gateway finality",
     "status.success": "Success",
     "status.failed": "Failed",
     "status.confirmed": "Confirmed",
@@ -158,6 +162,12 @@ const dictionaries: Record<Locale, TranslationMap> = {
     "chat.loadingThreads": "Đang tải lịch sử...",
     "chat.currentThread": "Đang mở",
     "chat.messageCount": "{count} tin",
+    "chat.threadActions": "Tuỳ chọn cuộc trò chuyện",
+    "chat.rename": "Đổi tên",
+    "chat.renameSave": "Lưu tên",
+    "chat.renameCancel": "Huỷ",
+    "chat.delete": "Xoá",
+    "chat.deleteConfirm": "Xoá cuộc trò chuyện này? Tin nhắn sẽ được lưu trữ, không xoá hẳn.",
     "chat.loading.openai.0": "OpenAI đang hiểu ý định Payna...",
     "chat.loading.openai.1": "Đang kiểm tra lệnh, chain và trường cần thiết...",
     "chat.loading.openai.2": "Đang chuẩn bị preview an toàn...",
@@ -193,7 +203,10 @@ const dictionaries: Record<Locale, TranslationMap> = {
     "bridge.error.unsupportedRoute": "Route này chưa nằm trong danh sách CCTP testnet hỗ trợ bởi Bridge Kit.",
     "bridge.error.forwardingUnsupported": "Destination {chain} chưa hỗ trợ Circle Forwarding Service.",
     "bridge.error.invalidRecipient": "Recipient address chưa hợp lệ cho bridge.",
+    "action.retryCommand": "Thử lại lệnh",
     "bridge.error.incomplete": "Bridge chưa hoàn tất. Kiểm tra lại steps và retry nếu cần.",
+    "bridge.error.burnedAwaitingMint":
+      "USDC đã được burn trên source chain (tx {txHash}) nhưng bước mint chưa xong. Tiền vẫn nằm trong CCTP và chờ mint — đừng chạy lại lệnh bridge, hãy dùng Resume mint để tiếp tục.",
 
     "missing.amount": "Bạn muốn dùng số tiền bao nhiêu?",
     "missing.token": "Bạn muốn dùng token nào?",
@@ -469,6 +482,8 @@ const dictionaries: Record<Locale, TranslationMap> = {
     "common.system": "System",
     "common.switchNetwork": "Switch network",
     "common.unifiedBalance": "Unified balance",
+    "common.balancePartial": "at least — unavailable: {sources}",
+    "common.balanceUnavailable": "unavailable",
     "common.usdc": "USDC",
 
     "nav.chat": "Chat",
@@ -482,6 +497,8 @@ const dictionaries: Record<Locale, TranslationMap> = {
     "shell.aiCopilot": "AI stablecoin copilot",
     "shell.gatewayNetworks": "Arc Testnet · Circle Gateway",
     "shell.appearanceHelp": "Light, dark, system",
+    "shell.gatewayDepositsPendingOne": "1 deposit waiting for finality",
+    "shell.gatewayDepositsPendingMany": "{count} deposits waiting for finality",
 
     "onboarding.badge": "First run guide",
     "onboarding.title": "Start with Payna chat",
@@ -501,7 +518,7 @@ const dictionaries: Record<Locale, TranslationMap> = {
 
     "status.queued": "Queued",
     "status.running": "Running",
-    "status.waiting_gateway": "Gateway",
+    "status.waiting_gateway": "Waiting for Gateway finality",
     "status.success": "Success",
     "status.failed": "Failed",
     "status.confirmed": "Confirmed",
@@ -599,6 +616,12 @@ const dictionaries: Record<Locale, TranslationMap> = {
     "chat.loadingThreads": "Loading history...",
     "chat.currentThread": "Current",
     "chat.messageCount": "{count} messages",
+    "chat.threadActions": "Conversation options",
+    "chat.rename": "Rename",
+    "chat.renameSave": "Save name",
+    "chat.renameCancel": "Cancel",
+    "chat.delete": "Delete",
+    "chat.deleteConfirm": "Delete this conversation? Messages are archived, not erased.",
     "chat.loading.openai.0": "OpenAI is understanding the Payna intent...",
     "chat.loading.openai.1": "Checking command, chain, and required fields...",
     "chat.loading.openai.2": "Preparing a safe preview...",
@@ -634,7 +657,10 @@ const dictionaries: Record<Locale, TranslationMap> = {
     "bridge.error.unsupportedRoute": "This route is not in the CCTP testnet list supported by Bridge Kit.",
     "bridge.error.forwardingUnsupported": "Destination {chain} does not support Circle Forwarding Service yet.",
     "bridge.error.invalidRecipient": "Recipient address is invalid for bridge.",
+    "action.retryCommand": "Retry command",
     "bridge.error.incomplete": "Bridge did not complete. Check the steps and retry if needed.",
+    "bridge.error.burnedAwaitingMint":
+      "USDC was already burned on the source chain (tx {txHash}) but the mint step did not finish. The funds are held by CCTP awaiting mint — do not re-run the bridge command, use Resume mint to continue.",
 
     "missing.amount": "How much do you want to use?",
     "missing.token": "Which token do you want to use?",

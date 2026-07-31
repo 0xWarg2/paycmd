@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronDown, Copy, LogOut, ShieldCheck, Wallet } from "lucide-react";
+import { Check, ChevronDown, Clock3, Copy, LogOut, ShieldCheck, Wallet } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -88,12 +88,19 @@ function ChainDropdownItem({
   );
 }
 
-export function PayCmdShell({ children }: { children: ReactNode }) {
+export function PayCmdShell({ children, sidebarPanel }: { children: ReactNode; sidebarPanel?: ReactNode }) {
   const { t } = useI18n();
   const pathname = usePathname();
   const [isMounted, setIsMounted] = useState(false);
   const [email, setEmail] = useState<string>("");
-  const { activeCommandCount, unreadCount, unifiedBalance, isBalanceLoading } = usePayCmdRuntime();
+  const {
+    activeCommandCount,
+    unreadCount,
+    unifiedBalance,
+    unifiedBalanceFailedChains,
+    isBalanceLoading,
+    pendingGatewayDepositCount,
+  } = usePayCmdRuntime();
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
   const { chains, switchChain, isPending: isSwitchingChain } = useSwitchChain();
@@ -106,8 +113,20 @@ export function PayCmdShell({ children }: { children: ReactNode }) {
       refetchInterval: 15_000,
     },
   });
+  // With any unreadable chain the total is a floor, so it is prefixed with "≥" rather than
+  // shown as an exact figure. Silently rounding down is how a user ends up trusting a number
+  // that is missing whole chains worth of USDC.
+  const isBalancePartial = unifiedBalanceFailedChains.length > 0;
   const unifiedBalanceLabel =
-    unifiedBalance === null ? "-- USDC" : `${formatUsdcBalance(unifiedBalance)} USDC`;
+    unifiedBalance === null
+      ? "-- USDC"
+      : `${isBalancePartial ? "≥ " : ""}${formatUsdcBalance(unifiedBalance)} USDC`;
+  // Split One/Many rather than interpolating a count into one string, matching
+  // `runtime.gatewayDepositReadyOne`/`…Many` — English needs "1 deposit" but "2 deposits".
+  const gatewayDepositsPendingLabel =
+    pendingGatewayDepositCount === 1
+      ? t("shell.gatewayDepositsPendingOne")
+      : t("shell.gatewayDepositsPendingMany", { count: pendingGatewayDepositCount });
   const activeChain = chains.find((chain) => chain.id === chainId);
   const activeChainMeta = chainMetaFromId(activeChain?.id);
   const ActiveChainIcon = isMounted ? (activeChainMeta?.Icon ?? ShieldCheck) : ShieldCheck;
@@ -263,9 +282,18 @@ export function PayCmdShell({ children }: { children: ReactNode }) {
               <ShieldCheck className="h-4 w-4 text-primary" />
               {t("shell.gatewayNetworks")}
             </div>
+            {/* Circle finality runs ~10 minutes after a deposit's transaction lands. A toast is
+                long gone by then, so the wait needs a surface that persists. Amber + Clock3
+                matches the "waiting" bucket on /notifications. */}
+            {pendingGatewayDepositCount > 0 ? (
+              <div className="mt-2 flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400">
+                <Clock3 className="h-4 w-4 shrink-0" />
+                <span>{gatewayDepositsPendingLabel}</span>
+              </div>
+            ) : null}
           </div>
 
-          <nav className="flex-1 space-y-1.5 px-3">
+          <nav className={`space-y-1.5 px-3 ${sidebarPanel ? "shrink-0" : "flex-1"}`}>
             {navigationItems.map((item) => {
               const isActive = pathname === item.href;
               const Icon = item.icon;
@@ -291,6 +319,8 @@ export function PayCmdShell({ children }: { children: ReactNode }) {
               );
             })}
           </nav>
+
+          {sidebarPanel ? <div className="mt-2 flex min-h-0 flex-1 flex-col px-3 pb-2">{sidebarPanel}</div> : null}
 
           <div className="border-t border-border/60 p-3">
             <div className="mb-2 rounded-xl border bg-background/65 px-3 py-2">
@@ -345,6 +375,20 @@ export function PayCmdShell({ children }: { children: ReactNode }) {
             <Button variant="ghost" size="icon" onClick={logout} aria-label={t("common.logout")}>
               <LogOut className="h-4 w-4" />
             </Button>
+            {/* Same signal as the sidebar card, which is hidden on mobile. Kept to icon + count
+                because this row is already crowded; the full sentence rides on the label so
+                screen readers and long-press still get it. */}
+            {pendingGatewayDepositCount > 0 ? (
+              <Badge
+                variant="outline"
+                className="shrink-0 gap-1 border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-400"
+                title={gatewayDepositsPendingLabel}
+                aria-label={gatewayDepositsPendingLabel}
+              >
+                <Clock3 className="h-3 w-3" aria-hidden="true" />
+                {pendingGatewayDepositCount}
+              </Badge>
+            ) : null}
             <Badge variant="secondary" className="max-w-[50vw] gap-1 truncate text-[11px]">
               <span className="shrink-0">{t("common.unifiedBalance")}:</span>
               <span className="truncate">{isBalanceLoading ? "..." : unifiedBalanceLabel}</span>

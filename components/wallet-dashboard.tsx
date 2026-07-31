@@ -134,6 +134,9 @@ export function WalletDashboard() {
   const [gatewayBalance, setGatewayBalance] = useState<number>(0);
   const [walletBalance, setWalletBalance] = useState<number>(0);
   const [chainBalances, setChainBalances] = useState<ChainBalance[]>([]);
+  // What the endpoint could not read. Non-empty means the totals below are lower bounds.
+  const [balanceFailedChains, setBalanceFailedChains] = useState<string[]>([]);
+  const [gatewayUnavailable, setGatewayUnavailable] = useState(false);
   const [balanceLoading, setBalanceLoading] = useState(true);
 
   // Deposit state
@@ -199,6 +202,8 @@ export function WalletDashboard() {
       setGatewayBalance(totalGateway);
       setWalletBalance(totalWallet);
       setChainBalances(allChainBalances);
+      setBalanceFailedChains(Array.isArray(data.failedChains) ? data.failedChains : []);
+      setGatewayUnavailable(Boolean(data.gatewayUnavailable));
     } catch (err: any) {
       toast.error("Balance Update Failed", {
         description: `Failed to fetch balances: ${err.message}`,
@@ -498,6 +503,15 @@ export function WalletDashboard() {
                   </div>
                 ) : totalBalance !== null ? (
                   <div className="space-y-4">
+                    {/* The endpoint answers 200 even when a source could not be read, so the
+                        totals below can be understated. Say which source is missing rather
+                        than letting a short number look authoritative. */}
+                    {balanceFailedChains.length > 0 || gatewayUnavailable ? (
+                      <p className="text-xs text-amber-500">
+                        Totals are a lower bound — could not read:{" "}
+                        {[...(gatewayUnavailable ? ["Circle Gateway"] : []), ...balanceFailedChains].join(", ")}
+                      </p>
+                    ) : null}
                     <div>
                       <p className="text-sm text-muted-foreground">
                         Arc Gateway Balance
@@ -515,9 +529,11 @@ export function WalletDashboard() {
                         {walletBalance.toLocaleString('en-US', { minimumFractionDigits: 6, maximumFractionDigits: 6 })} USDC
                       </p>
                     </div>
-                    {chainBalances.filter(cb => cb.balance > 0).length > 0 ? (
+                    {/* `balance === null` means the lookup failed, so the row is kept and marked
+                        unavailable. Filtering it out would understate the total with no visible cause. */}
+                    {chainBalances.filter(cb => cb.balance === null || cb.balance > 0).length > 0 ? (
                       <ul className="text-xs space-y-1 mt-[-8px] text-muted-foreground">
-                        {chainBalances.filter(cb => cb.balance > 0).map((cb, idx) => (
+                        {chainBalances.filter(cb => cb.balance === null || cb.balance > 0).map((cb, idx) => (
                           <li
                             key={`wallet-${idx}-${cb.chain}-${cb.balance}`}
                             className="flex justify-between items-center gap-2"
@@ -534,8 +550,8 @@ export function WalletDashboard() {
                                 <Copy className="h-3 w-3" />
                               </Button>
                             </span>
-                            <span className="font-mono">
-                              {cb.balance.toFixed(6)}
+                            <span className={cb.balance === null ? "font-mono text-amber-500" : "font-mono"}>
+                              {cb.balance === null ? "unavailable" : cb.balance.toFixed(6)}
                             </span>
                           </li>
                         ))}

@@ -20,15 +20,18 @@ import {
   Maximize2,
   MessageCircle,
   Paperclip,
+  Pencil,
   Plus,
   Printer,
   ReceiptText,
+  RotateCcw,
   Search,
   Send,
   Sparkles,
   Table2,
   ThumbsDown,
   ThumbsUp,
+  Trash2,
   UserPlus,
   Users,
   Wallet,
@@ -38,7 +41,7 @@ import {
   X,
 } from "lucide-react";
 import Image from "next/image";
-import { FormEvent, KeyboardEvent, ReactNode, useEffect, useLayoutEffect, useRef, useState, WheelEvent } from "react";
+import { FormEvent, KeyboardEvent, ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { decodeFunctionResult, encodeFunctionData, erc20Abi, formatUnits, parseUnits } from "viem";
 
 import {
@@ -52,6 +55,7 @@ import { PayCmdShell } from "@/components/paycmd-shell";
 import {
   bridgeErrorWithFaucet,
   isForegroundOnlyCommand,
+  partialBalanceSuffix,
   usePayCmdRuntime,
 } from "@/components/paycmd-runtime";
 import { Badge } from "@/components/ui/badge";
@@ -78,18 +82,11 @@ import {
 } from "@/lib/paycmd/commands";
 import { web3Chains } from "@/lib/paycmd/web3-chains";
 import {
-  amountOutFromReserves,
-  amountOutMinFromSlippage,
   getSwapAdapterAddress,
-  parseSwapAmount,
-  paynaFactoryAbi,
-  paynaDexFactory,
-  paynaPairAbi,
   paynaSwapAdapterAbi,
   paynaSwapTokens,
   PAYNA_SWAP_CHAIN,
   PAYNA_SWAP_SLIPPAGE_BPS,
-  swapPathFor,
   type PaynaSwapTokenSymbol,
 } from "@/lib/paycmd/swap";
 
@@ -115,13 +112,21 @@ type ChatCitation = {
   url?: string;
 };
 
-type AssistantAction = {
-  kind: "switch_to_asksurf";
-  label: string;
-  query: string;
-  surfMode?: SurfMode;
-  effort?: SurfEffort;
-};
+type AssistantAction =
+  | {
+      kind: "switch_to_asksurf";
+      label: string;
+      query: string;
+      surfMode?: SurfMode;
+      effort?: SurfEffort;
+    }
+  | {
+      // Offered only when the command failed without moving funds, so re-running it
+      // is safe. Never attached after a bridge burn — that would burn a second time.
+      kind: "retry_command";
+      label: string;
+      draft: ParsedCommand;
+    };
 
 type DraftState = "active" | "cancelled" | "confirmed";
 type PreviewDisplayState = DraftState | "closed";
@@ -159,12 +164,6 @@ type ExecutionItem = {
   txHash?: string;
   result?: unknown;
   error?: string;
-};
-
-type AiModelOption = {
-  id: string;
-  label: string;
-  description: string;
 };
 
 type AiCommandResult = {
@@ -214,7 +213,9 @@ type ChatThreadSummary = {
 
 const MESSAGE_PAGE_SIZE = 10;
 const THREAD_LIST_PAGE_SIZE = 30;
-const AUTO_SCROLL_BOTTOM_THRESHOLD = 160;
+// Kept tight: at 160px a user who scrolled up a short way still counted as "at the bottom",
+// so the next message yanked them back down mid-read.
+const AUTO_SCROLL_BOTTOM_THRESHOLD = 56;
 const METAMASK_CONFIRMATION_TIMEOUT_MS = 90_000;
 const METAMASK_CHAIN_TIMEOUT_MS = 60_000;
 const METAMASK_RPC_TIMEOUT_MS = 15_000;
@@ -293,17 +294,40 @@ function normalizeAssistantActions(value: unknown): AssistantAction[] | undefine
 
   const actions: AssistantAction[] = value
     .map((item) => recordFrom(item))
-    .filter((item) => item.kind === "switch_to_asksurf" && typeof item.query === "string" && item.query.trim())
-    .map((item) => ({
-      kind: "switch_to_asksurf" as const,
-      label: typeof item.label === "string" && item.label.trim() ? item.label.trim() : translateClient("asksurf.askButton"),
-      query: (item.query as string).trim(),
-      surfMode: item.surfMode === "instant" || item.surfMode === "research" ? item.surfMode : "research",
-      effort:
-        item.effort === "standard" || item.effort === "extended" || item.effort === "maximum"
-          ? item.effort
-          : "standard",
-    }));
+    .flatMap((item): AssistantAction[] => {
+      if (item.kind === "retry_command" && item.draft && typeof item.draft === "object") {
+        return [
+          {
+            kind: "retry_command" as const,
+            label:
+              typeof item.label === "string" && item.label.trim()
+                ? item.label.trim()
+                : translateClient("action.retryCommand"),
+            draft: item.draft as ParsedCommand,
+          },
+        ];
+      }
+
+      if (item.kind !== "switch_to_asksurf" || typeof item.query !== "string" || !item.query.trim()) {
+        return [];
+      }
+
+      return [
+        {
+          kind: "switch_to_asksurf" as const,
+          label:
+            typeof item.label === "string" && item.label.trim()
+              ? item.label.trim()
+              : translateClient("asksurf.askButton"),
+          query: item.query.trim(),
+          surfMode: item.surfMode === "instant" || item.surfMode === "research" ? item.surfMode : "research",
+          effort:
+            item.effort === "standard" || item.effort === "extended" || item.effort === "maximum"
+              ? item.effort
+              : "standard",
+        },
+      ];
+    });
 
   return actions.length ? actions : undefined;
 }
@@ -1297,43 +1321,7 @@ async function getErc20Balance(tokenAddress: `0x${string}`, account: string) {
   });
 }
 
-async function readMetaMaskContract<T>({
-  to,
-  abi,
-  functionName,
-  args = [],
-  label,
-}: {
-  to: `0x${string}`;
-  abi: any;
-  functionName: string;
-  args?: readonly unknown[];
-  label: string;
-}) {
-  const data = encodeFunctionData({
-    abi,
-    functionName,
-    args,
-  } as any);
-  const result = await requestMetaMask(
-    {
-      method: "eth_call",
-      params: [{ to, data }, "latest"],
-    },
-    { timeoutMs: METAMASK_RPC_TIMEOUT_MS, label },
-  );
-
-  if (typeof result !== "string") {
-    throw new Error(`${label} returned an invalid response.`);
-  }
-
-  return decodeFunctionResult({
-    abi,
-    functionName,
-    data: result as `0x${string}`,
-  } as any) as T;
-}
-
+// The Payna DEX exists on exactly one chain, so quotes read from a transport pinned to it instead
 async function getErc20Allowance(tokenAddress: `0x${string}`, owner: string, spender: string) {
   const data = encodeFunctionData({
     abi: erc20Abi,
@@ -1369,67 +1357,52 @@ type SwapEstimate = {
   pairs: `0x${string}`[];
 };
 
-async function estimateSwapDraft(draft: ParsedCommand): Promise<SwapEstimate> {
+// Quotes are priced server-side. Two client-side approaches were tried first and both broke:
+//
+// 1. Reading through the wallet (`eth_call` on the injected provider) resolves against whatever
+//    chain the user currently has selected, and this runs from a preview effect on every keystroke —
+//    long before `swapWithMetaMask` switches to Arc. With the wallet elsewhere the Payna factory
+//    address holds no code, `eth_call` returns `0x`, and viem throws `Cannot decode zero data
+//    ("0x")`. Reproduced by `/deposit … from base` (leaves MetaMask on Base Sepolia) then `/swap`.
+// 2. A viem public client pinned to the Arc RPC fixed the chain but hit CORS: that endpoint sits
+//    behind a load balancer whose nodes disagree about it. Measured over 10 requests each, 6/10
+//    POSTs came back with no `access-control-allow-origin` and 6/10 `OPTIONS` preflights returned
+//    400. viem sends `Content-Type: application/json`, which is not CORS-safelisted, so a preflight
+//    is mandatory and about half fail — surfacing as `Failed to fetch`. MetaMask never hit this
+//    because extension-originated requests are not subject to CORS at all.
+//
+// Same-origin has neither problem, and it collapses what were up to 5 sequential round trips from
+// the browser into one request. `/api/swap/quote` owns the pricing math now; this only decodes it.
+// `fresh` re-reads reserves instead of using the route's few-second cache. Pass it when the result
+// becomes the `amountOutMin` in a real transaction; leave it off for the preview, which is what
+// keeps the keystroke path inside the RPC's 4 req/s limit.
+async function estimateSwapDraft(
+  draft: ParsedCommand,
+  options: { fresh?: boolean } = {},
+): Promise<SwapEstimate> {
   const tokenIn = draft.fields.tokenIn as PaynaSwapTokenSymbol;
   const tokenOut = draft.fields.tokenOut as PaynaSwapTokenSymbol;
-  const amountIn = parseSwapAmount(draft.fields.amount, tokenIn);
-  const route = swapPathFor(tokenIn, tokenOut);
 
-  if (!route.length) {
-    throw new Error("Choose two different swap tokens.");
-  }
+  const quote = await requestJson("/api/swap/quote", {
+    method: "POST",
+    body: JSON.stringify({
+      tokenIn,
+      tokenOut,
+      amount: draft.fields.amount,
+      fresh: options.fresh ?? false,
+    }),
+  });
 
-  let rollingAmount = amountIn;
-  const pairs: `0x${string}`[] = [];
-
-  for (let index = 0; index + 1 < route.length; index += 1) {
-    const current = paynaSwapTokens[route[index]];
-    const next = paynaSwapTokens[route[index + 1]];
-    const pair = await readMetaMaskContract<`0x${string}`>({
-      to: paynaDexFactory,
-      abi: paynaFactoryAbi,
-      functionName: "getPair",
-      args: [current.address, next.address],
-      label: "DEX pair lookup",
-    });
-
-    if (!pair || /^0x0{40}$/i.test(pair)) {
-      throw new Error(`No liquidity pair for ${current.symbol}/${next.symbol}.`);
-    }
-
-    const token0 = normalizeAddress(
-      await readMetaMaskContract<string>({
-        to: pair,
-        abi: paynaPairAbi,
-        functionName: "token0",
-        label: "Pair token0 lookup",
-      }),
-    );
-    const reserves = await readMetaMaskContract<readonly [bigint, bigint, number]>({
-      to: pair,
-      abi: paynaPairAbi,
-      functionName: "getReserves",
-      label: "Pair reserves lookup",
-    });
-    const currentIsToken0 = token0 === normalizeAddress(current.address);
-    const reserveIn = currentIsToken0 ? reserves[0] : reserves[1];
-    const reserveOut = currentIsToken0 ? reserves[1] : reserves[0];
-
-    rollingAmount = amountOutFromReserves(rollingAmount, reserveIn, reserveOut);
-    if (rollingAmount <= 0n) {
-      throw new Error(`Pool ${current.symbol}/${next.symbol} has insufficient liquidity.`);
-    }
-    pairs.push(pair);
-  }
-
+  // Atomic units arrive as strings because JSON has no bigint. Re-widening here rather than having
+  // the route send decimals keeps `amountOutMin` — the value the user actually signs — exact.
   return {
-    tokenIn,
-    tokenOut,
-    amountIn,
-    amountOut: rollingAmount,
-    amountOutMin: amountOutMinFromSlippage(rollingAmount, PAYNA_SWAP_SLIPPAGE_BPS),
-    route,
-    pairs,
+    tokenIn: quote.tokenIn as PaynaSwapTokenSymbol,
+    tokenOut: quote.tokenOut as PaynaSwapTokenSymbol,
+    amountIn: BigInt(quote.amountIn),
+    amountOut: BigInt(quote.amountOut),
+    amountOutMin: BigInt(quote.amountOutMin),
+    route: quote.route as PaynaSwapTokenSymbol[],
+    pairs: quote.pairs as `0x${string}`[],
   };
 }
 
@@ -1484,7 +1457,9 @@ async function swapWithMetaMask(draft: ParsedCommand) {
 
   const account = await requestMetaMaskAccount();
   await switchMetaMaskChain(PAYNA_SWAP_CHAIN);
-  const estimate = await estimateSwapDraft(draft);
+  // `fresh`: this estimate becomes the `amountOutMin` encoded into the transaction, so it must come
+  // from reserves read now, not from the preview's short-lived cache.
+  const estimate = await estimateSwapDraft(draft, { fresh: true });
   const inputToken = paynaSwapTokens[estimate.tokenIn];
   const outputToken = paynaSwapTokens[estimate.tokenOut];
 
@@ -1615,8 +1590,14 @@ async function fundCircleWalletFromMetaMask(draft: ParsedCommand) {
     throw new Error("Unsupported fund chain.");
   }
 
-  const context = await requestJson(`/api/user/fund?chain=${encodeURIComponent(chainKey)}`);
-  const account = await requestMetaMaskAccount();
+  // Concurrent, not sequential: the server lookup and the MetaMask connect prompt need
+  // nothing from each other, and step 3 below needs both. Serialising them meant the
+  // wallet prompt could not even start until a round-trip finished, so every millisecond
+  // of server latency was added directly to how long `fund` felt before MetaMask appeared.
+  const [context, account] = await Promise.all([
+    requestJson(`/api/user/fund?chain=${encodeURIComponent(chainKey)}`),
+    requestMetaMaskAccount(),
+  ]);
   const sourceWallet = normalizeAddress(context.sourceWallet);
   const destinationWallet = normalizeAddress(context.destinationWallet);
 
@@ -1633,7 +1614,14 @@ async function fundCircleWalletFromMetaMask(draft: ParsedCommand) {
     args: [destinationWallet as `0x${string}`, amount],
   });
 
-  const nativeBalance = await getNativeBalance(account);
+  // Two independent reads against the same chain, so issue them together. Keep the checks
+  // themselves in order below: when a wallet fails both, "no gas" is the more useful thing
+  // to report, because funding gas is the prerequisite for fixing the USDC shortfall.
+  const [nativeBalance, usdcBalance] = await Promise.all([
+    getNativeBalance(account),
+    getErc20Balance(chain.usdcAddress, account),
+  ]);
+
   if (nativeBalance === 0n) {
     throw new Error(
       translateClient("fund.noNativeGas", {
@@ -1644,7 +1632,6 @@ async function fundCircleWalletFromMetaMask(draft: ParsedCommand) {
     );
   }
 
-  const usdcBalance = await getErc20Balance(chain.usdcAddress, account);
   if (usdcBalance < amount) {
     throw new Error(
       translateClient("fund.insufficientUsdc", {
@@ -1860,9 +1847,42 @@ async function estimateBridgeDraft(draft: ParsedCommand) {
 }
 
 async function bridgeUsdcWithMetaMask(draft: ParsedCommand): Promise<BridgeExecutionResult> {
+  // The burn is irreversible while the mint still needs a signature, so these are
+  // captured outside the try block: the catch has to report where the funds stopped.
+  let burnTxHash: string | undefined;
+  let burnRecordPromise: Promise<any> | null = null;
+
   try {
     const context = await buildBridgeContext(draft, { promptForAccount: true });
     const kit = new BridgeKit();
+
+    // BridgeKit emits `burn` with the source tx hash before the mint step runs
+    // (provider-cctp-v2 dispatchStepEvent). Persist it as `pending_mint` right then,
+    // so a rejected or failed mint still leaves a row that can be traced and claimed.
+    kit.on("burn", (payload: any) => {
+      const step = payload?.values ?? payload;
+      const txHash = step?.txHash;
+      if (step?.state !== "success" || !txHash || burnRecordPromise) {
+        return;
+      }
+      burnTxHash = txHash;
+      burnRecordPromise = requestJson("/api/cctp/bridge/record", {
+        method: "POST",
+        body: JSON.stringify({
+          sourceChain: context.sourceChain,
+          destinationChain: context.destinationChain,
+          amount: context.amount,
+          sourceTxHash: txHash,
+          userAddress: context.account,
+          recipientAddress: context.recipientAddress,
+          recipientMode: context.recipientMode,
+          mintMode: context.mintMode,
+          transferSpeed: context.transferSpeed,
+          status: "pending_mint",
+        }),
+      }).catch(() => null);
+    });
+
     const estimate = await kit.estimate({
       from: context.sourceParams as any,
       to: context.destinationParams,
@@ -1875,6 +1895,34 @@ async function bridgeUsdcWithMetaMask(draft: ParsedCommand): Promise<BridgeExecu
     const estimateSummary = bridgeEstimateSummary(estimate, context.amount);
 
     await switchMetaMaskChainByKey(context.sourceChain);
+
+    // Preflight after the chain switch, so eth_getBalance/eth_call read the source
+    // chain: a burn that fails halfway is far more expensive than an early refusal.
+    const nativeBalance = await getNativeBalance(context.account);
+    if (nativeBalance === 0n) {
+      throw new Error(
+        translateClient("fund.noNativeGas", {
+          address: context.account,
+          symbol: context.sourceRuntime.viemChain.nativeCurrency.symbol,
+          chain: context.sourceRuntime.label,
+        }),
+      );
+    }
+
+    // The source chain is debited amount + fees, so the estimate is the real requirement.
+    // Fixed to 6 decimals (USDC precision) because sourceDebit is a stringified float:
+    // values below 1e-6 stringify as exponential notation, which parseUnits rejects.
+    const requiredUsdc = parseUnits(Number(estimateSummary.sourceDebit).toFixed(6), 6);
+    const usdcBalance = await getErc20Balance(context.sourceRuntime.usdcAddress, context.account);
+    if (usdcBalance < requiredUsdc) {
+      throw new Error(
+        translateClient("fund.insufficientUsdc", {
+          chain: context.sourceRuntime.label,
+          required: estimateSummary.sourceDebit,
+          current: formatUnits(usdcBalance, 6),
+        }),
+      );
+    }
 
     const result = await kit.bridge({
       from: context.sourceParams as any,
@@ -1891,7 +1939,7 @@ async function bridgeUsdcWithMetaMask(draft: ParsedCommand): Promise<BridgeExecu
     }
 
     const steps = Array.isArray(result?.steps) ? result.steps : [];
-    const sourceTxHash = bridgeTxHashFromSteps(steps, /burn/i);
+    const sourceTxHash = bridgeTxHashFromSteps(steps, /burn/i) ?? burnTxHash;
     const mintTxHash = bridgeTxHashFromSteps(steps, /mint/i);
     const transferId =
       (steps.find((step: any) => /attestation|mint/i.test(String(step?.name ?? step?.method ?? ""))) as any)
@@ -1935,12 +1983,28 @@ async function bridgeUsdcWithMetaMask(draft: ParsedCommand): Promise<BridgeExecu
       proofTxHash: recorded?.transaction?.proof_tx_hash,
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Bridge failed";
-    throw new Error(
-      bridgeErrorWithFaucet(message, [
-        draft.fields.sourceChain,
-        draft.fields.bridgeMintMode === "manual_mint" ? draft.fields.destinationChain : null,
-      ]),
+    // Make sure the pending_mint row is actually written before surfacing the failure,
+    // otherwise a burn can be lost when the page navigates away on error.
+    if (burnRecordPromise) {
+      await burnRecordPromise;
+    }
+
+    const raw = error as { code?: number; message?: string };
+    const baseMessage = error instanceof Error ? error.message : "Bridge failed";
+    const message = burnTxHash
+      ? `${baseMessage} ${translateClient("bridge.error.burnedAwaitingMint", { txHash: burnTxHash })}`
+      : baseMessage;
+
+    // Keep `code` (4001 user-rejected, -32002 pending request) and the burn hash on the
+    // error so the chat layer can offer the right recovery action instead of a plain retry.
+    throw Object.assign(
+      new Error(
+        bridgeErrorWithFaucet(message, [
+          draft.fields.sourceChain,
+          draft.fields.bridgeMintMode === "manual_mint" ? draft.fields.destinationChain : null,
+        ]),
+      ),
+      { code: raw?.code, burnTxHash, mintPending: Boolean(burnTxHash) },
     );
   }
 }
@@ -2114,8 +2178,7 @@ export function PayCmdApp() {
   const [chatMode, setChatMode] = useState<ChatMode>("paycmd");
   const [selectedSurfMode, setSelectedSurfMode] = useState<SurfMode>("research");
   const [selectedSurfEffort, setSelectedSurfEffort] = useState<SurfEffort>("standard");
-  const [aiModels, setAiModels] = useState<AiModelOption[]>([]);
-  const [selectedAiModel, setSelectedAiModel] = useState("gpt-5.5");
+  const selectedAiModel = "inclusionai/ling-3.0-flash:free";
   const [suggestionChips, setSuggestionChips] = useState<string[]>([]);
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -2132,6 +2195,8 @@ export function PayCmdApp() {
   const scrollMetricsFrameRef = useRef<number | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const previousScrollHeightRef = useRef<number | null>(null);
+  // Set by the anchor-restore layout effect, consumed by the auto-scroll effect below it.
+  const didRestoreAnchorRef = useRef(false);
   const isLoadingOlderRef = useRef(false);
   const skipNextAutoScrollRef = useRef(false);
   const shouldAutoScrollRef = useRef(true);
@@ -2313,8 +2378,8 @@ export function PayCmdApp() {
     return savedMessage;
   }
 
-  async function addSystemStatus(text: string, execution: ExecutionItem) {
-    await saveMessage({ role: "system", text, kind: "status", execution });
+  async function addSystemStatus(text: string, execution: ExecutionItem, actions?: AssistantAction[]) {
+    await saveMessage({ role: "system", text, kind: "status", execution, actions });
   }
 
   async function updateDraftState(messageId: string, draftState: DraftState) {
@@ -2655,10 +2720,11 @@ export function PayCmdApp() {
       if (draft.fields.action === "balance") {
         const chain = draft.fields.chain;
         const total = totalBalanceSource(result?.balances ?? [], "wallet", chain);
+        const partial = partialBalanceSuffix(result, t, "wallet", chain);
 
         return chain
-          ? t("runtime.walletBalance", { chain, amount: formatDecimalAmount(total) })
-          : t("runtime.walletBalanceAll", { amount: formatDecimalAmount(total) });
+          ? t("runtime.walletBalance", { chain, amount: formatDecimalAmount(total) }) + partial
+          : t("runtime.walletBalanceAll", { amount: formatDecimalAmount(total) }) + partial;
       }
       return result?.hasWallet
         ? t("runtime.walletActive", { address: result.scaWallet?.address ?? result.scaWallet?.wallet_address })
@@ -2670,9 +2736,9 @@ export function PayCmdApp() {
       const balances = result?.balances ?? [];
       if (chain) {
         const chainTotal = totalBalanceSource(balances, "unified", chain);
-        return `${chain}: ${formatDecimalAmount(chainTotal)} USDC.`;
+        return `${chain}: ${formatDecimalAmount(chainTotal)} USDC.${partialBalanceSuffix(result, t, "unified", chain)}`;
       }
-      return `Unified balance: ${formatDecimalAmount(result?.totalUnified)} USDC.`;
+      return `Unified balance: ${formatDecimalAmount(result?.totalUnified)} USDC.${partialBalanceSuffix(result, t, "unified")}`;
     }
 
     if (draft.command === "deposit") {
@@ -2799,19 +2865,20 @@ export function PayCmdApp() {
         const chain = draft.fields.chain;
         const balances = result?.balances ?? [];
         const total = totalBalanceSource(balances, "gateway", chain);
+        const partial = partialBalanceSuffix(result, t, "gateway", chain);
 
         if (!chain && Array.isArray(balances) && balances.length) {
           const lines = balances
             .filter((row) => row?.source === "gateway")
             .map((row) => `${row.chain}: ${formatDecimalAmount(row.amount ?? "0")} USDC`);
           if (lines.length) {
-            return `${t("runtime.gatewayBalanceResultAll", { amount: formatDecimalAmount(total) })}\n${lines.join("\n")}`;
+            return `${t("runtime.gatewayBalanceResultAll", { amount: formatDecimalAmount(total) })}${partial}\n${lines.join("\n")}`;
           }
         }
 
         return chain
-          ? t("runtime.gatewayBalanceResult", { chain, amount: formatDecimalAmount(total) })
-          : t("runtime.gatewayBalanceResultAll", { amount: formatDecimalAmount(total) });
+          ? t("runtime.gatewayBalanceResult", { chain, amount: formatDecimalAmount(total) }) + partial
+          : t("runtime.gatewayBalanceResultAll", { amount: formatDecimalAmount(total) }) + partial;
       }
       return `Gateway online. Domains: ${(result?.domains ?? []).length}.`;
     }
@@ -2893,8 +2960,9 @@ export function PayCmdApp() {
         window.dispatchEvent(new Event("ra:balance-changed"));
       }
     } catch (error) {
+      const raw = error as { code?: string | number; mintPending?: boolean };
       const message = error instanceof Error ? error.message : "Command failed";
-      const errorCode = (error as { code?: string })?.code;
+      const errorCode = raw?.code;
       const waitingGateway = errorCode === "GATEWAY_FINALITY_PENDING";
       const failed = {
         ...execution,
@@ -2904,7 +2972,20 @@ export function PayCmdApp() {
       setExecutions((current) =>
         current.map((item) => (item.id === execution.id ? failed : item)),
       );
-      await addSystemStatus(message, failed);
+
+      // Retry is only offered when nothing moved on-chain: a rejected signature
+      // (4001) or a stuck MetaMask request (-32002). Once a bridge burn landed,
+      // `mintPending` is set and re-running would burn a second time.
+      const canRetrySafely =
+        !waitingGateway && !raw?.mintPending && (errorCode === 4001 || errorCode === -32002);
+
+      await addSystemStatus(
+        message,
+        failed,
+        canRetrySafely
+          ? [{ kind: "retry_command" as const, label: t("action.retryCommand"), draft }]
+          : undefined,
+      );
     }
   }
 
@@ -3104,6 +3185,62 @@ export function PayCmdApp() {
     window.history.replaceState(null, "", nextUrl.toString());
   }
 
+  async function renameChatThread(targetThreadId: string, nextTitle: string) {
+    const title = nextTitle.trim();
+    if (!userId || !title) return;
+
+    // Optimistic: the sidebar is the only reader of this title, so a failed write just
+    // reverts on the next loadChatThreads() rather than corrupting anything.
+    setChatThreads((current) =>
+      current.map((thread) => (thread.id === targetThreadId ? { ...thread, title } : thread)),
+    );
+
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("chat_threads")
+      .update({ title })
+      .eq("id", targetThreadId)
+      .eq("user_id", userId);
+
+    if (error) {
+      console.error("Failed to rename chat thread", error);
+      void loadChatThreads();
+    }
+  }
+
+  async function deleteChatThread(targetThreadId: string) {
+    if (!userId) return;
+
+    const supabase = createClient();
+    // Archive rather than delete. Threads carry the record of real transactions — the
+    // status message with a tx hash lives in chat_messages — so hard-deleting a thread
+    // would destroy the only in-app trace of money that actually moved.
+    const { error } = await supabase
+      .from("chat_threads")
+      .update({ status: "archived" })
+      .eq("id", targetThreadId)
+      .eq("user_id", userId);
+
+    if (error) {
+      console.error("Failed to delete chat thread", error);
+      return;
+    }
+
+    const remaining = chatThreads.filter((thread) => thread.id !== targetThreadId);
+    setChatThreads(remaining);
+
+    if (targetThreadId !== threadId) return;
+
+    // The open thread just vanished. Fall back to the next most recent one, or start a
+    // fresh thread so the composer is never pointing at an archived id.
+    if (remaining.length) {
+      await loadThreadMessages(remaining[0].id);
+      return;
+    }
+
+    await createNewChatThread();
+  }
+
   function updateScrollMetricsFromViewport(viewport: HTMLDivElement) {
     const nextMetrics = {
       top: Math.round(viewport.scrollTop),
@@ -3140,15 +3277,10 @@ export function PayCmdApp() {
     if (!viewport) return;
     shouldAutoScrollRef.current = isNearViewportBottom(viewport);
     scheduleScrollMetricsUpdate();
+    // Single entry point for pagination. The wheel handler used to fire this too, which
+    // meant one gesture could start two loads and land two anchor restores on top of
+    // each other — the position jump users were seeing when scrolling up.
     if (viewport.scrollTop < 48) {
-      void loadOlderMessages();
-    }
-  }
-
-  function handleViewportWheel(event: WheelEvent<HTMLDivElement>) {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    if (event.deltaY < 0 && viewport.scrollTop < 48) {
       void loadOlderMessages();
     }
   }
@@ -3252,6 +3384,24 @@ export function PayCmdApp() {
     })();
   }
 
+  // Re-runs a command that failed before any on-chain state changed. The retry action
+  // is only attached to such failures (see runForegroundCommand's catch), so this never
+  // re-submits a bridge whose burn already landed.
+  function retryCommand(draft: ParsedCommand) {
+    if (submitLockRef.current) return;
+
+    void (async () => {
+      submitLockRef.current = true;
+      setIsSubmitting(true);
+      try {
+        await runCommand(draft);
+      } finally {
+        submitLockRef.current = false;
+        setIsSubmitting(false);
+      }
+    })();
+  }
+
   function selectCommand(sample: string) {
     setInput(sample);
     setHistoryIndex(null);
@@ -3330,6 +3480,50 @@ export function PayCmdApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [registerStatusWriter, threadId, userId]);
 
+  // A deposit's card sits at `waiting_gateway` for the ~10 minutes Circle needs, and nothing here
+  // ever revisited it: `saveMessage`'s id is dropped by `addSystemStatus`, so the writer keeps no
+  // handle on the row it wrote. `/api/gateway/deposit/sync` persists the flip and then fires this
+  // event with the settled deposits, so the open thread repaints in place instead of waiting for
+  // a reload. Join on `txHash` — `deposit/route.ts` writes the same string into the execution
+  // metadata and into `transaction_history`.
+  useEffect(() => {
+    function handleSettledDeposits(event: Event) {
+      const settled = (event as CustomEvent).detail;
+      if (!Array.isArray(settled)) return;
+
+      const bodyByTxHash = new Map<string, string>();
+      for (const item of settled) {
+        if (typeof item?.txHash === "string" && typeof item?.message === "string") {
+          bodyByTxHash.set(item.txHash, item.message);
+        }
+      }
+
+      if (bodyByTxHash.size === 0) return;
+
+      setMessages((current) =>
+        current.map((message) => {
+          const execution = message.execution;
+          // Only the final card carries `txHash`; the queued/running lines above it are history
+          // and keep their own status.
+          if (!execution || execution.status !== "waiting_gateway" || !execution.txHash) {
+            return message;
+          }
+
+          const body = bodyByTxHash.get(execution.txHash);
+          if (!body) return message;
+
+          // Swapping the text matters as much as the status: `buildExecutionReceipt` has no
+          // deposit branch, so this string renders verbatim and would otherwise pair a green
+          // check with "waiting for Circle Gateway finality".
+          return { ...message, text: body, execution: { ...execution, status: "success" } };
+        }),
+      );
+    }
+
+    window.addEventListener("ra:gateway-deposit-settled", handleSettledDeposits);
+    return () => window.removeEventListener("ra:gateway-deposit-settled", handleSettledDeposits);
+  }, []);
+
   useEffect(() => {
     function handleEscape(event: globalThis.KeyboardEvent) {
       if (event.key !== "Escape") return;
@@ -3365,8 +3559,14 @@ export function PayCmdApp() {
     const previousHeight = previousScrollHeightRef.current;
     if (!viewport || previousHeight === null) return;
 
+    // Hold the user's reading position after older messages are prepended above it.
     viewport.scrollTop = viewport.scrollHeight - previousHeight;
     previousScrollHeightRef.current = null;
+    // Explicit handoff to the auto-scroll effect below. It used to infer "a restore just
+    // happened" from previousScrollHeightRef, but this effect nulls that ref before the
+    // passive effect reads it, so a prepend arriving in the same commit as an append
+    // could still scroll to the bottom and undo the restore.
+    didRestoreAnchorRef.current = true;
   }, [messages.length, activeAiProvider]);
 
   useEffect(() => {
@@ -3374,7 +3574,10 @@ export function PayCmdApp() {
       skipNextAutoScrollRef.current = false;
       return;
     }
-    if (previousScrollHeightRef.current !== null) return;
+    if (didRestoreAnchorRef.current) {
+      didRestoreAnchorRef.current = false;
+      return;
+    }
     if (!shouldAutoScrollRef.current) return;
     window.requestAnimationFrame(scrollToLatest);
   }, [messages.length, activeAiProvider]);
@@ -3392,20 +3595,6 @@ export function PayCmdApp() {
         window.cancelAnimationFrame(scrollMetricsFrameRef.current);
       }
     };
-  }, []);
-
-  useEffect(() => {
-    async function loadAiModels() {
-      try {
-        const data = await requestJson("/api/ai/models");
-        setAiModels(data.models ?? []);
-        setSelectedAiModel(data.defaultModelProfile ?? "gpt-5.5");
-      } catch (error) {
-        console.error("Failed to load AI models", error);
-      }
-    }
-
-    void loadAiModels();
   }, []);
 
   useEffect(() => {
@@ -3509,7 +3698,24 @@ export function PayCmdApp() {
   }, []);
 
   return (
-    <PayCmdShell>
+    <PayCmdShell
+      sidebarPanel={
+        <ChatThreadSidebar
+          threads={chatThreads}
+          activeThreadId={threadId}
+          locale={locale}
+          isLoading={isLoadingThreads}
+          canCreate={Boolean(userId) && !isLoadingThreads}
+          onSelect={(nextThreadId) => {
+            if (nextThreadId === threadId) return;
+            void loadThreadMessages(nextThreadId);
+          }}
+          onCreate={createNewChatThread}
+          onRename={(nextThreadId, title) => void renameChatThread(nextThreadId, title)}
+          onDelete={(nextThreadId) => void deleteChatThread(nextThreadId)}
+        />
+      }
+    >
       <div className="payna-shell-bg relative flex h-full min-h-0 flex-col">
         {showSlowAskSurfNotice ? (
           <SlowAskSurfNotice
@@ -3530,11 +3736,14 @@ export function PayCmdApp() {
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              {/* Desktop-only duplicate: the sidebar thread list covers this on lg+, but the
+                  sidebar is `hidden lg:flex`, so on mobile this dropdown is the only way to
+                  reach past conversations. */}
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                className="gap-2 rounded-full"
+                className="gap-2 rounded-full lg:hidden"
                 onClick={() => setIsThreadListOpen((current) => !current)}
               >
                 <History className="h-4 w-4" />
@@ -3569,8 +3778,7 @@ export function PayCmdApp() {
           <div
             ref={viewportRef}
             onScroll={handleViewportScroll}
-            onWheel={handleViewportWheel}
-            className="paycmd-chat-scrollbar h-full overflow-y-scroll scroll-pb-44 px-3 py-5 pb-40 pr-6 md:px-6 md:pb-48 md:pr-9"
+            className="paycmd-chat-scrollbar h-full overflow-y-scroll scroll-pb-44 px-3 py-5 pb-40 md:px-6 md:pb-48"
           >
             <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
               {isLoadingHistory ? (
@@ -3592,6 +3800,7 @@ export function PayCmdApp() {
                       onConfirm={confirmDraft}
                       onCancel={cancelDraft}
                       onRelatedQuestion={submitRelatedQuestion}
+                      onRetryCommand={retryCommand}
                     />
                   ))}
                   {activeAiProvider ? (
@@ -3654,8 +3863,6 @@ export function PayCmdApp() {
               chatMode={chatMode}
               surfMode={selectedSurfMode}
               surfEffort={selectedSurfEffort}
-              aiModels={aiModels}
-              selectedAiModel={selectedAiModel}
               isBusy={isInputBusy}
               onChatModeChange={setChatMode}
               onSurfModeChange={(mode) => {
@@ -3663,7 +3870,6 @@ export function PayCmdApp() {
                 if (mode === "instant") setSelectedSurfEffort("standard");
               }}
               onSurfEffortChange={setSelectedSurfEffort}
-              onAiModelChange={setSelectedAiModel}
             />
 
             <form
@@ -3700,6 +3906,161 @@ export function PayCmdApp() {
 
 function normalizePaletteQuery(query: string) {
   return query.trim().replace(/^\/+/, "").toLowerCase();
+}
+
+// Sidebar twin of ChatThreadMenu. The dropdown stays for the mobile header, where there is
+// no sidebar to dock into; on desktop this is always visible so history and "New chat" are
+// reachable without discovering a button buried in the chat header.
+function ChatThreadSidebar({
+  threads,
+  activeThreadId,
+  locale,
+  isLoading,
+  canCreate,
+  onSelect,
+  onCreate,
+  onRename,
+  onDelete,
+}: {
+  threads: ChatThreadSummary[];
+  activeThreadId: string | null;
+  locale: string;
+  isLoading: boolean;
+  canCreate: boolean;
+  onSelect: (threadId: string) => void;
+  onCreate: () => void;
+  onRename: (threadId: string, title: string) => void;
+  onDelete: (threadId: string) => void;
+}) {
+  const { t } = useI18n();
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [draftTitle, setDraftTitle] = useState("");
+
+  function beginRename(thread: ChatThreadSummary) {
+    setRenamingId(thread.id);
+    setDraftTitle(thread.title || "");
+  }
+
+  function commitRename() {
+    if (renamingId && draftTitle.trim()) {
+      onRename(renamingId, draftTitle);
+    }
+    setRenamingId(null);
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center justify-between px-3 pb-2">
+        <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+          <History className="h-3.5 w-3.5" />
+          {t("chat.history")}
+        </div>
+        <span className="text-[11px] text-muted-foreground">{threads.length}</span>
+      </div>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="mx-1 mb-2 justify-start gap-2 rounded-xl"
+        onClick={onCreate}
+        disabled={!canCreate}
+      >
+        <Plus className="h-4 w-4" />
+        {t("chat.newChat")}
+      </Button>
+      <div className="paycmd-command-palette-scrollbar min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
+        {isLoading ? (
+          <div className="px-3 py-3 text-xs text-muted-foreground">{t("chat.loadingThreads")}</div>
+        ) : threads.length ? (
+          threads.map((thread) => {
+            const isActive = thread.id === activeThreadId;
+
+            if (renamingId === thread.id) {
+              return (
+                <div key={thread.id} className="rounded-xl bg-accent/50 p-1.5">
+                  <Input
+                    autoFocus
+                    value={draftTitle}
+                    onChange={(event) => setDraftTitle(event.target.value)}
+                    onBlur={commitRename}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        commitRename();
+                      }
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        setRenamingId(null);
+                      }
+                    }}
+                    aria-label={t("chat.rename")}
+                    className="h-8 bg-background/80 text-sm"
+                  />
+                </div>
+              );
+            }
+
+            return (
+              // A row, not a <button>: the rename/delete controls are themselves buttons and
+              // cannot legally nest inside one. The title stays a real button so keyboard
+              // and screen-reader users still get a single activatable target per thread.
+              <div
+                key={thread.id}
+                className={`group/thread relative rounded-xl transition ${
+                  isActive
+                    ? "bg-primary/15 text-foreground ring-1 ring-primary/40"
+                    : "text-muted-foreground hover:bg-accent/70 hover:text-accent-foreground"
+                }`}
+              >
+                <button
+                  type="button"
+                  aria-current={isActive ? "true" : undefined}
+                  className="w-full rounded-xl px-3 py-2 pr-16 text-left"
+                  onClick={() => onSelect(thread.id)}
+                >
+                  <div className="truncate text-sm font-medium">{thread.title || t("chat.untitled")}</div>
+                  <div className="mt-0.5 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                    <span className="truncate">{thread.last_message_preview || t("chat.emptyThread")}</span>
+                    <span className="shrink-0">
+                      {formatThreadTimestamp(thread.last_message_at ?? thread.updated_at, locale)}
+                    </span>
+                  </div>
+                </button>
+                {/* Hover-only on pointer devices, but focus-within keeps them reachable by
+                    keyboard, and they stay visible on the active thread. */}
+                <div
+                  className={`absolute right-1.5 top-1.5 flex items-center gap-0.5 transition group-hover/thread:opacity-100 group-focus-within/thread:opacity-100 ${
+                    isActive ? "opacity-100" : "opacity-0"
+                  }`}
+                >
+                  <button
+                    type="button"
+                    aria-label={`${t("chat.rename")}: ${thread.title || t("chat.untitled")}`}
+                    className="rounded-lg p-1.5 text-muted-foreground transition hover:bg-background/80 hover:text-foreground"
+                    onClick={() => beginRename(thread)}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`${t("chat.delete")}: ${thread.title || t("chat.untitled")}`}
+                    className="rounded-lg p-1.5 text-muted-foreground transition hover:bg-destructive/15 hover:text-destructive"
+                    onClick={() => {
+                      if (window.confirm(t("chat.deleteConfirm"))) onDelete(thread.id);
+                    }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            );
+          })
+        ) : (
+          <div className="px-3 py-3 text-xs text-muted-foreground">{t("chat.historyEmpty")}</div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function ChatThreadMenu({
@@ -3773,27 +4134,19 @@ function ComposerModeControls({
   chatMode,
   surfMode,
   surfEffort,
-  aiModels,
-  selectedAiModel,
   isBusy,
   onChatModeChange,
   onSurfModeChange,
   onSurfEffortChange,
-  onAiModelChange,
 }: {
   chatMode: ChatMode;
   surfMode: SurfMode;
   surfEffort: SurfEffort;
-  aiModels: AiModelOption[];
-  selectedAiModel: string;
   isBusy: boolean;
   onChatModeChange: (mode: ChatMode) => void;
   onSurfModeChange: (mode: SurfMode) => void;
   onSurfEffortChange: (effort: SurfEffort) => void;
-  onAiModelChange: (model: string) => void;
 }) {
-  const models = aiModels.length ? aiModels : [{ id: "gpt-5.5", label: "GPT-5.5", description: "" }];
-
   return (
     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
       <div className="inline-flex rounded-2xl border bg-background/70 p-1 shadow-sm backdrop-blur">
@@ -3873,22 +4226,10 @@ function ComposerModeControls({
           </label>
         </div>
       ) : (
-        <label className="flex h-10 items-center gap-1 rounded-2xl border bg-background/70 px-2 text-xs text-muted-foreground shadow-sm backdrop-blur">
+        <div className="flex h-10 items-center gap-1 rounded-2xl border bg-background/70 px-3 text-xs text-muted-foreground shadow-sm backdrop-blur" title="OpenRouter free model is the fixed command-router model">
           <Bot className="h-3.5 w-3.5 text-primary" />
-          <select
-            value={selectedAiModel}
-            onChange={(event) => onAiModelChange(event.target.value)}
-            className="max-w-[132px] bg-transparent text-xs font-medium text-foreground outline-none"
-            aria-label="AI model"
-            disabled={isBusy}
-          >
-            {models.map((model) => (
-              <option key={model.id} value={model.id}>
-                {model.label}
-              </option>
-            ))}
-          </select>
-        </label>
+          <span className="font-medium text-foreground">OpenRouter Free</span>
+        </div>
       )}
     </div>
   );
@@ -3991,6 +4332,7 @@ function MessageBubble({
   onConfirm,
   onCancel,
   onRelatedQuestion,
+  onRetryCommand,
 }: {
   message: ChatMessage;
   activeDraftId: string | null;
@@ -3998,6 +4340,7 @@ function MessageBubble({
   onConfirm: (messageId: string, draft: ParsedCommand) => void;
   onCancel: (messageId: string) => void;
   onRelatedQuestion: (question: string) => void;
+  onRetryCommand: (draft: ParsedCommand) => void;
 }) {
   const isUser = message.role === "user";
   const isSystem = message.role === "system";
@@ -4061,7 +4404,11 @@ function MessageBubble({
               <span className="block whitespace-pre-wrap break-words">{message.text}</span>
             )}
             {message.actions?.length ? (
-              <AssistantActionBar actions={message.actions} onAskSurf={onRelatedQuestion} />
+              <AssistantActionBar
+                actions={message.actions}
+                onAskSurf={onRelatedQuestion}
+                onRetry={onRetryCommand}
+              />
             ) : null}
             {message.provider !== "asksurf" && message.citations?.length ? <CitationList citations={message.citations} /> : null}
           </div>
@@ -4090,24 +4437,40 @@ function executionStatusTone(execution: ExecutionItem, isLatest: boolean) {
 function AssistantActionBar({
   actions,
   onAskSurf,
+  onRetry,
 }: {
   actions: AssistantAction[];
   onAskSurf: (question: string) => void;
+  onRetry: (draft: ParsedCommand) => void;
 }) {
   return (
     <div className="flex flex-wrap gap-2 border-t pt-3">
-      {actions.map((action) => (
-        <Button
-          key={`${action.kind}_${action.query}`}
-          type="button"
-          size="sm"
-          className="border-emerald-400/50 bg-emerald-600 text-white shadow-sm shadow-emerald-500/20 hover:bg-emerald-700"
-          onClick={() => onAskSurf(action.query)}
-        >
-          <Waypoints className="h-3.5 w-3.5" />
-          {action.label}
-        </Button>
-      ))}
+      {actions.map((action, index) =>
+        action.kind === "retry_command" ? (
+          <Button
+            key={`retry_${action.draft.command}_${index}`}
+            type="button"
+            size="sm"
+            variant="outline"
+            className="border-amber-400/60 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 dark:text-amber-300"
+            onClick={() => onRetry(action.draft)}
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            {action.label}
+          </Button>
+        ) : (
+          <Button
+            key={`${action.kind}_${action.query}`}
+            type="button"
+            size="sm"
+            className="border-emerald-400/50 bg-emerald-600 text-white shadow-sm shadow-emerald-500/20 hover:bg-emerald-700"
+            onClick={() => onAskSurf(action.query)}
+          >
+            <Waypoints className="h-3.5 w-3.5" />
+            {action.label}
+          </Button>
+        ),
+      )}
     </div>
   );
 }
@@ -5570,29 +5933,41 @@ function CommandPreviewCard({
     if (!isSwap || !draft.fields.amount || !draft.fields.tokenIn || !draft.fields.tokenOut) return;
 
     let cancelled = false;
+    // Spinner goes up immediately even though the request is delayed, so the preview does not sit
+    // showing a stale figure while the debounce runs.
     setSwapEstimateLoading(true);
     setSwapEstimateError("");
 
-    void estimateSwapDraft(draft)
-      .then((result) => {
-        if (!cancelled) {
-          setSwapEstimate(result);
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setSwapEstimate(null);
-          setSwapEstimateError(error instanceof Error ? error.message : t("preview.swapEstimateFailed"));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setSwapEstimateLoading(false);
-        }
-      });
+    // `draft` is a fresh object per keystroke, so this effect used to fire a quote per character.
+    // The Arc RPC allows 4 requests/second and a quote costs several, so typing "100" was enough to
+    // get HTTP 429 back — which viem raises as a transport error and the route reported as "could
+    // not reach Arc Testnet". Cancelling the pending timer on each keystroke means only the last
+    // one in a burst actually asks.
+    const timer = window.setTimeout(() => {
+      void estimateSwapDraft(draft)
+        .then((result) => {
+          if (!cancelled) {
+            setSwapEstimate(result);
+          }
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            setSwapEstimate(null);
+            setSwapEstimateError(
+              error instanceof Error ? error.message : t("preview.swapEstimateFailed"),
+            );
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setSwapEstimateLoading(false);
+          }
+        });
+    }, 350);
 
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
   }, [draft, isSwap, t]);
   const mintGasModeText =

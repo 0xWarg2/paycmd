@@ -17,6 +17,7 @@ import {
   xdcTestnet,
 } from "viem/chains";
 import { defineChain } from "viem";
+import { isSupportedChain } from "@/lib/paycmd/chains";
 
 export const CIRCLE_TESTNET_FAUCET_URL = "https://faucet.circle.com/";
 
@@ -259,6 +260,9 @@ let supportedBridgeChainsPromise: Promise<CctpBridgeRuntimeChain[]> | null = nul
 export type CctpBridgeRuntimeChain = CctpBridgeChainConfig & {
   canForwardToDestination: boolean;
   canFastFromSource: boolean;
+  // Taken from the BridgeKit chain definition so balance checks never have to
+  // re-derive the address from a second table with different chain keys.
+  usdcAddress: `0x${string}`;
 };
 
 export function normalizeCctpBridgeChain(value?: string | null): CctpBridgeChainKey | "" {
@@ -271,7 +275,9 @@ export function isCctpBridgeChain(value: string): value is CctpBridgeChainKey {
 }
 
 export function isKnownTestnetChain(value?: string | null) {
-  return Boolean(value && (isCctpBridgeChain(value) || value === "arcTestnet" || value === "baseSepolia" || value === "avalancheFuji"));
+  // Union of both key spaces: the bridge rail uses `ethereumSepolia`/`seiTestnet` while the
+  // Gateway rail uses `sepolia`/`seiAtlantic`, and a faucet hint is worth showing for either.
+  return Boolean(value && (isCctpBridgeChain(value) || isSupportedChain(value)));
 }
 
 export function faucetHint(chain?: string | null) {
@@ -309,12 +315,13 @@ async function loadSupportedCctpBridgeChains() {
     .filter((chain: any) => chain?.isTestnet && chain?.type === "evm" && chain?.cctp?.contracts?.v2)
     .map((chain: any) => {
       const config = bridgeKitChainMap[chain.chain];
-      if (!config) return null;
+      if (!config || !chain?.usdcAddress) return null;
 
       return {
         ...config,
         canFastFromSource: Boolean(chain?.cctp?.forwarderSupported?.source ?? chain?.cctp?.contracts?.v2?.fastConfirmations),
         canForwardToDestination: Boolean(chain?.cctp?.forwarderSupported?.destination),
+        usdcAddress: chain.usdcAddress as `0x${string}`,
       } satisfies CctpBridgeRuntimeChain;
     })
     .filter((chain): chain is CctpBridgeRuntimeChain => Boolean(chain))

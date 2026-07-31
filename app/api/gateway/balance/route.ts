@@ -67,6 +67,9 @@ export async function POST(req: NextRequest) {
         // Fetch Gateway balance (available balance on Gateway contracts)
         let gatewayBalances: Array<{ domain: number; balance: number; chain: string }> = [];
         let gatewayTotal = 0;
+        // Same trap as the per-chain catch below: if this call fails, gatewayTotal stays 0,
+        // which is indistinguishable from "nothing deposited on Gateway" unless we say so.
+        let gatewayUnavailable = false;
 
         try {
           const gatewayResponse = await fetchGatewayBalance(address as Address);
@@ -92,6 +95,7 @@ export async function POST(req: NextRequest) {
         } catch (error: any) {
           console.error(`Error fetching Gateway balance for ${address}:`, error.message);
           console.log(`Will fetch on-chain balances only`);
+          gatewayUnavailable = true;
         }
 
         // Fetch on-chain USDC balances (wallet balances not yet deposited)
@@ -105,18 +109,25 @@ export async function POST(req: NextRequest) {
                 address,
               };
             } catch (error) {
-              console.error(`Error fetching on-chain balance for ${chain}:`, error);
+              // A failed lookup must not masquerade as a zero balance. Returning `balance: 0`
+              // here let a dead RPC silently understate real funds inside a 200 response, so
+              // the UI had no way to tell "no USDC on this chain" from "could not check".
+              const message = error instanceof Error ? error.message : String(error);
+              console.error(`Error fetching on-chain balance for ${chain}:`, message);
               return {
                 chain,
-                balance: 0,
+                balance: null as number | null,
                 address,
+                error: message,
               };
             }
           })
         );
 
-        // Calculate total from on-chain balances (wallet balance)
-        const walletTotal = chainBalances.reduce((sum, cb) => sum + cb.balance, 0);
+        const failedChains = chainBalances.filter((cb) => cb.balance === null).map((cb) => cb.chain);
+
+        // Only successful lookups contribute. With any failedChains this is a floor, not the total.
+        const walletTotal = chainBalances.reduce((sum, cb) => sum + (cb.balance ?? 0), 0);
 
         return {
           address,
@@ -125,6 +136,8 @@ export async function POST(req: NextRequest) {
           chainBalances,
           walletTotal,
           totalBalance: gatewayTotal + walletTotal,
+          failedChains,
+          gatewayUnavailable,
         };
       } catch (error: any) {
         console.error(`Error fetching balance for ${address}:`, error);
@@ -132,6 +145,9 @@ export async function POST(req: NextRequest) {
           address,
           error: error.message,
           totalBalance: 0,
+          // Nothing was read for this address, so every chain counts as unchecked.
+          failedChains: [...supportedChains] as string[],
+          gatewayUnavailable: true,
         };
       }
     });
@@ -143,9 +159,18 @@ export async function POST(req: NextRequest) {
       return sum + (b.totalBalance || 0);
     }, 0);
 
+    // Union across addresses so callers get one flag instead of re-walking every entry.
+    const failedChains = [...new Set(balances.flatMap((b) => b.failedChains ?? []))];
+    const gatewayUnavailable = balances.some((b) => b.gatewayUnavailable);
+
     return NextResponse.json({
       success: true,
       totalUnified,
+      // `totalUnified` only counts chains that answered, so with any failedChains it is a
+      // lower bound. Callers must render it as "at least", never as an exact total.
+      partial: failedChains.length > 0 || gatewayUnavailable,
+      failedChains,
+      gatewayUnavailable,
       balances,
     });
   } catch (error: any) {

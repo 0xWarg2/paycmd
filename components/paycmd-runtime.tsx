@@ -48,7 +48,13 @@ type RuntimeContext = {
   activeCommandCount: number;
   unreadCount: number;
   unifiedBalance: number | null;
+  // Chains whose balance could not be read. Non-empty means `unifiedBalance` is a lower
+  // bound, so any UI showing that number must say so.
+  unifiedBalanceFailedChains: string[];
   isBalanceLoading: boolean;
+  // Deposits whose on-chain transaction landed but whose Gateway balance is not spendable yet.
+  // Circle finality runs ~10 minutes, so this needs a surface that outlives a toast.
+  pendingGatewayDepositCount: number;
   notifications: NotificationItem[];
   refreshBalance: () => Promise<void>;
   refreshNotifications: () => Promise<void>;
@@ -225,6 +231,30 @@ export function totalBalanceSource(
 
 type Translator = (key: string, params?: Record<string, string | number | undefined | null>) => string;
 
+// The balance endpoint answers 200 even when some chains could not be read, so any total
+// derived from it can be understated. Every place that prints such a total appends this, so
+// a partial number is never shown as if it were exact.
+// Mirrors totalBalanceSource's signature so the warning is scoped to the same data the
+// number was summed from: a dead chain RPC does not make a Gateway-only total wrong, and
+// vice versa. Flagging both everywhere would train the user to ignore the warning.
+export function partialBalanceSuffix(
+  result: any,
+  translate: Translator,
+  source: "wallet" | "gateway" | "unified",
+  chain?: string,
+) {
+  const failedChains: string[] = Array.isArray(result?.failedChains) ? result.failedChains : [];
+  const sources =
+    source === "gateway" ? [] : failedChains.filter((entry) => !chain || entry === chain);
+
+  if (source !== "wallet" && result?.gatewayUnavailable) {
+    sources.push("Gateway");
+  }
+  if (sources.length === 0) return "";
+
+  return ` (${translate("common.balancePartial", { sources: sources.join(", ") })})`;
+}
+
 function commandTitle(draft: ParsedCommand, t: Translator) {
   if (draft.command === "transfer") {
     return t("transfer.title", {
@@ -364,10 +394,11 @@ export function resultText(draft: ParsedCommand, result: any, t?: Translator) {
     if (draft.fields.action === "balance") {
       const chain = draft.fields.chain;
       const total = totalBalanceSource(result?.balances ?? [], "wallet", chain);
+      const partial = partialBalanceSuffix(result, translate, "wallet", chain);
 
       return chain
-        ? translate("runtime.walletBalance", { chain, amount: formatDecimalAmount(total) })
-        : translate("runtime.walletBalanceAll", { amount: formatDecimalAmount(total) });
+        ? translate("runtime.walletBalance", { chain, amount: formatDecimalAmount(total) }) + partial
+        : translate("runtime.walletBalanceAll", { amount: formatDecimalAmount(total) }) + partial;
     }
     return result?.hasWallet
       ? translate("runtime.walletActive", { address: result.scaWallet?.address ?? result.scaWallet?.wallet_address })
@@ -379,9 +410,9 @@ export function resultText(draft: ParsedCommand, result: any, t?: Translator) {
     const balances = result?.balances ?? [];
     if (chain) {
       const chainTotal = totalBalanceSource(balances, "unified", chain);
-      return `${chain}: ${formatDecimalAmount(chainTotal)} USDC.`;
+      return `${chain}: ${formatDecimalAmount(chainTotal)} USDC.${partialBalanceSuffix(result, translate, "unified", chain)}`;
     }
-    return `Unified balance: ${formatDecimalAmount(result?.totalUnified)} USDC.`;
+    return `Unified balance: ${formatDecimalAmount(result?.totalUnified)} USDC.${partialBalanceSuffix(result, translate, "unified")}`;
   }
 
   if (draft.command === "deposit") {
@@ -475,10 +506,11 @@ export function resultText(draft: ParsedCommand, result: any, t?: Translator) {
     if (draft.fields.action === "balance") {
       const chain = draft.fields.chain;
       const total = totalBalanceSource(result?.balances ?? [], "gateway", chain);
+      const partial = partialBalanceSuffix(result, translate, "gateway", chain);
 
       return chain
-        ? translate("runtime.gatewayBalanceResult", { chain, amount: formatDecimalAmount(total) })
-        : translate("runtime.gatewayBalanceResultAll", { amount: formatDecimalAmount(total) });
+        ? translate("runtime.gatewayBalanceResult", { chain, amount: formatDecimalAmount(total) }) + partial
+        : translate("runtime.gatewayBalanceResultAll", { amount: formatDecimalAmount(total) }) + partial;
     }
     return `Gateway online. Domains: ${(result?.domains ?? []).length}.`;
   }
@@ -673,7 +705,9 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
   const [activeCommandCount, setActiveCommandCount] = useState(0);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unifiedBalance, setUnifiedBalance] = useState<number | null>(null);
+  const [unifiedBalanceFailedChains, setUnifiedBalanceFailedChains] = useState<string[]>([]);
   const [isBalanceLoading, setIsBalanceLoading] = useState(true);
+  const [pendingGatewayDepositCount, setPendingGatewayDepositCount] = useState(0);
   const statusWriterRef = useRef<((text: string, execution: ExecutionItem) => Promise<void>) | null>(
     null,
   );
@@ -694,42 +728,63 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // This is fired from a lot of places at once: every completed command queues it immediately
+  // plus at 5s and 15s, and a 30s interval, a window focus handler, and a balance-changed
+  // event all call it too. With no guard those overlapped into several concurrent 12-chain
+  // fan-outs, which is what pushed the shared public RPCs into rate-limited timeouts — and a
+  // route held open for minutes queues every other API request behind it, including the
+  // `/api/user/fund` call that `fund` awaits before it can open MetaMask. Coalesce instead:
+  // a caller arriving mid-flight joins the in-flight request rather than starting a new sweep.
+  const balanceRequestRef = useRef<Promise<void> | null>(null);
+
   const refreshBalance = useCallback(async () => {
+    if (balanceRequestRef.current) return balanceRequestRef.current;
+
     if (unifiedBalance === null) {
       setIsBalanceLoading(true);
     }
 
-    try {
-      const data = await requestJson("/api/gateway/balance", {
-        method: "POST",
-        body: JSON.stringify({}),
-      });
-      const total = Number(data?.totalUnified ?? 0);
+    const request = (async () => {
+      try {
+        const data = await requestJson("/api/gateway/balance", {
+          method: "POST",
+          body: JSON.stringify({}),
+        });
+        const total = Number(data?.totalUnified ?? 0);
 
-      setUnifiedBalance(Number.isFinite(total) ? total : 0);
-    } catch (error) {
-      const status = (error as { status?: number })?.status;
+        setUnifiedBalance(Number.isFinite(total) ? total : 0);
+        setUnifiedBalanceFailedChains(Array.isArray(data?.failedChains) ? data.failedChains : []);
+      } catch (error) {
+        const status = (error as { status?: number })?.status;
+        // Every early return below leaves no usable total, so the previous per-chain failure
+        // list is stale — keeping it would pin a warning onto an unrelated balance.
+        setUnifiedBalanceFailedChains([]);
 
-      if (status === 401) {
+        if (status === 401) {
+          setUnifiedBalance(null);
+          return;
+        }
+
+        if (status === 404) {
+          setUnifiedBalance(0);
+          return;
+        }
+
+        if (isTransientFetchError(error)) {
+          setUnifiedBalance(null);
+          return;
+        }
+
+        console.error("Failed to load unified balance", error);
         setUnifiedBalance(null);
-        return;
+      } finally {
+        setIsBalanceLoading(false);
+        balanceRequestRef.current = null;
       }
+    })();
 
-      if (status === 404) {
-        setUnifiedBalance(0);
-        return;
-      }
-
-      if (isTransientFetchError(error)) {
-        setUnifiedBalance(null);
-        return;
-      }
-
-      console.error("Failed to load unified balance", error);
-      setUnifiedBalance(null);
-    } finally {
-      setIsBalanceLoading(false);
-    }
+    balanceRequestRef.current = request;
+    return request;
   }, [unifiedBalance]);
 
   const syncGatewayDeposits = useCallback(async () => {
@@ -739,6 +794,9 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({}),
       });
       const completedCount = Array.isArray(data?.completed) ? data.completed.length : 0;
+      // The route has always returned `pending` on every path; nothing read it until now. It
+      // drives both the sidebar badge and the polling interval below.
+      setPendingGatewayDepositCount(Array.isArray(data?.pending) ? data.pending.length : 0);
 
       if (completedCount > 0) {
         const firstCompleted = data.completed[0];
@@ -751,6 +809,13 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
             : t("runtime.gatewayDepositReadyMany", { count: completedCount });
 
         toast.success(t("runtime.gatewayBalanceUpdated"), { description });
+        // The sync route has already repainted the chat row in Postgres, but an open thread does
+        // not re-read it — so the card that announced this deposit would keep spinning until a
+        // manual reload. Hand the settled deposits to `paycmd-app` for an in-place patch; it
+        // joins on `txHash`, the one field the chat message and the deposit row share.
+        window.dispatchEvent(
+          new CustomEvent("ra:gateway-deposit-settled", { detail: data.completed }),
+        );
         await refreshNotifications();
         await refreshBalance();
       }
@@ -926,24 +991,41 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
 
         const result = await executeServerCommand(draft);
         const txHash = result?.txHash ?? result?.mintTxHash;
+        // A deposit's on-chain transaction succeeding is not the same as the balance being
+        // spendable: Circle needs finality/indexing first, measured at ~10 minutes on testnet,
+        // and `app/api/gateway/deposit/route.ts` says so by returning this status. Claiming
+        // "Command completed" here contradicted the body text, which already read "waiting for
+        // Circle Gateway finality".
+        const awaitingFinality = result?.status === "pending_gateway_finality";
         const success = {
           ...execution,
-          status: "success" as const,
+          status: awaitingFinality ? ("waiting_gateway" as const) : ("success" as const),
           txHash,
           result,
         };
         const body = resultText(draft, result, t);
+        const title = awaitingFinality
+          ? t("runtime.gatewayPending")
+          : t("runtime.commandCompleted");
 
         await updateExecutionRecord(success);
         await insertNotification({
           userId: context.userId,
           executionId: success.id,
-          type: "command_success",
-          title: t("runtime.commandCompleted"),
+          // Substring-matched by `app/notifications/page.tsx`, which checks `pending|finality`
+          // before `gateway` — so this lands in the amber "waiting" bucket on its own.
+          type: awaitingFinality ? "gateway_deposit_pending" : "command_success",
+          title,
           body,
         });
         await writeStatus(context, body, success);
-        toast.success(t("runtime.commandCompleted"), { description: body });
+        if (awaitingFinality) {
+          // Deliberately not `toast.loading`: a toast held open for ten minutes is the wrong
+          // surface. The notification and the sidebar badge own the long wait.
+          toast.warning(title, { description: body });
+        } else {
+          toast.success(title, { description: body });
+        }
 
         if (usesGatewayPipeline(draft) || draft.command === "balance") {
           void refreshBalance();
@@ -1038,12 +1120,31 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
     };
   }, [syncGatewayDeposits]);
 
+  // Deliberately a separate effect from the one above. Gating that one on `hasPending` would
+  // tear down and re-register its focus + `ra:balance-changed` listeners every time the count
+  // crossed zero, firing a duplicate immediate sync each time.
+  //
+  // Finality takes ~10 minutes, and nothing else covers that span: `ra:balance-changed` is
+  // never dispatched for deposit, and the `setTimeout` chain in `runServerCommand` stops at
+  // +60s. Leave the tab alone and the deposit would otherwise sit pending until a focus event.
+  const hasPendingGatewayDeposits = pendingGatewayDepositCount > 0;
+
+  useEffect(() => {
+    // Derived boolean, not the count itself, so 3 → 2 → 1 does not rebuild the interval.
+    if (!hasPendingGatewayDeposits) return;
+
+    const interval = window.setInterval(() => void syncGatewayDeposits(), 60_000);
+    return () => window.clearInterval(interval);
+  }, [hasPendingGatewayDeposits, syncGatewayDeposits]);
+
   const value = useMemo(
     () => ({
       activeCommandCount,
       unreadCount: notifications.filter((item) => item.status === "unread").length,
       unifiedBalance,
+      unifiedBalanceFailedChains,
       isBalanceLoading,
+      pendingGatewayDepositCount,
       notifications,
       refreshBalance,
       refreshNotifications,
@@ -1054,11 +1155,13 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
       activeCommandCount,
       isBalanceLoading,
       notifications,
+      pendingGatewayDepositCount,
       refreshBalance,
       refreshNotifications,
       registerStatusWriter,
       runServerCommand,
       unifiedBalance,
+      unifiedBalanceFailedChains,
     ],
   );
 

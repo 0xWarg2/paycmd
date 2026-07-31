@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { cctpBridgeChainConfigs, normalizeCctpBridgeChain } from "@/lib/paycmd/cctp-bridge";
-import { getAiModelOption } from "@/lib/paycmd/ai/models";
-import { aiCommandJsonSchema, aiCommandResponseSchema } from "@/lib/paycmd/ai/schema";
+import { chainAliases, supportedChains } from "@/lib/paycmd/chains";
+import { askOpenRouter } from "@/lib/paycmd/ai/openrouter";
+import { commandRouterModel, commandRouterModelProfile } from "@/lib/paycmd/ai/models";
+import { aiCommandResponseSchema } from "@/lib/paycmd/ai/schema";
 import { requestLocale, tr, type PayCmdLocale } from "@/lib/i18n/server";
 import { commandRegistry, parsePayCmd } from "@/lib/paycmd/commands";
 import { createClient } from "@/lib/supabase/server";
@@ -14,6 +16,22 @@ type AiCommandRequest = {
 };
 
 const evmAddressPattern = /0x[a-fA-F0-9]{40}/;
+
+// Derived from the alias table `normalizeChain` actually uses, so the router is told about
+// every Gateway chain instead of the three that used to be hardcoded here. Capped at the
+// three shortest aliases per chain to keep the prompt tight.
+function gatewayChainPromptHints() {
+  return supportedChains
+    .map((chain) => {
+      const aliases = Object.entries(chainAliases)
+        .filter(([, key]) => key === chain)
+        .map(([alias]) => alias)
+        .sort((left, right) => left.length - right.length)
+        .slice(0, 3);
+      return `${aliases.join("/")} -> ${chain}`;
+    })
+    .join(", ");
+}
 
 function isContactIntent(value: string) {
   return /\bcontact\b|danh\s*bạ|thêm\s+(?:người\s+)?liên\s+hệ|add\s+(?:a\s+)?contact|lưu\s+(?:người\s+)?nhận/i.test(
@@ -243,17 +261,6 @@ function deterministicPaymentCommand(input: string, locale: PayCmdLocale) {
   return null;
 }
 
-function extractOutputText(response: any) {
-  if (typeof response.output_text === "string") return response.output_text;
-
-  const parts = (response.output ?? [])
-    .flatMap((item: any) => item.content ?? [])
-    .map((content: any) => content.text ?? "")
-    .filter(Boolean);
-
-  return parts.join("\n").trim();
-}
-
 function parseJsonObject(value: string) {
   const trimmed = value
     .trim()
@@ -279,45 +286,6 @@ function parseJsonObject(value: string) {
   }
 }
 
-function openAiResponsesUrl() {
-  const baseUrl = (process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1").replace(/\/+$/, "");
-  return `${baseUrl}/responses`;
-}
-
-function promptCacheRetention() {
-  const retention = process.env.OPENAI_PROMPT_CACHE_RETENTION;
-  return retention === "24h" || retention === "in_memory" ? retention : null;
-}
-
-function surfBaseUrl() {
-  return (process.env.SURF_API_BASE_URL ?? "https://api.asksurf.ai/gateway/v1").replace(/\/+$/, "");
-}
-
-function surfChatCompletionUrls() {
-  const configured = surfBaseUrl();
-  const urls = [`${configured}/chat/completions`];
-
-  if (/^https:\/\/api\.asksurf\.ai\/v1$/i.test(configured)) {
-    urls.push("https://api.asksurf.ai/gateway/v1/chat/completions");
-  }
-
-  return [...new Set(urls)];
-}
-
-function extractSurfOutputText(response: any) {
-  if (typeof response.output_text === "string") return response.output_text.trim();
-
-  const choices = Array.isArray(response.choices) ? response.choices : [];
-  const chatText = choices
-    .map((choice: any) => choice.message?.content ?? choice.text ?? "")
-    .filter(Boolean)
-    .join("\n")
-    .trim();
-
-  if (chatText) return chatText;
-
-  return extractOutputText(response).trim();
-}
 
 function commandCatalog() {
   return commandRegistry.map((command) => ({
@@ -475,92 +443,10 @@ function commandRouterResult(aiResult: any, modelProfile: string, locale: PayCmd
   };
 }
 
-async function askSurfCommandRouter(prompt: string) {
-  if (!process.env.SURF_API_KEY) {
-    throw Object.assign(new Error("SURF_API_KEY is not configured"), { status: 500 });
-  }
-
-  const messages = [
-    {
-      role: "system",
-      content: [
-        "You are Payna's fallback command router.",
-        "Return JSON only. No Markdown. No commentary.",
-        "Your JSON must match this exact TypeScript shape:",
-        '{ "intent": "command" | "answer" | "clarify" | "crypto_research", "canonicalCommand": string, "assistantText": string, "missingFields": string[], "suggestions": string[] }',
-      ].join("\n"),
-    },
-    { role: "user", content: prompt },
-  ];
-  const requestBody = JSON.stringify({
-    model: process.env.SURF_COMMAND_ROUTER_MODEL ?? "surf-1.5-instant",
-    messages,
-    stream: false,
-    reasoning_effort: "low",
-    max_tokens: 900,
-  });
-
-  let response: Response | null = null;
-  let data: any = {};
-
-  for (const url of surfChatCompletionUrls()) {
-    response = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.SURF_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: requestBody,
-      signal: AbortSignal.timeout(30_000),
-    });
-
-    data = await response.json().catch(() => ({}));
-
-    if (response.ok || response.status !== 404) {
-      break;
-    }
-  }
-
-  if (!response?.ok) {
-    throw Object.assign(
-      new Error(data?.error?.message ?? data?.message ?? "AskSurf command router failed"),
-      { status: response?.status ?? 502 },
-    );
-  }
-
-  const parsedOutput = aiCommandResponseSchema.safeParse(parseJsonObject(extractSurfOutputText(data)));
-
-  if (!parsedOutput.success) {
-    throw Object.assign(new Error("AskSurf command router returned invalid JSON"), { status: 502 });
-  }
-
-  return parsedOutput.data;
-}
-
-async function commandRouterFallback(
-  input: string,
-  recentMessages: { role: string; text: string }[],
-  prompt: string,
-  locale: PayCmdLocale,
-) {
-  try {
-    const surfResult = await askSurfCommandRouter(prompt);
-    return commandRouterResult(
-      surfResult,
-      process.env.SURF_COMMAND_ROUTER_MODEL ?? "surf-1.5-instant",
-      locale,
-    );
-  } catch (error) {
-    console.error("AskSurf command router fallback failed:", error);
-    return deterministicCommandFallback(input, locale, recentMessages);
-  }
-}
-
 export async function POST(req: NextRequest) {
   const locale = requestLocale(req);
   let fallbackInput = "";
   let fallbackRecentMessages: { role: string; text: string }[] = [];
-  let fallbackPrompt = "";
 
   try {
     const supabase = await createClient();
@@ -582,11 +468,15 @@ export async function POST(req: NextRequest) {
 
     const recentMessages = (body.recentMessages ?? []).slice(-8);
     fallbackRecentMessages = recentMessages;
-    const modelOption = getAiModelOption(body.modelProfile);
     const appContext = await getAppContext(user.id);
+    const responseLanguageInstruction =
+      locale === "en"
+        ? "Write every value in assistantText, suggestions, and any human-readable JSON field in English."
+        : "Write every value in assistantText, suggestions, and any human-readable JSON field in Vietnamese.";
     const prompt = [
       "You are Payna's AI command router for a stablecoin payment dapp.",
       "Return only JSON matching the schema.",
+      responseLanguageInstruction,
       "Do not execute commands. Convert natural language into one canonical slash command when safe.",
       "The user may write in Vietnamese, English, Chinese, or mixed-language shorthand. Infer the intended Payna command from meaning, not exact keywords.",
       "If the user asks crypto research, market, token, chain, protocol, news, or conceptual questions that are not Payna actions, intent must be crypto_research.",
@@ -594,7 +484,7 @@ export async function POST(req: NextRequest) {
       "If required information is missing, intent must be clarify and assistantText must ask one concise question.",
       "If the message could be a Payna action such as pay, transfer, swap, fund, deposit, withdraw, balance, wallet, contact, gas, payroll, or payment request, prefer command or clarify over crypto_research.",
       "All payment/fund/deposit/withdraw/transfer/payroll commands will be previewed and confirmed by the user later.",
-      `Gateway chains: arc -> arcTestnet, base -> baseSepolia, avalanche/avax/fuji -> avalancheFuji.`,
+      `Gateway chains: ${gatewayChainPromptHints()}.`,
       `Bridge chains (testnet MetaMask rail): ${cctpBridgeChainConfigs.map((chain) => `${chain.aliases[0]} -> ${chain.key}`).join(", ")}.`,
       "Swap is Arc Testnet only and supports USDC, EURC, and cirBTC. Canonical swap format: /swap <amount> <tokenIn> to <tokenOut>.",
       "Supported commands:",
@@ -605,68 +495,23 @@ export async function POST(req: NextRequest) {
       JSON.stringify(recentMessages),
       `User input: ${input}`,
     ].join("\n\n");
-    fallbackPrompt = prompt;
-
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json(await commandRouterFallback(input, recentMessages, prompt, locale));
-    }
-
-    const payload: Record<string, unknown> = {
-      model: modelOption.model,
-      input: prompt,
-      text: {
-        format: {
-          type: "json_schema",
-          ...aiCommandJsonSchema,
-        },
-      },
-      max_output_tokens: 900,
-    };
-
-    payload.prompt_cache_key = process.env.OPENAI_PROMPT_CACHE_KEY ?? "paycmd-ai-command-router-v1";
-
-    const cacheRetention = promptCacheRetention();
-    if (cacheRetention) {
-      payload.prompt_cache_retention = cacheRetention;
-    }
-
-    if (modelOption.reasoningEffort) {
-      payload.reasoning = { effort: modelOption.reasoningEffort };
-    }
-
-    const response = await fetch(openAiResponsesUrl(), {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(30_000),
+    const response = await askOpenRouter({
+      model: commandRouterModel(),
+      messages: [
+        { role: "system", content: "You are Payna's AI command router. Return JSON only; no Markdown or commentary. Follow the user's supplied output schema exactly." },
+        { role: "user", content: prompt },
+      ],
+      maxTokens: 900,
+      timeoutMs: 30_000,
     });
-    const data = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      console.error("OpenAI command router failed:", data?.error?.message ?? data?.error ?? response.status);
-      return NextResponse.json(await commandRouterFallback(input, recentMessages, prompt, locale));
-    }
-
-    const outputText = extractOutputText(data);
-    const parsedOutput = aiCommandResponseSchema.safeParse(parseJsonObject(outputText));
-
+    const parsedOutput = aiCommandResponseSchema.safeParse(parseJsonObject(response.text));
     if (!parsedOutput.success) {
-      return NextResponse.json(await commandRouterFallback(input, recentMessages, prompt, locale));
+      return NextResponse.json(deterministicCommandFallback(input, locale, recentMessages));
     }
-
-    return NextResponse.json(commandRouterResult(parsedOutput.data, modelOption.id, locale));
+    return NextResponse.json(commandRouterResult(parsedOutput.data, commandRouterModelProfile, locale));
   } catch (error: any) {
-    console.error("AI command route failed:", error);
-    if (fallbackInput && fallbackPrompt) {
-      return NextResponse.json(await commandRouterFallback(fallbackInput, fallbackRecentMessages, fallbackPrompt, locale));
-    }
-
-    return NextResponse.json(
-      { error: error.message || "Failed to parse AI command" },
-      { status: 500 },
-    );
+    console.error("OpenRouter command router failed:", error);
+    if (fallbackInput) return NextResponse.json(deterministicCommandFallback(fallbackInput, locale, fallbackRecentMessages));
+    return NextResponse.json({ error: error.message || "Failed to parse AI command" }, { status: 500 });
   }
 }

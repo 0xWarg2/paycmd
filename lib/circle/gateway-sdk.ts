@@ -251,6 +251,60 @@ function getChainConfig(chain: SupportedChain): Chain {
   return GATEWAY_CHAIN_CONFIGS[chain].viemChain;
 }
 
+// Some chain definitions ship a default public RPC that is no longer reachable, and
+// `http()` with no URL silently falls back to that default. Verified 2026-07-29 by
+// probing eth_chainId on all 12 gateway chains: 10 answered correctly, these 2 did not.
+// `rpc-amoy.polygon.technology` no longer resolves at all (ENOTFOUND), and
+// `rpc.hyperliquid-testnet.xyz` fails Node's TLS chain verification
+// (UNABLE_TO_VERIFY_LEAF_SIGNATURE) even though browsers accept its cert.
+const RPC_URL_OVERRIDES: Partial<Record<SupportedChain, string>> = {
+  polygonAmoy: "https://polygon-amoy-bor-rpc.publicnode.com",
+  hyperEvmTestnet: "https://hyperliquid-testnet.drpc.org",
+  // Alternates for the bundled defaults (11155111.rpc.thirdweb.com and
+  // worldchain-sepolia.g.alchemy.com/public), both measured healthy here: 372ms and 441ms
+  // under a 48-request concurrent sweep.
+  //
+  // Do NOT read the timeouts these two used to log as evidence that an endpoint is bad. A
+  // later probe fanned all 12 chains out 4x concurrently — 48/48 succeeded in 1089ms — so
+  // the in-app timeouts were not coming from the endpoints at all. See RPC_TIMEOUT_MS below.
+  sepolia: "https://ethereum-sepolia-rpc.publicnode.com",
+  worldChainSepolia: "https://worldchain-sepolia.gateway.tenderly.co",
+};
+
+// viem's `http()` defaults to no timeout, so a single unresponsive endpoint held this whole
+// route open for over two minutes. Capping it is right — but the cap has to account for
+// *where* the clock is measured.
+//
+// viem races the request against a `setTimeout`, so the deadline is wall-clock, not
+// time-spent-on-the-network. Next's dev server compiles routes on demand in-process, and that
+// work blocks the event loop (a single request logged `compile: 5.7s, render: 24.1s`). While
+// it is blocked, responses that already arrived sit unread in the socket and the timer still
+// counts — so an 8s cap reported all 12 chains as timed out on a run where a standalone probe
+// of the same 12 endpoints, 4x concurrently, returned 48/48 in 1089ms. The failures were the
+// cap firing against a stalled event loop, not slow RPCs.
+//
+// Production has no on-demand compile, and a Vercel function has its own duration ceiling, so
+// keep the tight cap there and give dev enough slack to survive a compile pause.
+const isProduction = process.env.NODE_ENV === "production";
+const RPC_TIMEOUT_MS = isProduction ? 8_000 : 20_000;
+
+// Retry in production, where a timeout is most likely a transient network fault worth one
+// more attempt. Not in dev: there the cause is a stalled event loop, which a retry cannot
+// help, and retrying would double the worst case to 40s of head-of-line blocking on a route
+// other requests are queued behind.
+const RPC_RETRY_COUNT = isProduction ? 1 : 0;
+
+// Always pass an explicit URL to `http()`. Relying on the bare fallback is what let a dead
+// endpoint surface as a balance of 0 instead of an error, and it makes the endpoint in use
+// invisible at the call site.
+function getRpcUrl(chain: SupportedChain): string {
+  return RPC_URL_OVERRIDES[chain] ?? GATEWAY_CHAIN_CONFIGS[chain].viemChain.rpcUrls.default.http[0];
+}
+
+function getRpcTransport(chain: SupportedChain) {
+  return http(getRpcUrl(chain), { timeout: RPC_TIMEOUT_MS, retryCount: RPC_RETRY_COUNT });
+}
+
 const gatewayWalletAbi = [
   {
     type: "function",
@@ -885,7 +939,7 @@ export async function checkWalletGasBalance(
   // Check native token balance
   const publicClient = createPublicClient({
     chain: chainConfig,
-    transport: http(),
+    transport: getRpcTransport(chain),
   });
 
   const balance = await publicClient.getBalance({ address: walletAddress });
@@ -946,7 +1000,7 @@ export async function isGatewaySignerAuthorized(
 ): Promise<boolean> {
   const publicClient = createPublicClient({
     chain: getChainConfig(chain),
-    transport: http(),
+    transport: getRpcTransport(chain),
   });
 
   return await publicClient.readContract({
@@ -1246,26 +1300,107 @@ export async function transferUnifiedBalanceCircle(
   };
 }
 
-export async function fetchGatewayBalance(address: Address): Promise<{
+export async function fetchGatewayBalance(
+  address: Address | Address[]
+): Promise<{
   token: string;
   balances: Array<{ domain: number; depositor: string; balance: string }>;
 }> {
-  const sources = supportedGatewayChains.map((chain) => ({
-    domain: DOMAIN_IDS[chain],
-    depositor: address,
-  }));
+  // Accepts several depositors so one call can cover a user's SCA *and* their Gateway signer
+  // EOA. `GatewayWallet.deposit()` credits the calling wallet, so which address holds the
+  // balance depends on who sent the deposit — see `app/api/gateway/deposit/sync/route.ts`.
+  // Circle takes many sources per request, so this stays a single HTTP round-trip.
+  const requested = Array.isArray(address) ? address : [address];
+  const depositors = [
+    ...new Map(requested.map((item) => [item.toLowerCase(), item])).values(),
+  ];
 
-  const requestBody = {
-    token: "USDC",
-    sources,
+  const sources = supportedGatewayChains.flatMap((chain) =>
+    depositors.map((depositor) => ({
+      domain: DOMAIN_IDS[chain],
+      depositor,
+    }))
+  );
+
+  // Circle rejects more than 20 sources per request with a 400, and there are already 12
+  // supported chains — so two depositors (24 sources) overflows and the whole call fails,
+  // taking every chain's balance with it. Chunk instead of trimming: a dropped source reads
+  // back as "no balance", which is indistinguishable from a deposit that has not settled.
+  const MAX_SOURCES_PER_REQUEST = 20;
+  const batches: Array<typeof sources> = [];
+  for (let index = 0; index < sources.length; index += MAX_SOURCES_PER_REQUEST) {
+    batches.push(sources.slice(index, index + MAX_SOURCES_PER_REQUEST));
+  }
+
+  const responses = await Promise.all(
+    batches.map(async (batch) => {
+      const response = await fetch("https://gateway-api-testnet.circle.com/v1/balances", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ token: "USDC", sources: batch }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Gateway API error: ${response.status} - ${errorText}`);
+      }
+
+      return (await response.json()) as {
+        token: string;
+        balances?: Array<{ domain: number; depositor: string; balance: string }>;
+      };
+    })
+  );
+
+  return {
+    token: responses[0]?.token ?? "USDC",
+    balances: responses.flatMap((item) => item.balances ?? []),
   };
+}
 
-  const response = await fetch("https://gateway-api-testnet.circle.com/v1/balances", {
+export type GatewayPendingDeposit = {
+  depositor: string;
+  domain: number;
+  transactionHash: string;
+  // Atomic units here ("1000000" = 1 USDC), unlike `/v1/balances` which returns decimals.
+  amount: string;
+  status: string;
+  blockHeight: string;
+  blockHash: string;
+  blockTimestamp: string;
+};
+
+// Circle's per-deposit view: every deposit it has observed but not yet credited, keyed by
+// transaction hash. `status` is documented as always `"pending"`, so membership in this list is
+// the entire signal — the endpoint exists to answer "has Circle credited this deposit yet?".
+//
+// This is what `/v1/balances` fundamentally cannot tell us. A balance total cannot distinguish
+// money that just arrived from money that was already there, so a deposit onto an already-funded
+// chain is indistinguishable from one that has not been credited at all. Inferring from the total
+// reported four Base deposits as available while Circle still listed all four as pending.
+//
+// `domain` is optional per source, and omitting it returns every chain for that depositor — which
+// keeps this to one source per address rather than the chain x depositor cross product
+// `fetchGatewayBalance` needs, so the 20-source cap is not a concern until 20+ wallets.
+export async function fetchGatewayPendingDeposits(
+  address: Address | Address[]
+): Promise<{ token: string; deposits: GatewayPendingDeposit[] }> {
+  const requested = Array.isArray(address) ? address : [address];
+  const depositors = [
+    ...new Map(requested.map((item) => [item.toLowerCase(), item])).values(),
+  ];
+
+  const response = await fetch("https://gateway-api-testnet.circle.com/v1/deposits", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(requestBody),
+    body: JSON.stringify({
+      token: "USDC",
+      sources: depositors.map((depositor) => ({ depositor })),
+    }),
   });
 
   if (!response.ok) {
@@ -1273,8 +1408,15 @@ export async function fetchGatewayBalance(address: Address): Promise<{
     throw new Error(`Gateway API error: ${response.status} - ${errorText}`);
   }
 
-  const data = await response.json();
-  return data;
+  const json = (await response.json()) as {
+    token?: string;
+    deposits?: GatewayPendingDeposit[];
+  };
+
+  return {
+    token: json.token ?? "USDC",
+    deposits: json.deposits ?? [],
+  };
 }
 
 export async function getUsdcBalance(
@@ -1283,7 +1425,7 @@ export async function getUsdcBalance(
 ): Promise<bigint> {
   const publicClient = createPublicClient({
     chain: getChainConfig(chain),
-    transport: http(),
+    transport: getRpcTransport(chain),
   });
 
   const balance = await publicClient.readContract({

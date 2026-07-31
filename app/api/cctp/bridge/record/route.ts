@@ -15,7 +15,7 @@ const bridgeRecordSchema = z.object({
   recipientMode: z.enum(["self", "external"]).default("self"),
   mintMode: z.enum(["auto_forwarding", "manual_mint"]).default("auto_forwarding"),
   transferSpeed: z.enum(["FAST", "SLOW"]).default("FAST"),
-  status: z.enum(["success", "failed", "pending"]).default("success"),
+  status: z.enum(["success", "failed", "pending", "pending_mint"]).default("success"),
   transferId: z.string().optional(),
   reason: z.string().optional(),
 });
@@ -50,24 +50,45 @@ export async function POST(req: NextRequest) {
         mintTxHash: payload.mintTxHash ?? null,
       });
 
-  const { data, error } = await supabase
-    .from("transaction_history")
-    .insert({
-      user_id: user.id,
-      chain: payload.sourceChain,
-      destination_chain: payload.destinationChain,
-      tx_type: "bridge",
-      amount: payload.amount,
-      tx_hash: txHash,
-      status: payload.status,
-      reason,
-    })
-    .select("*")
-    .single();
+  const row = {
+    user_id: user.id,
+    chain: payload.sourceChain,
+    destination_chain: payload.destinationChain,
+    tx_type: "bridge",
+    amount: payload.amount,
+    tx_hash: txHash,
+    status: payload.status,
+    reason,
+  };
+
+  // The burn is recorded as `pending_mint` before the mint signature, so a later
+  // call for the same burn must update that row instead of inserting a duplicate.
+  let existingId: string | null = null;
+  if (txHash) {
+    const { data: existing } = await supabase
+      .from("transaction_history")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("tx_type", "bridge")
+      .eq("tx_hash", txHash)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    existingId = existing?.id ?? null;
+  }
+
+  const { data, error } = existingId
+    ? await supabase.from("transaction_history").update(row).eq("id", existingId).select("*").single()
+    : await supabase.from("transaction_history").insert(row).select("*").single();
 
   if (error) {
     console.error("Failed to record bridge transaction", error);
     return NextResponse.json({ error: "Failed to record bridge transaction" }, { status: 500 });
+  }
+
+  // A burn awaiting its mint is not a completed transfer, so no receipt proof yet.
+  if (payload.status === "pending_mint") {
+    return NextResponse.json({ transaction: data });
   }
 
   try {

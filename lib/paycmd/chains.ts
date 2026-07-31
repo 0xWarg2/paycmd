@@ -15,9 +15,9 @@ export const supportedChains = [
 
 export type PayCmdChain = (typeof supportedChains)[number];
 
-export function normalizeChain(value?: string | null): PayCmdChain | "" {
-  const token = (value ?? "").trim().toLowerCase();
-  const aliases: Record<string, PayCmdChain> = {
+// Module scope so the AI command prompt can advertise the same aliases this function
+// accepts, instead of hardcoding its own shorter list that drifts out of sync.
+export const chainAliases: Record<string, PayCmdChain> = {
     arc: "arcTestnet",
     arctestnet: "arcTestnet",
     "arc-testnet": "arcTestnet",
@@ -66,10 +66,12 @@ export function normalizeChain(value?: string | null): PayCmdChain | "" {
     worldchain: "worldChainSepolia",
     "world-chain": "worldChainSepolia",
     worldchainsepolia: "worldChainSepolia",
-    "world-chain-sepolia": "worldChainSepolia",
-  };
+  "world-chain-sepolia": "worldChainSepolia",
+};
 
-  return aliases[token] ?? "";
+export function normalizeChain(value?: string | null): PayCmdChain | "" {
+  const token = (value ?? "").trim().toLowerCase();
+  return chainAliases[token] ?? "";
 }
 
 export function isSupportedChain(value: string): value is PayCmdChain {

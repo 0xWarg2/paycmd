@@ -15,5 +15,6 @@ Thư mục này là handoff documentation cho dự án Ra. Tài liệu ưu tiên
 9. `08-paycmd-v1-tinh-nang-va-test-plan.md`
 10. `09-gateway-vs-cctp-v2-phi-va-gas.md`
 11. `10-ra-onchain-proof-contract.md`
+12. `11-kien-thuc-luong-he-thong-va-test-e2e.md`
 
 Các quyết định kiến trúc nằm trong `quyet-dinh/`.

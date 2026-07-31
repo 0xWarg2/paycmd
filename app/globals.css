@@ -561,14 +561,29 @@
   }
 
   .paycmd-chat-scrollbar {
-    scrollbar-gutter: stable;
-    scrollbar-width: none;
-    scroll-behavior: smooth;
+    /* No `scrollbar-gutter: stable` here. The viewport is `overflow-y-scroll`, so a bar is
+       always painted and the gutter is already reserved — adding `stable` on top of a now
+       *visible* scrollbar reserved a second empty strip beside the real thumb, which reads
+       as two bars. (It was harmless while the bar was hidden; it stopped being harmless
+       when the bar was made visible.) */
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--primary) 45%, transparent) transparent;
+    /* No `scroll-behavior: smooth` here: anchor-restore after prepending older messages
+       assigns scrollTop directly, and smooth turns that into a visible animated jump. */
     overscroll-behavior: contain;
   }
 
   .paycmd-chat-scrollbar::-webkit-scrollbar {
-    display: none;
+    width: 8px;
+  }
+
+  .paycmd-chat-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .paycmd-chat-scrollbar::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: color-mix(in oklch, var(--primary) 45%, transparent);
   }
 
   .paycmd-command-palette-scrollbar {
