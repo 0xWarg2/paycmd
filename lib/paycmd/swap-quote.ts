@@ -1,7 +1,7 @@
-import { createPublicClient, http, type Address, type Chain } from "viem";
+import { type Address } from "viem";
 
+import { arcPublicClient } from "./arc-rpc";
 import {
-  PAYNA_SWAP_CHAIN_ID,
   amountOutFromReserves,
   paynaDexFactory,
   paynaFactoryAbi,
@@ -9,46 +9,16 @@ import {
   paynaSwapTokens,
   type PaynaSwapTokenSymbol,
 } from "./swap";
-import { web3Chains } from "./web3-chains";
 
-const arcChain = web3Chains.arcTestnet;
-
-// The Arc testnet RPC allows 4 requests/second — `x-ratelimit-limit: 4, 4;w=1`, and over the limit
-// it answers HTTP 429 `{"code":-32011,"message":"request limit reached"}`. viem reports that as
-// `HttpRequestError`, which is why it first showed up as a "could not reach the RPC" error against
-// an RPC that was answering every direct request fine.
+// Client, transport, throttle and rate-limit measurements all live in `./arc-rpc` so every Arc
+// reader in the process shares one request budget. An earlier version of this file owned its own
+// client and documented a 4 req/s limit; re-measuring showed the limit is a burst allowance
+// (~20 concurrent) rather than a fixed rate, and that sequential requests barely trip it at all.
 //
-// The old shape spent 3 calls per hop (getPair, token0, getReserves), so 6 for EURC->USDC->cirBTC,
-// and the preview re-quotes on every keystroke. Three overlapping quotes put ~18 calls in one second.
-// Everything below exists to fit a quote inside that budget: batch independent reads through
-// multicall3, and cache what does not change.
-const MULTICALL3_ADDRESS = "0xcA11bde05977b3631167028862bE2a173976CA11" as const;
-
-// `batch.multicall` reads the multicall3 address off `client.chain`, so the client needs a chain
-// object — unlike the plain reads before it, which needed none. Verified deployed at the canonical
-// address on Arc testnet (3808 bytes of code). `nativeCurrency` is inlined rather than mapped from
-// `web3Chains` because viem only uses it for formatting, and no read here formats native value.
-const arcTestnetChain = {
-  id: PAYNA_SWAP_CHAIN_ID,
-  name: arcChain.name,
-  nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 6 },
-  rpcUrls: { default: { http: [arcChain.rpcUrl] } },
-  contracts: { multicall3: { address: MULTICALL3_ADDRESS } },
-  testnet: true,
-} as const satisfies Chain;
-
-export const swapQuoteClient = createPublicClient({
-  chain: arcTestnetChain,
-  // `retryCount` is viem's default 3, named here because it is load-bearing: viem retries 429, so a
-  // quote that clips the limit recovers instead of failing. `retryDelay` is the base for viem's
-  // exponential backoff, set above the 1s rate-limit window (`x-ratelimit-reset: 1`) so the first
-  // retry lands after the bucket refills rather than into the same exhausted window.
-  transport: http(arcChain.rpcUrl, { timeout: 15_000, retryCount: 3, retryDelay: 1_200 }),
-  // Merges every `readContract` issued in the same tick into one `aggregate3` call. The reads below
-  // are deliberately grouped into `Promise.all`s so each group costs one request regardless of how
-  // many hops the route has.
-  batch: { multicall: { wait: 10 } },
-});
+// What remains here is the part specific to pricing: a route costs 3 calls per hop if nothing is
+// cached (getPair, token0, getReserves), and the keystroke preview re-quotes as the user types.
+// Batching independent reads through multicall3 and caching what cannot change keeps a quote to
+// two requests at most, and zero when both caches are warm.
 
 type PairInfo = { pair: Address; token0: Address };
 
@@ -100,7 +70,7 @@ async function loadPairInfo(
     // resolve one pair before asking for the next. Issued together, they batch into one request.
     const resolved = await Promise.all(
       missing.map((hop) =>
-        swapQuoteClient.readContract({
+        arcPublicClient.readContract({
           address: paynaDexFactory,
           abi: paynaFactoryAbi,
           functionName: "getPair",
@@ -123,7 +93,7 @@ async function loadPairInfo(
     // pair for the process lifetime rather than once per quote.
     const token0s = await Promise.all(
       resolved.map((pair) =>
-        swapQuoteClient.readContract({ address: pair, abi: paynaPairAbi, functionName: "token0" }),
+        arcPublicClient.readContract({ address: pair, abi: paynaPairAbi, functionName: "token0" }),
       ),
     );
 
@@ -164,7 +134,7 @@ async function loadReserves(pairs: Address[], fresh: boolean): Promise<CachedRes
     // Again issued together so every hop's reserves arrive in one request.
     const results = await Promise.all(
       stale.map((pair) =>
-        swapQuoteClient.readContract({ address: pair, abi: paynaPairAbi, functionName: "getReserves" }),
+        arcPublicClient.readContract({ address: pair, abi: paynaPairAbi, functionName: "getReserves" }),
       ),
     );
 

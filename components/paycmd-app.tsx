@@ -1260,6 +1260,42 @@ async function switchMetaMaskChainByKey(chainKey: string) {
   }
 }
 
+// Arc receipts are read server-side, not through the wallet. `waitForMetaMaskReceipt` below polls
+// MetaMask 30 times at a fixed 2s interval, and a swap sends two transactions — up to 60 wallet
+// requests per swap, which is most of what was tripping Arc's rate limit. It stays as-is because the
+// fund flow on other chains still uses it.
+const ARC_RECEIPT_ATTEMPTS = 10;
+
+async function waitForArcReceipt(txHash: string): Promise<"success" | "failed" | "pending"> {
+  for (let attempt = 0; attempt < ARC_RECEIPT_ATTEMPTS; attempt += 1) {
+    try {
+      // The route holds each request open for several seconds while it waits, so it paces itself and
+      // needs no sleep in between. It answers `pending` instead of failing when that wait elapses,
+      // which is what makes asking again safe.
+      const result = await requestJson("/api/swap/receipt", {
+        method: "POST",
+        body: JSON.stringify({ txHash }),
+      });
+
+      if (result?.status === "success" || result?.status === "failed") {
+        return result.status;
+      }
+    } catch {
+      // A failed round trip says nothing about the transaction — only that this one read did not
+      // land. Keep waiting rather than reporting a swap the user already signed as broken.
+      //
+      // The sleep only matters here. A `pending` answer already cost the route's own wait, so the
+      // loop paces itself; a request that fails fast (auth, bad payload) does not, and without this
+      // the ten attempts would fire back-to-back — the tight loop this whole change exists to remove.
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+    }
+  }
+
+  // Ten waits is far past Arc's ~1s block time. Still report pending, not failed: the transaction is
+  // on-chain either way, and calling it failed would assert something we did not observe.
+  return "pending";
+}
+
 function isCctpBridgeKey(value: string): value is CctpBridgeChainKey {
   return value in cctpBridgeChainMap;
 }
@@ -1319,32 +1355,6 @@ async function getErc20Balance(tokenAddress: `0x${string}`, account: string) {
     functionName: "balanceOf",
     data: result as `0x${string}`,
   });
-}
-
-// The Payna DEX exists on exactly one chain, so quotes read from a transport pinned to it instead
-async function getErc20Allowance(tokenAddress: `0x${string}`, owner: string, spender: string) {
-  const data = encodeFunctionData({
-    abi: erc20Abi,
-    functionName: "allowance",
-    args: [owner as `0x${string}`, spender as `0x${string}`],
-  });
-  const result = await requestMetaMask(
-    {
-      method: "eth_call",
-      params: [{ to: tokenAddress, data }, "latest"],
-    },
-    { timeoutMs: METAMASK_RPC_TIMEOUT_MS, label: "Token allowance lookup" },
-  );
-
-  if (typeof result !== "string") {
-    return 0n;
-  }
-
-  return decodeFunctionResult({
-    abi: erc20Abi,
-    functionName: "allowance",
-    data: result as `0x${string}`,
-  }) as bigint;
 }
 
 type SwapEstimate = {
@@ -1411,9 +1421,11 @@ async function approveErc20IfNeeded(params: {
   owner: string;
   spender: `0x${string}`;
   amount: bigint;
+  // Passed in rather than read here: the only caller already has it from `/api/swap/preflight`, and
+  // reading it again would put back one of the wallet `eth_call`s that preflight exists to remove.
+  currentAllowance: bigint;
 }) {
-  const allowance = await getErc20Allowance(params.tokenAddress, params.owner, params.spender);
-  if (allowance >= params.amount) {
+  if (params.currentAllowance >= params.amount) {
     return null;
   }
 
@@ -1441,8 +1453,9 @@ async function approveErc20IfNeeded(params: {
     throw new Error("MetaMask did not return an approval transaction hash.");
   }
 
-  const receipt = await waitForMetaMaskReceipt(txHash);
-  if (receipt?.status === "0x0") {
+  // Only an observed revert aborts here, same as before: a receipt we could not read yet is not
+  // grounds to refuse to continue.
+  if ((await waitForArcReceipt(txHash)) === "failed") {
     throw new Error("Token approval failed on-chain.");
   }
 
@@ -1463,8 +1476,18 @@ async function swapWithMetaMask(draft: ParsedCommand) {
   const inputToken = paynaSwapTokens[estimate.tokenIn];
   const outputToken = paynaSwapTokens[estimate.tokenOut];
 
-  const nativeBalance = await getNativeBalance(account);
-  if (nativeBalance === 0n) {
+  // One server call replaces three reads that used to go through MetaMask (`eth_getBalance` plus two
+  // `eth_call`s). The wallet is not a read layer: it forwards to the same Arc RPC while adding its
+  // own background polling, and reads through it resolve against whatever chain the user currently
+  // has selected — which is how a wallet left on Base Sepolia made the Arc token address hold no
+  // code and `eth_call` return `0x`. Server-side the chain is pinned and the three reads collapse
+  // into one multicall plus one balance lookup, both behind the shared Arc throttle.
+  const preflight = await requestJson("/api/swap/preflight", {
+    method: "POST",
+    body: JSON.stringify({ account, tokenIn: estimate.tokenIn }),
+  });
+
+  if (!preflight?.hasNativeGas) {
     throw new Error(
       translateClient("fund.noNativeGas", {
         address: account,
@@ -1474,7 +1497,8 @@ async function swapWithMetaMask(draft: ParsedCommand) {
     );
   }
 
-  const inputBalance = await getErc20Balance(inputToken.address, account);
+  // Atomic units arrive as strings because JSON has no bigint.
+  const inputBalance = BigInt(preflight.balance ?? "0");
   if (inputBalance < estimate.amountIn) {
     throw new Error(`Insufficient ${inputToken.symbol}. Required ${draft.fields.amount}, current ${formatUnits(inputBalance, inputToken.decimals)}.`);
   }
@@ -1484,6 +1508,8 @@ async function swapWithMetaMask(draft: ParsedCommand) {
     owner: account,
     spender: adapterAddress,
     amount: estimate.amountIn,
+    // Already read by the preflight above, so approving does not pay for a second allowance call.
+    currentAllowance: BigInt(preflight.allowance ?? "0"),
   });
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
   const data = encodeFunctionData({
@@ -1517,8 +1543,7 @@ async function swapWithMetaMask(draft: ParsedCommand) {
     throw new Error("MetaMask did not return a swap transaction hash.");
   }
 
-  const receipt = await waitForMetaMaskReceipt(txHash);
-  const status = receipt?.status === "0x1" ? "success" : receipt?.status === "0x0" ? "failed" : "pending";
+  const status = await waitForArcReceipt(txHash);
   const recorded = await requestJson("/api/swap/record", {
     method: "POST",
     body: JSON.stringify({
