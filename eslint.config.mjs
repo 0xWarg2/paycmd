@@ -13,6 +13,12 @@ export default defineConfig([
       "react/no-unescaped-entities": "off",
     },
   },
+  {
+    files: ["hardhat.config.{ts,cjs}", "scripts/**/*.{js,ts,cjs}", "test/**/*.{js,ts,cjs}"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
   globalIgnores([
     ".next/**",
     "out/**",

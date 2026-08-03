@@ -1015,7 +1015,6 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
 
       let execution = await createExecutionRecord(draft, context.userId);
       const running = { ...execution, status: "running" as const };
-      const waiting = { ...execution, status: "waiting_gateway" as const };
 
       try {
         if (usesGatewayPipeline(draft)) {
@@ -1026,9 +1025,6 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
           await updateExecutionRecord(execution);
           await writeStatus(context, t("runtime.running", { title }), execution);
 
-          execution = waiting;
-          await updateExecutionRecord(execution);
-          await writeStatus(context, t("runtime.gateway", { title }), execution);
         } else {
           execution = running;
           await updateExecutionRecord(execution);

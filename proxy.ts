@@ -43,6 +43,9 @@ export async function proxy(request: NextRequest) {
   // on and persists to cookies, so the client refreshes its own token and route handlers
   // read the fresh one.
   if (
+    // The page itself is environment-gated and calls notFound() in production. Let it reach
+    // that guard so production returns a real 404 instead of leaking an auth redirect.
+    pathname.startsWith("/dev/ui-preview") ||
     pathname.startsWith("/api") ||
     // Framework internals, never a page that could need an auth redirect. The matcher below
     // only excludes `_next/static` and `_next/image`, so `_next/webpack-hmr` and `_next/data`

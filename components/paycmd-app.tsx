@@ -20,7 +20,6 @@ import {
   Loader2,
   Maximize2,
   MessageCircle,
-  Paperclip,
   Pencil,
   Plus,
   Printer,
@@ -54,6 +53,11 @@ import {
 } from "@/components/chain-identity";
 import { PayCmdShell } from "@/components/paycmd-shell";
 import {
+  ExecutionTimeline,
+  TransactionConfirmActions,
+  TransactionPreviewFields,
+} from "@/components/paycmd/transaction-safety";
+import {
   balanceBreakdownText,
   bridgeErrorWithFaucet,
   isForegroundOnlyCommand,
@@ -66,6 +70,7 @@ import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import { localeRequestHeaders, translateClient, useI18n } from "@/lib/i18n";
 import { balanceBreakdown } from "@/lib/paycmd/balance-breakdown";
+import { buildTransactionPreviewModel, canSafelyRetryExecutionFailure } from "@/lib/paycmd/ui-models";
 import {
   normalizeQuotaOnboardingState,
   shouldShowQuotaOnboarding,
@@ -197,6 +202,8 @@ type ExecutionItem = {
   txHash?: string;
   result?: unknown;
   error?: string;
+  fundsMoved?: boolean;
+  safeToRetry?: boolean;
   // Persisted with each status message so the one-chain scope survives a chat reload.
   chainFilter?: PayCmdChain;
 };
@@ -2295,6 +2302,49 @@ async function executeCommand(draft: ParsedCommand) {
   throw new Error("Unsupported command");
 }
 
+function mapRowToMessage(row: ChatMessageRow): ChatMessage {
+  const metadata = row.metadata ?? {};
+
+  return {
+    id: row.id,
+    role: row.role,
+    text: row.content,
+    kind: row.kind,
+    draft: metadata.draft as ParsedCommand | undefined,
+    draftState:
+      metadata.draftState === "active" ||
+      metadata.draftState === "cancelled" ||
+      metadata.draftState === "confirmed"
+        ? metadata.draftState
+        : undefined,
+    execution: metadata.execution as ExecutionItem | undefined,
+    createdAt: row.created_at,
+    provider: normalizeAiProvider(metadata.provider),
+    citations: Array.isArray(metadata.citations) ? (metadata.citations as ChatCitation[]) : undefined,
+    model: typeof metadata.model === "string" ? metadata.model : undefined,
+    surfMode:
+      metadata.surfMode === "instant" || metadata.surfMode === "research"
+        ? metadata.surfMode
+        : undefined,
+    effort: typeof metadata.effort === "string" ? normalizeSurfEffort(metadata.effort) : undefined,
+    durationMs: typeof metadata.durationMs === "number" ? metadata.durationMs : undefined,
+    actions: normalizeAssistantActions(metadata.actions),
+    reasoning:
+      typeof metadata.reasoning === "string" && metadata.reasoning.trim()
+        ? metadata.reasoning
+        : undefined,
+    quota: normalizeAiQuota(metadata.quota),
+    quotaContactCta: metadata.quotaContactCta === true,
+  };
+}
+
+function mapRowsToMessages(rows: ChatMessageRow[]) {
+  return rows.map((row) => ({
+    ...mapRowToMessage(row),
+    createdAt: row.created_at,
+  }));
+}
+
 export function PayCmdApp() {
   const { t, locale } = useI18n();
   const { registerStatusWriter, runServerCommand, refreshBalance } = usePayCmdRuntime();
@@ -2394,45 +2444,6 @@ export function PayCmdApp() {
     },
     {},
   );
-
-  function mapRowToMessage(row: ChatMessageRow): ChatMessage {
-    const metadata = row.metadata ?? {};
-
-    return {
-      id: row.id,
-      role: row.role,
-      text: row.content,
-      kind: row.kind,
-      draft: metadata.draft as ParsedCommand | undefined,
-      draftState:
-        metadata.draftState === "active" ||
-        metadata.draftState === "cancelled" ||
-        metadata.draftState === "confirmed"
-          ? metadata.draftState
-          : undefined,
-      execution: metadata.execution as ExecutionItem | undefined,
-      createdAt: row.created_at,
-      provider: normalizeAiProvider(metadata.provider),
-      citations: Array.isArray(metadata.citations) ? (metadata.citations as ChatCitation[]) : undefined,
-      model: typeof metadata.model === "string" ? metadata.model : undefined,
-      surfMode:
-        metadata.surfMode === "instant" || metadata.surfMode === "research"
-          ? metadata.surfMode
-          : undefined,
-      // Normalized rather than allowlisted, so rows written under the old three-tier scheme keep
-      // their tier. Still undefined when the key is absent: most messages have no effort at all and
-      // should show no badge, which is different from having one that defaults to standard.
-      effort: typeof metadata.effort === "string" ? normalizeSurfEffort(metadata.effort) : undefined,
-      durationMs: typeof metadata.durationMs === "number" ? metadata.durationMs : undefined,
-      actions: normalizeAssistantActions(metadata.actions),
-      reasoning:
-        typeof metadata.reasoning === "string" && metadata.reasoning.trim()
-          ? metadata.reasoning
-          : undefined,
-      quota: normalizeAiQuota(metadata.quota),
-      quotaContactCta: metadata.quotaContactCta === true,
-    };
-  }
 
   function addMessage(message: Omit<ChatMessage, "id"> & { id?: string }) {
     setMessages((current) => [
@@ -3104,8 +3115,6 @@ export function PayCmdApp() {
     setActiveDraftId(null);
 
     const running = { ...execution, status: "running" as const };
-    const waiting = { ...execution, status: "waiting_gateway" as const };
-
     if (usesGatewayPipeline(draft)) {
       setExecutions((current) => [execution, ...current]);
       await addSystemStatus(t("runtime.queued", { title }), execution);
@@ -3115,10 +3124,6 @@ export function PayCmdApp() {
       );
       await addSystemStatus(t("runtime.running", { title }), running);
 
-      setExecutions((current) =>
-        current.map((item) => (item.id === execution.id ? waiting : item)),
-      );
-      await addSystemStatus(t("runtime.gateway", { title }), waiting);
     } else {
       setExecutions((current) => [running, ...current]);
       await addSystemStatus(t("runtime.checking", { title }), running);
@@ -3127,9 +3132,10 @@ export function PayCmdApp() {
     try {
       const result = await executeCommand(draft);
       const txHash = result?.txHash ?? result?.mintTxHash;
+      const awaitingFinality = result?.status === "pending_gateway_finality";
       const success = {
         ...execution,
-        status: "success" as const,
+        status: awaitingFinality ? "waiting_gateway" as const : "success" as const,
         txHash,
         result,
       };
@@ -3145,24 +3151,26 @@ export function PayCmdApp() {
         window.dispatchEvent(new Event("ra:balance-changed"));
       }
     } catch (error) {
-      const raw = error as { code?: string | number; mintPending?: boolean };
+      const raw = error as { code?: string | number; mintPending?: boolean; burnTxHash?: string };
       const message = error instanceof Error ? error.message : "Command failed";
       const errorCode = raw?.code;
       const waitingGateway = errorCode === "GATEWAY_FINALITY_PENDING";
+
+      // A user-rejected signature conclusively means nothing was submitted. A pending wallet
+      // request (-32002) is deliberately excluded because it can still be approved later.
+      const canRetrySafely =
+        !waitingGateway && canSafelyRetryExecutionFailure({ errorCode, fundsMoved: raw?.mintPending });
       const failed = {
         ...execution,
         status: waitingGateway ? "waiting_gateway" as const : "failed" as const,
         error: message,
+        txHash: raw?.burnTxHash,
+        fundsMoved: Boolean(raw?.mintPending),
+        safeToRetry: canRetrySafely,
       };
       setExecutions((current) =>
         current.map((item) => (item.id === execution.id ? failed : item)),
       );
-
-      // Retry is only offered when nothing moved on-chain: a rejected signature
-      // (4001) or a stuck MetaMask request (-32002). Once a bridge burn landed,
-      // `mintPending` is set and re-running would burn a second time.
-      const canRetrySafely =
-        !waitingGateway && !raw?.mintPending && (errorCode === 4001 || errorCode === -32002);
 
       await addSystemStatus(
         message,
@@ -3263,13 +3271,6 @@ export function PayCmdApp() {
     setIsLoadingOlder(false);
   }
 
-  function mappedMessagesFromRows(rows: ChatMessageRow[]) {
-    return rows.map((row) => ({
-      ...mapRowToMessage(row),
-      createdAt: row.created_at,
-    }));
-  }
-
   async function loadChatThreads(nextUserId = userId) {
     if (!nextUserId) return;
 
@@ -3321,7 +3322,7 @@ export function PayCmdApp() {
     }
 
     const recentRows = ((data ?? []) as ChatMessageRow[]).reverse();
-    const mappedMessages = mappedMessagesFromRows(recentRows);
+    const mappedMessages = mapRowsToMessages(recentRows);
     setHasOlderMessages(recentRows.length === MESSAGE_PAGE_SIZE);
     setMessages(mappedMessages);
     setActiveDraftId(
@@ -3874,7 +3875,23 @@ export function PayCmdApp() {
       }
 
       setThreadId(activeThreadId);
-      void loadChatThreads(user.id);
+      setIsLoadingThreads(true);
+      void supabase
+        .from("chat_threads")
+        .select("id,user_id,title,status,created_at,updated_at,last_message_preview,last_message_at,last_message_role,last_message_kind,message_count")
+        .eq("user_id", user.id)
+        .eq("status", "active")
+        .order("last_message_at", { ascending: false, nullsFirst: false })
+        .order("updated_at", { ascending: false })
+        .limit(THREAD_LIST_PAGE_SIZE)
+        .then(({ data, error }) => {
+          if (error) {
+            console.error("Failed to load chat threads", error);
+          } else {
+            setChatThreads((data ?? []) as ChatThreadSummary[]);
+          }
+          setIsLoadingThreads(false);
+        });
 
       const { data: recentMessages, error: messagesError } = await supabase
         .from("chat_messages")
@@ -3891,7 +3908,7 @@ export function PayCmdApp() {
       }
 
       const recentRows = ((recentMessages ?? []) as ChatMessageRow[]).reverse();
-      const mappedMessages = mappedMessagesFromRows(recentRows);
+      const mappedMessages = mapRowsToMessages(recentRows);
       setHasOlderMessages(recentRows.length === MESSAGE_PAGE_SIZE);
       setMessages(mappedMessages);
       setActiveDraftId(
@@ -4058,7 +4075,9 @@ export function PayCmdApp() {
 
         <div className="shrink-0 border-t border-border/60 bg-card/65 px-3 py-3 backdrop-blur-xl md:px-6">
           <div className="mx-auto w-full max-w-3xl">
-            {showPalette ? <CommandPalette query={input} onSelect={selectCommand} /> : null}
+            {showPalette ? (
+              <CommandPalette query={input} onSelect={selectCommand} onDismiss={() => setInput("")} />
+            ) : null}
             {suggestionChips.length ? (
               <div className="mb-2 flex flex-wrap gap-2">
                 {suggestionChips.map((suggestion) => (
@@ -4074,44 +4093,43 @@ export function PayCmdApp() {
               </div>
             ) : null}
 
-            <ComposerModeControls
-              chatMode={chatMode}
-              surfMode={selectedSurfMode}
-              surfEffort={selectedSurfEffort}
-              isBusy={isInputBusy}
-              onChatModeChange={setChatMode}
-              onSurfModeChange={(mode) => {
-                setSelectedSurfMode(mode);
-                if (mode === "instant") setSelectedSurfEffort("standard");
-              }}
-              onSurfEffortChange={setSelectedSurfEffort}
-            />
-
-            <form
-              className="payna-composer flex items-center gap-2 rounded-[1.35rem] p-2"
-              onSubmit={submitCommand}
-            >
-              <Button type="button" variant="ghost" size="icon" aria-label="Attach context">
-                <Paperclip className="h-4 w-4" />
-              </Button>
-              <Input
-                value={input}
-                onChange={(event) => handleInputChange(event.target.value)}
-                onKeyDown={handleInputKeyDown}
-                placeholder={
-                  activeAiProvider === "asksurf"
-                    ? t("chat.placeholderAskSurf")
-                    : activeAiProvider === "openai"
-                      ? t("chat.placeholderOpenAI")
-                      : t("chat.placeholderDefault")
-                }
-                className="min-w-0 flex-1 border-0 bg-transparent text-[15px] shadow-none focus-visible:ring-0"
-                disabled={isInputBusy}
+            <div className="command-panel rounded-[1.35rem] p-2">
+              <ComposerModeControls
+                chatMode={chatMode}
+                surfMode={selectedSurfMode}
+                surfEffort={selectedSurfEffort}
+                isBusy={isInputBusy}
+                onChatModeChange={setChatMode}
+                onSurfModeChange={(mode) => {
+                  setSelectedSurfMode(mode);
+                  if (mode === "instant") setSelectedSurfEffort("standard");
+                }}
+                onSurfEffortChange={setSelectedSurfEffort}
               />
-              <Button type="submit" size="icon" aria-label="Send command" disabled={isInputBusy || !input.trim()} className="h-11 w-11 shrink-0 rounded-2xl">
-                {isInputBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              </Button>
-            </form>
+
+              <form
+                className="payna-composer mt-1 flex items-center gap-2 rounded-2xl border-0 bg-transparent p-1 shadow-none"
+                onSubmit={submitCommand}
+              >
+                <Input
+                  value={input}
+                  onChange={(event) => handleInputChange(event.target.value)}
+                  onKeyDown={handleInputKeyDown}
+                  placeholder={
+                    activeAiProvider === "asksurf"
+                      ? t("chat.placeholderAskSurf")
+                      : activeAiProvider === "openai"
+                        ? t("chat.placeholderOpenAI")
+                        : t("chat.placeholderDefault")
+                  }
+                  className="min-w-0 flex-1 border-0 bg-transparent text-[15px] shadow-none focus-visible:ring-0"
+                  disabled={isInputBusy}
+                />
+                <Button type="submit" size="icon" aria-label={t("chat.send")} disabled={isInputBusy || !input.trim()} className="h-11 w-11 shrink-0 rounded-2xl">
+                  {isInputBusy ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <Send className="h-4 w-4" />}
+                </Button>
+              </form>
+            </div>
           </div>
         </div>
       </div>
@@ -4450,14 +4468,18 @@ function ComposerModeControls({
   );
 }
 
-function CommandPalette({
+export function CommandPalette({
   query,
   onSelect,
+  onDismiss,
 }: {
   query: string;
   onSelect: (sample: string) => void;
+  onDismiss: () => void;
 }) {
   const { t } = useI18n();
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const paletteScrollRef = useRef<HTMLDivElement>(null);
   const normalizedQuery = normalizePaletteQuery(query);
   const filteredSections = commandTemplates
     .map((section) => ({
@@ -4473,6 +4495,53 @@ function CommandPalette({
       }),
     }))
     .filter((section) => section.items.length > 0);
+  const filteredItems = filteredSections.flatMap((section) => section.items);
+
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [normalizedQuery]);
+
+  useEffect(() => {
+    const scrollContainer = paletteScrollRef.current;
+    const option = scrollContainer?.querySelector<HTMLElement>(`[data-palette-index="${selectedIndex}"]`);
+    if (!scrollContainer || !option) return;
+
+    const containerRect = scrollContainer.getBoundingClientRect();
+    const optionRect = option.getBoundingClientRect();
+    if (optionRect.top < containerRect.top) {
+      scrollContainer.scrollTop -= containerRect.top - optionRect.top;
+    } else if (optionRect.bottom > containerRect.bottom) {
+      scrollContainer.scrollTop += optionRect.bottom - containerRect.bottom;
+    }
+  }, [selectedIndex]);
+
+  useEffect(() => {
+    function handlePaletteKeyboard(event: globalThis.KeyboardEvent) {
+      if (!["ArrowUp", "ArrowDown", "Enter", "Escape"].includes(event.key)) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (event.key === "Escape") {
+        onDismiss();
+        return;
+      }
+
+      if (!filteredItems.length) return;
+      if (event.key === "Enter") {
+        onSelect(filteredItems[Math.min(selectedIndex, filteredItems.length - 1)].sample);
+        return;
+      }
+
+      setSelectedIndex((current) => {
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        return (current + direction + filteredItems.length) % filteredItems.length;
+      });
+    }
+
+    window.addEventListener("keydown", handlePaletteKeyboard, true);
+    return () => window.removeEventListener("keydown", handlePaletteKeyboard, true);
+  }, [filteredItems, onDismiss, onSelect, selectedIndex]);
 
   return (
     <div className="payna-glass mb-2 overflow-hidden rounded-2xl">
@@ -4482,7 +4551,7 @@ function CommandPalette({
           {normalizedQuery ? t("commandPalette.filter", { query: normalizedQuery }) : t("commandPalette.fillSample")}
         </div>
       </div>
-      <div className="paycmd-command-palette-scrollbar max-h-[42vh] overflow-y-auto p-2">
+      <div ref={paletteScrollRef} className="paycmd-command-palette-scrollbar max-h-[42vh] overflow-y-auto p-2">
         {filteredSections.length ? (
           <div className="grid gap-3">
             {filteredSections.map((section) => (
@@ -4493,12 +4562,19 @@ function CommandPalette({
               <div className="grid gap-2 md:grid-cols-2">
                 {section.items.map((item) => {
                   const Icon = item.icon;
+                  const currentIndex = filteredItems.findIndex((candidate) => candidate.sample === item.sample);
+                  const isSelected = currentIndex === selectedIndex;
                   return (
                     <button
                       key={item.sample}
-                      className="payna-subtle-lift group min-w-0 rounded-xl border bg-card/78 p-3 text-left backdrop-blur transition hover:border-primary hover:bg-accent/80"
+                      className={`payna-subtle-lift group min-w-0 rounded-xl border p-3 text-left backdrop-blur transition hover:border-primary hover:bg-accent/80 ${
+                        isSelected ? "border-primary bg-primary/10 ring-2 ring-primary/20" : "bg-card/78"
+                      }`}
                       onClick={() => onSelect(item.sample)}
+                      onMouseEnter={() => setSelectedIndex(currentIndex)}
                       type="button"
+                      aria-current={isSelected ? "true" : undefined}
+                      data-palette-index={currentIndex}
                     >
                       <div className="flex min-w-0 items-start gap-3">
                         <span className="mt-0.5 rounded-lg border bg-background/80 p-1.5 text-primary">
@@ -5015,8 +5091,9 @@ function ResearchSectionNav({ researchId, sections }: { researchId: string; sect
   useEffect(() => {
     const container = document.querySelector(`[data-research-id="${researchId}"]`);
     const scrollRoot = document.querySelector<HTMLElement>(".paycmd-chat-scrollbar");
-    const elements = sections
-      .map((section) => container?.querySelector<HTMLElement>(`#${CSS.escape(section.id)}`) ?? null)
+    const sectionIds = sectionSignature ? sectionSignature.split("|") : [];
+    const elements = sectionIds
+      .map((sectionId) => container?.querySelector<HTMLElement>(`#${CSS.escape(sectionId)}`) ?? null)
       .filter((element): element is HTMLElement => Boolean(element));
 
     if (!elements.length) return;
@@ -6218,6 +6295,7 @@ function CommandPreviewCard({
   const hasMintGasChoice = draft.command === "transfer" || draft.command === "pay";
   const isBridge = draft.command === "bridge";
   const isSwap = draft.command === "swap";
+  const isPayroll = draft.command === "payroll";
   const [selectedMintGasMode, setSelectedMintGasMode] = useState(
     draft.fields.mintGasMode === "manual" || (draft.command === "pay" && !draft.fields.mintGasMode)
       ? "manual"
@@ -6246,6 +6324,8 @@ function CommandPreviewCard({
   const [swapEstimate, setSwapEstimate] = useState<SwapEstimate | null>(null);
   const [swapEstimateError, setSwapEstimateError] = useState("");
   const [swapEstimateLoading, setSwapEstimateLoading] = useState(false);
+  const [payrollRecipientCount, setPayrollRecipientCount] = useState<number | null>(null);
+  const [payrollRecipientError, setPayrollRecipientError] = useState("");
 
   useEffect(() => {
     if (!isBridge) return;
@@ -6266,7 +6346,32 @@ function CommandPreviewCard({
     return () => {
       cancelled = true;
     };
-  }, [isBridge]);
+  }, [isBridge, t]);
+
+  useEffect(() => {
+    if (!isPayroll || !isActive) return;
+
+    let cancelled = false;
+    setPayrollRecipientCount(null);
+    setPayrollRecipientError("");
+    void requestJson("/api/contacts")
+      .then((result) => {
+        if (cancelled) return;
+        const contacts: unknown[] = Array.isArray(result?.contacts) ? result.contacts : [];
+        const activeCount = contacts
+          .filter((contact) => recordFrom(contact).status === "active")
+          .slice(0, 25).length;
+        setPayrollRecipientCount(activeCount);
+        if (!activeCount) setPayrollRecipientError(t("preview.payrollLoadFailed"));
+      })
+      .catch(() => {
+        if (!cancelled) setPayrollRecipientError(t("preview.payrollLoadFailed"));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isActive, isPayroll, t]);
 
   useEffect(() => {
     if (bridgeRecipientMode === "external" && bridgeMintMode === "manual_mint") {
@@ -6387,6 +6492,10 @@ function CommandPreviewCard({
           destination: draft.fields.destinationChain,
         })
       : draft.summary;
+  const payrollTotal =
+    isPayroll && payrollRecipientCount !== null
+      ? formatDecimalAmount(Number(draft.fields.amount || 0) * payrollRecipientCount)
+      : null;
   const confirmedDraft: ParsedCommand = {
     ...draft,
     summary: isBridge
@@ -6403,7 +6512,17 @@ function CommandPreviewCard({
             destination: bridgeDestinationChain,
           })
       : draft.summary,
-    fields: isBridge
+    fields: isPayroll
+      ? {
+          ...draft.fields,
+          token: "USDC",
+          recipient:
+            payrollRecipientCount === null
+              ? t("preview.confirmPayrollPending")
+              : t("preview.activeRecipients", { count: payrollRecipientCount }),
+          totalExposure: payrollTotal ? `${payrollTotal} USDC` : "",
+        }
+      : isBridge
       ? {
           ...draft.fields,
           sourceChain: bridgeSourceChain,
@@ -6420,6 +6539,14 @@ function CommandPreviewCard({
           }
         : draft.fields,
   };
+  const previewModel = buildTransactionPreviewModel(confirmedDraft);
+  const confirmLabel = isPayroll
+    ? payrollTotal && payrollRecipientCount
+      ? t("preview.confirmPayroll", { total: payrollTotal, token: "USDC", count: payrollRecipientCount })
+      : t("preview.confirmPayrollPending")
+    : previewModel.amount
+    ? t("preview.confirmAmount", { amount: previewModel.amount, token: previewModel.token })
+    : t("common.confirmCommand");
   const bridgeChainChoices = supportedBridgeChains.length ? supportedBridgeChains : Object.values(cctpBridgeChainMap).map((chain) => ({
     ...chain,
     canFastFromSource: true,
@@ -6440,43 +6567,25 @@ function CommandPreviewCard({
     !swapEstimate ||
     swapEstimateLoading ||
     Boolean(swapEstimateError);
-  const hiddenFieldKeys = new Set([
-    "mintGasMode",
-    "bridgeMintMode",
-    "transferSpeed",
-    "recipientMode",
-  ]);
-
   return (
-    <div className="min-w-[260px] space-y-3">
+    <div className="min-w-[260px] space-y-3" aria-live="polite">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-xs font-medium uppercase text-muted-foreground">{t("chat.preview")}</div>
           <div className="font-semibold">{previewTitle}</div>
         </div>
-        {isActive ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="-mr-2 -mt-2 h-8 w-8 shrink-0"
-            onClick={onCancel}
-            aria-label={t("common.cancel")}
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        ) : (
+        {!isActive ? (
           <Badge variant="secondary" className="shrink-0">
             {previewStatusLabel}
           </Badge>
-        )}
+        ) : null}
       </div>
-      <div className="grid gap-2 text-xs">
-        <Row label={t("chat.command")} value={`/${draft.command}`} />
-        {Object.entries(draft.fields).map(([key, value]) =>
-          value && !hiddenFieldKeys.has(key) ? <Row key={key} label={key} value={value} /> : null,
-        )}
-      </div>
+      <TransactionPreviewFields model={previewModel} />
+      {isPayroll && payrollRecipientError ? (
+        <div role="alert" className="rounded-xl border border-danger/35 bg-danger/10 px-3 py-2 text-xs text-danger">
+          {payrollRecipientError}
+        </div>
+      ) : null}
       <div className="space-y-2 rounded-lg border bg-background p-2 text-xs text-muted-foreground">
         <div className="flex flex-wrap items-center gap-2">
           <RailBadge rail={previewRail} />
@@ -6814,14 +6923,20 @@ function CommandPreviewCard({
         ) : null}
         {mintGasHelpText ? <div>{mintGasHelpText}</div> : null}
       </div>
-      <Button
-        className="w-full"
-        disabled={isBridge ? bridgeConfirmDisabled : isSwap ? swapConfirmDisabled : !isActive}
-        onClick={() => onConfirm(confirmedDraft)}
-      >
-        <Check className="mr-2 h-4 w-4" />
-        {isActive ? t("common.confirmCommand") : previewStatusLabel}
-      </Button>
+      {isActive ? (
+        <TransactionConfirmActions
+          confirmLabel={confirmLabel}
+          cancelLabel={t("common.cancel")}
+          disabled={isBridge ? bridgeConfirmDisabled : isSwap ? swapConfirmDisabled : isPayroll ? payrollRecipientCount === null || payrollRecipientCount === 0 || Boolean(payrollRecipientError) : false}
+          onCancel={onCancel}
+          onConfirm={() => onConfirm(confirmedDraft)}
+        />
+      ) : (
+        <Button className="w-full" disabled>
+          <Check className="h-4 w-4" />
+          {previewStatusLabel}
+        </Button>
+      )}
     </div>
   );
 }
@@ -6965,9 +7080,20 @@ function ExecutionStatus({
   const rail = inferRailFromCommand(execution.command);
   const receipt = buildExecutionReceipt(execution, t);
   const followUps = showFollowUps ? executionFollowUps(execution, t) : [];
+  const showsTransactionTimeline = ([
+    "wallet",
+    "deposit",
+    "fund",
+    "bridge",
+    "swap",
+    "withdraw",
+    "transfer",
+    "pay",
+    "payroll",
+  ] as ParsedCommand["command"][]).includes(execution.command);
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3" aria-live="polite">
       <div className="flex items-center gap-2 font-medium">
         {done ? (
           <Check className="h-4 w-4 text-emerald-500" />
@@ -6982,6 +7108,39 @@ function ExecutionStatus({
           {statusLabel(execution.status, t)}
         </span>
       </div>
+      {showsTransactionTimeline ? (
+        <ExecutionTimeline
+          status={execution.status}
+          fundsMoved={execution.fundsMoved}
+          submitted={Boolean(execution.txHash || execution.fundsMoved)}
+          waitingMessage={t("execution.waitingHelp")}
+          labels={{
+            prepared: t("execution.prepared"),
+            wallet_approval: t("execution.walletApproval"),
+            submitted: t("execution.submitted"),
+            finalizing: t("execution.finalizing"),
+            complete: t("execution.complete"),
+          }}
+        />
+      ) : null}
+      {failed ? (
+        <div
+          role="alert"
+          className={`rounded-xl border px-3 py-2 text-xs leading-5 ${
+            execution.fundsMoved
+              ? "border-waiting/35 bg-waiting/10 text-waiting-foreground"
+              : execution.safeToRetry
+                ? "border-info/35 bg-info/10 text-info-foreground"
+                : "border-danger/30 bg-danger/5 text-danger"
+          }`}
+        >
+          {execution.fundsMoved
+            ? t("execution.failureFundsMoved")
+            : execution.safeToRetry
+              ? t("execution.failureNoFundsMoved")
+              : t("execution.failureReview")}
+        </div>
+      ) : null}
       {receipt ? (
         <ExecutionReceiptCard receipt={receipt} rail={rail} />
       ) : execution.command === "balance" ? (
@@ -7044,7 +7203,23 @@ function ExecutionReceiptCard({
   rail: ReturnType<typeof inferRailFromCommand>;
 }) {
   const { t } = useI18n();
+  const [copiedHash, setCopiedHash] = useState<string | null>(null);
+  const [copyErrorHash, setCopyErrorHash] = useState<string | null>(null);
   const hasDetails = receipt.details.length > 0;
+
+  async function copyHash(txHash: string) {
+    try {
+      if (!navigator.clipboard) throw new Error("Clipboard API unavailable");
+      await navigator.clipboard.writeText(txHash);
+      setCopyErrorHash(null);
+      setCopiedHash(txHash);
+      window.setTimeout(() => setCopiedHash((current) => (current === txHash ? null : current)), 1600);
+    } catch {
+      setCopiedHash(null);
+      setCopyErrorHash(txHash);
+      window.setTimeout(() => setCopyErrorHash((current) => (current === txHash ? null : current)), 2400);
+    }
+  }
 
   return (
     <div className="space-y-3">
@@ -7081,13 +7256,33 @@ function ExecutionReceiptCard({
         {receipt.links.length ? (
           <div className="mt-3 space-y-1.5 rounded-lg bg-background p-2 text-xs text-muted-foreground">
             {receipt.links.map((link) => (
-              <div key={`${link.label}-${link.txHash}`} className="grid grid-cols-[92px_minmax(0,1fr)] items-center gap-2">
+              <div key={`${link.label}-${link.txHash}`} className="grid grid-cols-[92px_minmax(0,1fr)_auto] items-center gap-2">
                 <span>{link.label}</span>
                 <ExplorerTxLink chain={link.chain} txHash={link.txHash} compact />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 rounded-lg"
+                  aria-label={
+                    copiedHash === link.txHash
+                      ? t("receipt.hashCopied")
+                      : copyErrorHash === link.txHash
+                        ? t("receipt.copyFailed")
+                        : t("receipt.copyHash")
+                  }
+                  title={copyErrorHash === link.txHash ? t("receipt.copyFailed") : undefined}
+                  onClick={() => void copyHash(link.txHash)}
+                >
+                  {copiedHash === link.txHash ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                </Button>
               </div>
             ))}
           </div>
         ) : null}
+        <span className="sr-only" aria-live="polite">
+          {copiedHash ? t("receipt.hashCopied") : copyErrorHash ? t("receipt.copyFailed") : ""}
+        </span>
 
         {hasDetails ? (
           <details className="mt-3 rounded-lg border border-border/70 bg-muted/15 px-3 py-2 text-xs">
@@ -7103,15 +7298,6 @@ function ExecutionReceiptCard({
           </details>
         ) : null}
       </div>
-    </div>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-2">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="break-words font-medium">{value}</span>
     </div>
   );
 }

@@ -28,11 +28,11 @@ export default async function ContactsPage() {
       title="Contacts"
       description={tr(locale, "pages.contacts.description")}
     >
-      <div className="divide-y rounded-lg border bg-card shadow-sm">
+      <div className="command-panel divide-y divide-border/60 overflow-hidden rounded-2xl">
         {(contacts ?? []).map((contact) => (
           <article key={contact.id} className="flex items-center justify-between gap-4 p-4">
             <div className="flex min-w-0 items-center gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-accent text-accent-foreground">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
                 <Contact className="h-4 w-4" />
               </div>
               <div className="min-w-0">
@@ -47,7 +47,7 @@ export default async function ContactsPage() {
           </article>
         ))}
         {contacts?.length ? null : (
-          <div className="p-4 text-sm text-muted-foreground">
+          <div className="p-8 text-center text-sm text-muted-foreground">
             {tr(locale, "pages.contacts.empty")}
           </div>
         )}

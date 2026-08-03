@@ -1,0 +1,4 @@
+/* Next.js development controls are not part of the product UI and change state while tests run. */
+nextjs-portal {
+  display: none !important;
+}

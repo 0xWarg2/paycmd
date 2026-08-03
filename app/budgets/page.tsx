@@ -5,24 +5,8 @@ import { redirect } from "next/navigation";
 import { PayCmdSectionPage } from "@/components/paycmd-section-page";
 import { Badge } from "@/components/ui/badge";
 import { localeFromCookieStore, tr } from "@/lib/i18n/server";
+import { loadBudgetDashboardData } from "@/lib/paycmd/budgets";
 import { createClient } from "@/lib/supabase/server";
-
-type BudgetRow = {
-  id: string;
-  name: string;
-  token: string;
-  limit_amount: number | string;
-  used_amount: number | string;
-  status: string;
-};
-
-type TransactionRow = {
-  amount: number | string | null;
-  tx_type: string | null;
-  status: string | null;
-  chain: string | null;
-  created_at: string | null;
-};
 
 function toNumber(value: unknown) {
   const parsed = Number(value ?? 0);
@@ -50,24 +34,7 @@ export default async function BudgetsPage() {
 
   if (!user) redirect("/auth/login?next=/budgets");
 
-  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-  const [budgetsResult, transactionsResult] = await Promise.all([
-    supabase
-      .from("budgets")
-      .select("id, name, token, limit_amount, used_amount, status")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false }),
-    supabase
-      .from("transaction_history")
-      .select("amount, tx_type, status, chain, created_at")
-      .eq("user_id", user.id)
-      .gte("created_at", since)
-      .order("created_at", { ascending: false })
-      .limit(100),
-  ]);
-
-  const budgets = (budgetsResult.data ?? []) as BudgetRow[];
-  const transactions = (transactionsResult.data ?? []) as TransactionRow[];
+  const { budgets, transactions } = await loadBudgetDashboardData(supabase, user.id);
   const successfulSpend = transactions
     .filter((row) => row.status === "success" && ["pay", "transfer", "bridge", "swap", "withdraw"].includes(row.tx_type ?? ""))
     .reduce((sum, row) => sum + toNumber(row.amount), 0);
@@ -89,7 +56,7 @@ export default async function BudgetsPage() {
       description={tr(locale, "pages.budgets.description")}
     >
       <div className="grid gap-4">
-        <section className="rounded-2xl border border-primary/20 bg-card/75 p-5 shadow-sm backdrop-blur-xl">
+        <section className="command-panel rounded-2xl border-primary/20 p-5">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <Badge variant="secondary" className="mb-3 gap-1">
@@ -123,7 +90,7 @@ export default async function BudgetsPage() {
               const percent = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
 
               return (
-                <article key={budget.id} className="rounded-2xl border bg-card/82 p-4 shadow-sm backdrop-blur-xl">
+                <article key={budget.id} className="command-panel rounded-2xl p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="flex items-center gap-2 font-medium">
@@ -156,7 +123,7 @@ export default async function BudgetsPage() {
             })}
           </section>
         ) : (
-          <section className="rounded-2xl border bg-card/75 p-5 shadow-sm backdrop-blur-xl">
+          <section className="command-panel rounded-2xl p-5">
             <div className="flex items-start gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
                 <Gauge className="h-5 w-5" />
@@ -185,7 +152,7 @@ function Insight({
   value: string;
 }) {
   return (
-    <div className="rounded-2xl border bg-card/75 p-4 shadow-sm backdrop-blur-xl">
+    <div className="command-panel rounded-2xl p-4">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <Icon className="h-4 w-4 text-primary" />
         {label}

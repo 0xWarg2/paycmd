@@ -59,7 +59,7 @@ import {
 type TransactionType = "fund" | "deposit" | "withdraw" | "transfer" | "unify" | "bridge" | "swap";
 type TransactionStatus = "pending" | "pending_gateway_finality" | "success" | "failed";
 
-interface Transaction {
+export interface Transaction {
   id: string;
   user_id: string;
   chain: string;
@@ -150,10 +150,15 @@ function getStatusBadge(status: TransactionStatus) {
   }
 }
 
-export function TransactionHistory() {
-  const [isMounted, setIsMounted] = useState(false);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [loading, setLoading] = useState(true);
+export function TransactionHistory({
+  initialTransactions,
+}: {
+  initialTransactions?: Transaction[];
+} = {}) {
+  const hasInitialTransactions = initialTransactions !== undefined;
+  const [isMounted, setIsMounted] = useState(hasInitialTransactions);
+  const [transactions, setTransactions] = useState<Transaction[]>(initialTransactions ?? []);
+  const [loading, setLoading] = useState(!hasInitialTransactions);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
@@ -187,10 +192,10 @@ export function TransactionHistory() {
       }
     }
 
-    if (isMounted) {
+    if (isMounted && !hasInitialTransactions) {
       void fetchTransactions();
     }
-  }, [isMounted]);
+  }, [hasInitialTransactions, isMounted]);
 
   const filteredAndSortedTransactions = useMemo(() => {
     const searchLower = searchTerm.trim().toLowerCase();
@@ -283,7 +288,7 @@ export function TransactionHistory() {
                 className="sm:max-w-xs"
               />
               <Select value={typeFilter} onValueChange={setTypeFilter}>
-                <SelectTrigger className="sm:w-[180px]">
+                <SelectTrigger className="sm:w-[180px]" aria-label="Filter transactions by type">
                   <SelectValue placeholder="Filter by type" />
                 </SelectTrigger>
                 <SelectContent>
@@ -298,7 +303,7 @@ export function TransactionHistory() {
                 </SelectContent>
               </Select>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="sm:w-[210px]">
+                <SelectTrigger className="sm:w-[210px]" aria-label="Filter transactions by status">
                   <SelectValue placeholder="Filter by status" />
                 </SelectTrigger>
                 <SelectContent>
@@ -311,7 +316,7 @@ export function TransactionHistory() {
               </Select>
             </div>
 
-            <div className="overflow-x-auto rounded-md border">
+            <div className="hidden overflow-x-auto rounded-xl border border-border/65 lg:block">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -392,6 +397,61 @@ export function TransactionHistory() {
                   )}
                 </TableBody>
               </Table>
+            </div>
+
+            <div className="grid gap-3 lg:hidden" aria-live="polite">
+              {loading ? (
+                Array.from({ length: 3 }).map((_, index) => (
+                  <div key={index} className="rounded-2xl border border-border/65 bg-surface-raised/60 p-4">
+                    <Skeleton className="h-5 w-24" />
+                    <Skeleton className="mt-4 h-12 w-full" />
+                    <Skeleton className="mt-4 h-5 w-32" />
+                  </div>
+                ))
+              ) : error ? (
+                <div className="rounded-2xl border border-danger/30 bg-danger/5 p-4 text-sm text-danger">
+                  Error: {error}
+                </div>
+              ) : paginatedTransactions.length > 0 ? (
+                paginatedTransactions.map((tx) => {
+                  const explorerChain = getTransactionExplorerChain(tx);
+
+                  return (
+                    <article
+                      key={tx.id}
+                      data-testid="transaction-mobile-card"
+                      className="command-panel min-w-0 rounded-2xl p-4"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 space-y-2">
+                          <div className="font-semibold">{formatTxType(tx.tx_type)}</div>
+                          <RailBadge rail={inferRailFromTransactionType(tx.tx_type)} />
+                        </div>
+                        {getStatusBadge(tx.status)}
+                      </div>
+                      <div className="mt-4 rounded-xl border border-border/55 bg-muted/25 p-3">
+                        <ChainRoute sourceChain={tx.chain} destinationChain={tx.destination_chain} />
+                        <div className="mt-3 break-words font-mono text-sm font-semibold">
+                          {formatTransactionAmount(tx)}
+                        </div>
+                      </div>
+                      {tx.reason ? (
+                        <p className="mt-3 break-words text-xs leading-5 text-muted-foreground">{tx.reason}</p>
+                      ) : null}
+                      <div className="mt-4 flex min-w-0 items-center justify-between gap-3 border-t border-border/55 pt-3">
+                        <time className="min-w-0 text-xs text-muted-foreground" dateTime={tx.created_at}>
+                          {formatDate(tx.created_at)}
+                        </time>
+                        <ExplorerTxLink chain={explorerChain} txHash={tx.tx_hash} compact />
+                      </div>
+                    </article>
+                  );
+                })
+              ) : (
+                <div className="rounded-2xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+                  No transactions found.
+                </div>
+              )}
             </div>
 
             {totalPages > 0 ? (

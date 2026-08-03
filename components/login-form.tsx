@@ -179,6 +179,7 @@ export function LoginForm({
               <Input
                 id="email"
                 type="email"
+                aria-label="Email"
                 placeholder="Email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -188,6 +189,7 @@ export function LoginForm({
             <Input
               id="password"
               type="password"
+              aria-label="Password"
               placeholder="Password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
