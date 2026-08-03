@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { askSurfResearch } from "@/lib/paycmd/ai/surf";
+import { askResearch } from "@/lib/paycmd/ai/research";
 import { createClient } from "@/lib/supabase/server";
 
 type CryptoResearchRequest = {
   input?: string;
   recentMessages?: { role: string; text: string }[];
   surfMode?: "instant" | "research";
-  effort?: "standard" | "extended" | "maximum";
+  // `extended` and `maximum` are the pre-merge tiers. Still accepted because a client loaded before
+  // this deployed keeps sending them; `mapLegacyEffort` in the research layer folds both into
+  // `deep`. Written as a literal rather than the imported type so those legacy values stay valid
+  // here without widening `ResearchEffort` itself.
+  effort?: "standard" | "deep" | "extended" | "maximum";
   locale?: "vi" | "en";
 };
 
@@ -31,7 +35,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "input is required" }, { status: 400 });
     }
 
-    const result = await askSurfResearch({
+    const result = await askResearch({
       input,
       recentMessages: body.recentMessages ?? [],
       surfMode: body.surfMode,
@@ -41,20 +45,23 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ...result,
+      // Legacy wire value, deliberately unchanged. The client reads this back out of persisted rows
+      // through a hard allowlist to pick its rich research renderer, so every message already in the
+      // database says "asksurf" — renaming it would make that history render as raw markdown.
       provider: "asksurf",
     });
   } catch (error: any) {
-    console.error("AskSurf crypto route failed:", error);
+    console.error("Research route failed:", error);
 
     if (error?.name === "TimeoutError") {
       return NextResponse.json(
-        { error: "AskSurf timed out while researching crypto data" },
+        { error: "Research timed out while gathering crypto data" },
         { status: 504 },
       );
     }
 
     return NextResponse.json(
-      { error: error.message || "AskSurf research failed" },
+      { error: error.message || "Research failed" },
       { status: error.status ?? 500 },
     );
   }

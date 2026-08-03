@@ -7,8 +7,7 @@ Tài liệu này liệt kê các tính năng đang có trong Ra V1 và cách tes
 - Chạy app local: `npm install`, `npm run dev`, mở `http://localhost:3000`.
 - Supabase đã apply toàn bộ migration, bao gồm migration mới nhất cho internal contacts: `20260607000000_add_internal_contact_wallet_resolution.sql`.
 - Env tối thiểu: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `CIRCLE_API_KEY`, `CIRCLE_ENTITY_SECRET`, `CIRCLE_WALLET_SET_ID`.
-- Nếu test AI natural language, cần thêm `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `PAYCMD_DEFAULT_AI_MODEL_PROFILE`.
-- Nếu test crypto research bằng AskSurf, cần thêm `SURF_API_KEY`. Mặc định dùng `SURF_API_BASE_URL=https://api.asksurf.ai/gateway/v1`, `SURF_TIMEOUT_MS=600000`.
+- Nếu test AI natural language hoặc crypto research, cần thêm `DEEPSEEK_API_KEY`. Mặc định dùng `DEEPSEEK_BASE_URL=https://api.deepseek.com`, `DEEPSEEK_RESEARCH_TIMEOUT_MS=240000`.
 - Chuẩn bị ít nhất 2 account test: account A là payer, account B là recipient nội bộ.
 - Mỗi account cần có Circle SCA wallet. Login xong chạy `/wallet status`; nếu chưa có thì chạy `/wallet create`.
 - Test payment thật nên có testnet USDC và native gas trên chain liên quan. External recipient/mint có thể cần gas ở Gateway EOA signer wallet theo thông báo lỗi `INSUFFICIENT_GAS`.
@@ -43,7 +42,7 @@ Tính năng:
 - Chat history lưu theo user và có load older messages.
 - Empty state có Ra mascot và các lệnh cơ bản cho user mới.
 - UI chặn double-submit khi user nhấn Enter nhiều lần quá nhanh.
-- Assistant bubble hiển thị provider badge: `OpenAI Router`, `AskSurf Research` hoặc `Ra`.
+- Assistant bubble hiển thị provider badge: `DeepSeek Router`, `DeepSeek Research` hoặc `Ra`.
 
 Cách test:
 1. Vào `/app`, gõ `/`.
@@ -60,44 +59,46 @@ Cách test:
 12. Nhập một command rồi nhấn Enter liên tiếp thật nhanh.
 13. Kỳ vọng chỉ có một user message và một execution/preview tương ứng.
 
-## 3. AI Command Router Và AskSurf Crypto Research
+## 3. AI Command Router Và Crypto Research
 
 Tính năng:
 - User có thể nhập natural language không bắt đầu bằng `/`.
 - `/api/ai/command` dùng app context hiện tại để convert thành slash command.
-- Composer có mode switch `Ra` / `AskSurf`.
-- Mode `Ra` có model selector: `GPT-5.5`, `GPT-5.4`, `GPT-5.4 Mini`, `Codex Auto Review`.
-- Mode `AskSurf` có selector `Instant` / `Research 2.0` và effort `Standard` / `Extended` / `Maximum`.
+- Composer có mode switch `Ra` / `Research`.
+- Mode `Research` có selector `Instant` / `Research` và effort `Standard` / `Deep`.
 - AI trả suggestions để user bấm lại nhanh.
-- OpenAI là router cấp 1: nếu câu là hành động Ra thì tạo command/clarify; nếu là research crypto thì trả intent `crypto_research`.
-- Khi đang ở mode `AskSurf`, câu hỏi không bắt đầu bằng `/` bỏ qua OpenAI router và gọi thẳng `/api/ai/crypto`.
+- Command router là router cấp 1: nếu câu là hành động Ra thì tạo command/clarify; nếu là research crypto thì trả intent `crypto_research`.
+- Khi đang ở mode `Research`, câu hỏi không bắt đầu bằng `/` bỏ qua command router và gọi thẳng `/api/ai/crypto`.
 - Slash command luôn chạy Ra dù composer đang ở mode nào.
-- `/api/ai/crypto` gọi AskSurf server-side để trả lời crypto, market, stablecoin, chain, protocol, news hoặc conceptual questions.
-- Khi OpenAI chạy, UI hiện loading `OpenAI đang phân tích lệnh...`; khi AskSurf chạy, UI đổi sang `AskSurf đang tìm thông tin crypto...`.
-- AskSurf không được ký, submit hoặc execute transaction. Nó chỉ trả lời research hoặc gợi ý slash command nếu user muốn hành động.
-- UI label `Research 2.0` map tới model public chính thức của AskSurf: `Standard` dùng `surf-1.5` + `reasoning_effort=medium`, `Extended` dùng `surf-1.5` + `high`, `Maximum` dùng `surf-1.5-thinking` + `high`. `Instant` dùng `surf-1.5-instant`.
-- AskSurf research có thể mất vài chục giây. Ra local dùng timeout 120 giây cho `Instant` và 10 phút cho `Research 2.0`. Route export `maxDuration = 600`, nhưng trên Vercel Hobby có thể vẫn bị giới hạn khoảng 300 giây. Sau khoảng 12 giây, UI hiện thanh báo nhỏ có nút tắt để user biết request vẫn đang chạy nhưng không bị che màn hình.
-- AskSurf answer render dạng research bubble rộng hơn, có `Sections of Research`, table controls, footer actions và `Related Questions` nếu model trả về.
+- `/api/ai/crypto` gọi DeepSeek server-side để trả lời crypto, market, stablecoin, chain, protocol, news hoặc conceptual questions.
+- Khi command router chạy, UI hiện loading `DeepSeek đang phân tích lệnh...`; khi research chạy, UI đổi sang `Research đang tìm thông tin crypto...`.
+- Research không được ký, submit hoặc execute transaction. Nó chỉ trả lời research hoặc gợi ý slash command nếu user muốn hành động.
+- Effort map tới model DeepSeek: `Instant` và `Standard` dùng `deepseek-v4-flash`, `Deep` dùng `deepseek-v4-pro`. Cả hai tier research bật reasoning; `Instant` và command router tắt.
+- Message cũ lưu effort `extended` hoặc `maximum` (3 tier trước khi gộp) được map về `Deep` ở cả server và client hydrate.
+- Research có thể mất vài chục giây. Timeout xếp theo thứ tự 240 giây (server) < 270 giây (client abort) < 300 giây (`maxDuration`). Sau khoảng 12 giây, UI hiện thanh báo nhỏ có nút tắt để user biết request vẫn đang chạy nhưng không bị che màn hình.
+- Answer research render dạng research bubble rộng hơn, có `Sections of Research`, table controls, footer actions và `Related Questions` nếu model trả về.
+- Message có reasoning hiện disclosure `Xem reasoning` (đóng mặc định) ngay dưới provider badge. Reasoning được persist trong `chat_messages.metadata` nên còn nguyên sau reload và sau khi confirm/cancel draft.
 
 Cách test:
-1. Đảm bảo `OPENAI_API_KEY` đã set.
-2. Vào `/app`, chọn mode `Ra` và model cần test.
+1. Đảm bảo `DEEPSEEK_API_KEY` đã set trong `.env.local`.
+2. Vào `/app`, chọn mode `Ra`.
 3. Nhập `pay 2 USDC to Minh on arc from base`.
-4. Kỳ vọng AI trả preview command `/pay 2 to Minh on arc from base` hoặc hỏi thêm nếu thiếu contact.
+4. Kỳ vọng AI trả preview command `/pay 2 to Minh on arc from base` hoặc hỏi thêm nếu thiếu contact. `modelProfile` phải khác `paycmd-rules-fallback`; nếu bằng thì đường model đã fail im lặng, soi console server.
 5. Nhập câu thiếu thông tin, ví dụ `pay Minh`.
 6. Kỳ vọng AI hỏi một câu ngắn về thông tin còn thiếu, không execute.
-7. Đảm bảo `SURF_API_KEY` đã set.
+7. Command router không được hiện disclosure reasoning (thinking tắt).
 8. Trong mode `Ra`, nhập `USDC Gateway khác bridge thường ở điểm nào?`.
-9. Kỳ vọng UI hiện OpenAI Router trước, sau đó AskSurf Research, cuối cùng trả answer research và không hiện transaction preview.
-10. Chọn mode `AskSurf`, `Research 2.0`, effort `Standard`, nhập `Monad là gì?`.
-11. Kỳ vọng câu hỏi gọi thẳng AskSurf, trả research bubble có `Sections of Research`, footer copy/download/print, và `Related Questions` nếu AskSurf trả về.
-12. Nếu answer có bảng, test copy table, download CSV, download PNG và fullscreen.
-13. Bấm một nút `Related Questions`.
-14. Kỳ vọng câu hỏi mới được submit tiếp bằng mode `AskSurf`.
-15. Gõ `/balance` khi composer vẫn ở mode `AskSurf`.
-16. Kỳ vọng slash command vẫn chạy Ra, không gọi AskSurf.
-17. Tắt hoặc bỏ `SURF_API_KEY`, hỏi lại câu research.
-18. Kỳ vọng lỗi rõ `SURF_API_KEY is not configured`; các slash command khác vẫn hoạt động.
+9. Kỳ vọng UI hiện DeepSeek Router trước, sau đó DeepSeek Research, cuối cùng trả answer research và không hiện transaction preview.
+10. Chọn mode `Research`, effort `Standard`, nhập `Monad là gì?`.
+11. Kỳ vọng câu hỏi gọi thẳng research, trả research bubble có `Sections of Research`, footer copy/download/print, `Related Questions` nếu model trả về, và disclosure reasoning mở ra được.
+12. Reload trang; kỳ vọng disclosure reasoning còn nguyên.
+13. Confirm hoặc cancel một draft trên message có reasoning; kỳ vọng reasoning còn nguyên.
+14. Mở một message research cũ trước migration trong history; kỳ vọng vẫn render research bubble, không phải markdown thô.
+15. Nếu answer có bảng, test copy table, download CSV, download PNG và fullscreen.
+16. Bấm một nút `Related Questions`; kỳ vọng câu hỏi mới submit tiếp bằng mode `Research`.
+17. Gõ `/balance` khi composer vẫn ở mode `Research`; kỳ vọng slash command vẫn chạy Ra.
+18. Tắt hoặc bỏ `DEEPSEEK_API_KEY`, hỏi lại câu research.
+19. Kỳ vọng lỗi rõ `DEEPSEEK_API_KEY is not configured`; các slash command khác vẫn hoạt động.
 
 ## 4. Wallet Management
 

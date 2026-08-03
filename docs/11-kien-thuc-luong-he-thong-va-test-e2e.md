@@ -122,9 +122,9 @@ Browser /app
   │  → validation → preview → user confirm → API execution → Circle/Supabase
   │
   └─ Natural language
-     ├─ Payna mode → OpenRouter command router
+     ├─ Payna mode → DeepSeek command router
      │  → command | clarify | answer | crypto_research
-     └─ AskSurf mode → OpenRouter research backend
+     └─ Research mode → DeepSeek research backend
 
 Command router lỗi / trả JSON sai
   → deterministic rules fallback (contact, payment, bridge, swap, clarify)
@@ -132,19 +132,22 @@ Command router lỗi / trả JSON sai
 
 ### AI hiện tại
 
-| Bề mặt | Model hiện dùng | Vai trò |
-| --- | --- | --- |
-| Payna command router | `inclusionai/ling-3.0-flash:free` | Chuyển ngôn ngữ tự nhiên thành command/clarify/answer/research intent. |
-| AskSurf Instant/Standard UI | `inclusionai/ling-3.0-flash:free` | Câu trả lời research nhanh. |
-| AskSurf Extended/Maximum UI | `poolside/laguna-s-2.1:free` | Câu trả lời research dài hơn. |
+| Bề mặt | Model hiện dùng | Reasoning | Vai trò |
+| --- | --- | --- | --- |
+| Payna command router | `deepseek-v4-flash` | tắt | Chuyển ngôn ngữ tự nhiên thành command/clarify/answer/research intent. |
+| Research Instant | `deepseek-v4-flash` | tắt | Câu trả lời research nhanh. |
+| Research Standard | `deepseek-v4-flash` | bật | Câu trả lời research có chain-of-thought. |
+| Research Deep | `deepseek-v4-pro` | bật | Câu trả lời research dài và sâu hơn. |
 
-Locale UI quyết định ngôn ngữ `assistantText`: English UI trả English, Vietnamese UI trả Vietnamese. Nhãn AskSurf vẫn được giữ ở UI nhưng backend research hiện là OpenRouter; không có live web/on-chain search hay citation đã xác minh. AskSurf API cũ được lưu inactive tại [legacy-asksurf-api.md](./legacy-asksurf-api.md).
+Reasoning của DeepSeek bật sẵn trên cả hai model và token reasoning **rút từ chính `max_tokens`**. Command router vì vậy phải tắt thinking: nếu bật, chain-of-thought có thể ăn hết budget làm JSON bị cắt và route âm thầm rơi về rules fallback với HTTP 200. Reasoning trả về ở `choices[0].message.reasoning_content`, được cắt còn 4.000 ký tự ở transport và persist trong `chat_messages.metadata.reasoning`.
+
+Locale UI quyết định ngôn ngữ `assistantText`: English UI trả English, Vietnamese UI trả Vietnamese. Backend research là DeepSeek; không có live web/on-chain search hay citation đã xác minh.
 
 ## 4. Chuẩn bị test
 
 1. Apply Supabase migrations; cấu hình `NEXT_PUBLIC_SUPABASE_URL` và `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
 2. Cấu hình Circle: `CIRCLE_API_KEY`, `CIRCLE_ENTITY_SECRET`, `CIRCLE_WALLET_SET_ID`.
-3. Để test AI, set `OPENROUTER_API_KEY` và các `OPENROUTER_*_MODEL` trong `.env.local`.
+3. Để test AI, set `DEEPSEEK_API_KEY` (và các `DEEPSEEK_*_MODEL` nếu muốn override) trong `.env.local`.
 4. Chạy `npm install` rồi `npm run dev`; mở `http://localhost:3000`.
 5. Chuẩn bị account A (payer) và B (recipient). Login mỗi account một lần để bootstrap Circle SCA wallet; kiểm tra bằng `/wallet status`.
 6. Nạp testnet USDC và native gas vào các ví/chain cần test. Khi test MetaMask fund, account MetaMask phải có USDC testnet và native gas.
@@ -167,8 +170,8 @@ Kỳ vọng: một Circle SCA wallet ổn định cho mỗi user; link MetaMask 
 3. Gõ `/balance` để kiểm tra command không cần confirm.
 4. Ở Payna mode, nhập `pay 1 USDC to Minh on arc from base`; kiểm tra router tạo preview hoặc clarify.
 5. Trong English UI, nhập `hello`; kiểm tra answer bằng English. Đổi Vietnamese UI và lặp lại; kiểm tra answer bằng Vietnamese.
-6. Chọn AskSurf, hỏi một câu research; kiểm tra research bubble, loading và actions copy/download/print.
-7. Khi AskSurf mode, gõ `/balance`; kiểm tra slash command vẫn đi parser, không đi research.
+6. Chọn Research, hỏi một câu research; kiểm tra research bubble, loading, disclosure reasoning và actions copy/download/print.
+7. Khi Research mode, gõ `/balance`; kiểm tra slash command vẫn đi parser, không đi research.
 
 ### C. Contacts và trả tiền
 
@@ -214,8 +217,8 @@ Ghi nhớ: nếu Gateway source balance thiếu, transfer chat có thể auto-de
 | Deposit vượt Circle wallet balance | Không ghi success. |
 | Withdraw vượt Gateway balance | `INSUFFICIENT_GATEWAY_BALANCE`. |
 | Thiếu native gas | `INSUFFICIENT_GAS` với wallet/chain cần nạp. |
-| OpenRouter lỗi/JSON không hợp lệ | Command router rơi về PayCmd rules fallback; slash command vẫn chạy. |
-| OpenRouter free model hết quota | Research có thể lỗi; kiểm tra message lỗi và retry sau/đổi `OPENROUTER_*_MODEL`. |
+| DeepSeek lỗi/JSON không hợp lệ | Command router rơi về PayCmd rules fallback; slash command vẫn chạy. Fallback trả HTTP 200 nên phải soi `modelProfile` để biết. |
+| DeepSeek hết số dư | Cả command router và research lỗi; kiểm tra message lỗi và nạp thêm credit. |
 | Gateway finality chưa hoàn tất | Có thể `waiting_gateway` hoặc lỗi authorization tạm thời; đợi index/finality rồi retry. |
 
 ## 7. Giới hạn hiện tại
@@ -223,8 +226,9 @@ Ghi nhớ: nếu Gateway source balance thiếu, transfer chat có thể auto-de
 - Không auto-execute payment khi chưa confirm.
 - Payroll chạy tuần tự trong request, chưa có queue/worker riêng.
 - Schedule chưa có cron thật; budget là demo static.
-- Research OpenRouter không thay thế live search/on-chain research của AskSurf cũ.
-- Free model availability/quota không ổn định; production cần model trả phí hoặc fallback provider phù hợp.
+- Research DeepSeek không có live web/on-chain search; câu trả lời dựa trên kiến thức model, không có citation đã xác minh.
+- Không có retry ở transport. Một request lỗi là lỗi luôn, user phải hỏi lại.
+- Giá DeepSeek nhân đôi giờ cao điểm Bắc Kinh 09:00–12:00 và 14:00–18:00 (UTC+8).
 
 ## 8. Smoke test trước demo
 

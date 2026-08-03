@@ -2,18 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { cctpBridgeChainConfigs, normalizeCctpBridgeChain } from "@/lib/paycmd/cctp-bridge";
 import { chainAliases, supportedChains } from "@/lib/paycmd/chains";
-import { askOpenRouter } from "@/lib/paycmd/ai/openrouter";
+import { askDeepSeek } from "@/lib/paycmd/ai/deepseek";
 import { commandRouterModel, commandRouterModelProfile } from "@/lib/paycmd/ai/models";
 import { aiCommandResponseSchema } from "@/lib/paycmd/ai/schema";
 import { requestLocale, tr, type PayCmdLocale } from "@/lib/i18n/server";
-import { commandRegistry, parsePayCmd } from "@/lib/paycmd/commands";
+import { commandRegistry, parsePayCmd, type CommandName } from "@/lib/paycmd/commands";
 import { createClient } from "@/lib/supabase/server";
 
 type AiCommandRequest = {
   input?: string;
-  modelProfile?: string;
   recentMessages?: { role: string; text: string }[];
 };
+
+// Comfortably above the 25s transport timeout below. Without this the platform default applied,
+// which is shorter than the budget this route asks for — and because the deterministic fallback runs
+// *inside* the handler, being killed mid-request produced a bare 504 with no fallback at all.
+export const maxDuration = 60;
 
 const evmAddressPattern = /0x[a-fA-F0-9]{40}/;
 
@@ -332,6 +336,79 @@ async function getAppContext(userId: string) {
   };
 }
 
+/**
+ * Lowercases and strips Vietnamese diacritics so one keyword entry covers "chuyển", "chuyen", and
+ * "CHUYỂN". `đ` needs its own replace: it is U+0111, a distinct letter rather than `d` + combining
+ * mark, so NFD leaves it untouched.
+ */
+function normalizeForMatch(text: string) {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[đĐ]/g, "d");
+}
+
+// Keyword hints for every command in `commandRegistry`, used only when the model path is down.
+// Deliberately *not* a second router: a match here never becomes an executable command, because the
+// samples carry placeholder values (`/payroll run team 25 from base` would pay the wrong amount to
+// the wrong group). It only picks which command to name in the clarify text and suggestion chips,
+// so the user gets pointed at the right one of 16 instead of a fixed list of 3.
+//
+// Ambiguous single words are omitted on purpose: bare "đổi" collides with `request` ("đòi tiền"),
+// and "gửi" alone spans pay/deposit/transfer. Scoring below prefers the longest matched phrase, so
+// "gửi vào gateway" beats "gửi cho" without either needing to be removed.
+// Not `Partial<...>`: a full Record means adding a 17th command to `commandRegistry` fails the
+// typecheck until it gets keywords here, so "every feature is reachable" cannot silently regress.
+const commandKeywordHints: Record<CommandName, string[]> = {
+  wallet: ["wallet", "vi circle", "circle wallet", "tao vi", "trang thai vi", "create wallet"],
+  link: ["link", "ket noi", "lien ket", "metamask", "connect wallet", "external wallet"],
+  fund: ["fund", "nap tien vao", "nap tu", "nap vi", "top up", "add funds", "chuyen tien vao"],
+  balance: ["balance", "so du", "con bao nhieu", "bao nhieu tien", "how much", "xem tien"],
+  deposit: ["deposit", "nap vao gateway", "gui vao gateway", "nap gateway", "deposit gateway"],
+  withdraw: ["withdraw", "rut", "rut tien", "rut ve", "rut khoi gateway", "cash out"],
+  transfer: ["transfer", "chuyen noi bo", "chuyen giua", "move between", "chuyen qua lai"],
+  bridge: ["bridge", "cctp", "chuyen chain", "sang chain", "cross chain", "qua chain", "bac cau"],
+  swap: ["swap", "hoan doi", "doi sang", "doi token", "exchange", "convert", "eurc", "cirbtc"],
+  pay: ["pay", "tra tien", "thanh toan", "gui cho", "chuyen cho", "send to", "gui tien cho", "tra cho"],
+  request: ["request", "yeu cau", "doi tien", "xin tien", "invoice", "hoa don", "de nghi"],
+  payroll: ["payroll", "tra luong", "luong", "salary", "tra nhieu nguoi", "bulk pay", "chi luong"],
+  contacts: ["contact", "danh ba", "luu dia chi", "them nguoi nhan", "address book", "luu contact"],
+  gas: ["gas", "phi mang", "phi gas", "native token", "gas fee", "het phi"],
+  gateway: ["gateway", "unified balance", "so du gateway", "gateway info"],
+  history: ["history", "lich su", "giao dich cu", "transactions", "xem lai giao dich"],
+};
+
+/**
+ * Picks the command whose longest keyword phrase matches the input. Returns its registry `sample`
+ * so the suggested text always matches a command that really exists — hardcoding samples here would
+ * drift the moment one is edited in commands.ts.
+ */
+function guessCommandFromKeywords(input: string) {
+  const haystack = normalizeForMatch(input);
+  let best: { name: CommandName; score: number } | null = null;
+
+  for (const [name, keywords] of Object.entries(commandKeywordHints) as [CommandName, string[]][]) {
+    for (const keyword of keywords) {
+      // Word-boundary matched rather than plain `includes`, so "gas" does not fire on "gasoline"
+      // and short entries cannot match mid-word.
+      const pattern = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
+      if (pattern.test(haystack) && keyword.length > (best?.score ?? 0)) {
+        best = { name, score: keyword.length };
+      }
+    }
+  }
+
+  if (!best) return null;
+  const command = commandRegistry.find((item) => item.name === best!.name);
+  return command ? { name: command.name, sample: command.sample } : null;
+}
+
+/**
+ * Reached only when the model path already failed, so the copy says so. It used to return
+ * `ai.unknownCommand` ("I am not sure which command to use"), which blamed the user for a vague
+ * message in the one situation where the router had not read it at all.
+ */
 function fallbackClarify(input: string, locale: PayCmdLocale) {
   const parsed = parsePayCmd(input, locale);
 
@@ -346,12 +423,20 @@ function fallbackClarify(input: string, locale: PayCmdLocale) {
     };
   }
 
+  const guess = guessCommandFromKeywords(input);
+
   return {
     intent: "clarify" as const,
     canonicalCommand: "",
-    assistantText: tr(locale, "ai.unknownCommand"),
+    // Stays `clarify` with `parsedCommand: null` even when a keyword matched: the sample carries
+    // placeholder values, so it is something to offer, never something to execute.
+    assistantText: guess
+      ? tr(locale, "ai.routerUnavailableGuess", { sample: guess.sample })
+      : tr(locale, "ai.routerUnavailable"),
     missingFields: parsed.missingFields,
-    suggestions: ["/balance", "/link metamask", "/fund 10 from metamask on base"],
+    suggestions: guess
+      ? [guess.sample, "/balance", "/history"]
+      : ["/balance", "/link metamask", "/fund 10 from metamask on base"],
     parsedCommand: null,
   };
 }
@@ -411,12 +496,21 @@ function deterministicCommandFallback(
   };
 }
 
-function commandRouterResult(aiResult: any, modelProfile: string, locale: PayCmdLocale) {
+// `reasoning` is passed separately rather than read off `aiResult`: every return below spreads the
+// zod-validated output, and the schema has no reasoning field, so it would be stripped on the way
+// through. Empty in practice while the router runs with thinking off.
+function commandRouterResult(
+  aiResult: any,
+  modelProfile: string,
+  locale: PayCmdLocale,
+  reasoning?: string,
+) {
   if (aiResult.intent !== "command") {
     return {
       ...aiResult,
       parsedCommand: null,
       modelProfile,
+      reasoning: reasoning || undefined,
     };
   }
 
@@ -433,6 +527,7 @@ function commandRouterResult(aiResult: any, modelProfile: string, locale: PayCmd
       suggestions: aiResult.suggestions,
       parsedCommand,
       modelProfile,
+      reasoning: reasoning || undefined,
     };
   }
 
@@ -440,6 +535,7 @@ function commandRouterResult(aiResult: any, modelProfile: string, locale: PayCmd
     ...aiResult,
     parsedCommand,
     modelProfile,
+    reasoning: reasoning || undefined,
   };
 }
 
@@ -475,7 +571,16 @@ export async function POST(req: NextRequest) {
         : "Write every value in assistantText, suggestions, and any human-readable JSON field in Vietnamese.";
     const prompt = [
       "You are Payna's AI command router for a stablecoin payment dapp.",
-      "Return only JSON matching the schema.",
+      // The field names have to live here now. DeepSeek has no `json_schema` mode, so nothing on the
+      // provider side tells the model what shape to emit — and `canonicalCommand` has a zod
+      // `.default("")`, meaning a response that omits it still validates and then silently parses as
+      // an unknown command. Describing the keys in the prompt is the only thing preventing that.
+      "Output exactly this json object and no other keys:",
+      '{"intent":"command"|"clarify"|"answer"|"crypto_research","canonicalCommand":string,"assistantText":string,"missingFields":string[],"suggestions":string[]}',
+      'canonicalCommand: one slash command from the supported command list with every value filled in, for example "/pay 25 to Minh on arc from base". Use "" for any intent other than "command".',
+      'missingFields: the requiredFields names you could not fill. Empty array unless intent is "clarify".',
+      "suggestions: up to 3 slash commands the user may want next.",
+      "The supported command list below uses the keys name/title/sample/requiredFields. That describes the available commands; it is not the shape of your output.",
       responseLanguageInstruction,
       "Do not execute commands. Convert natural language into one canonical slash command when safe.",
       "The user may write in Vietnamese, English, Chinese, or mixed-language shorthand. Infer the intended Payna command from meaning, not exact keywords.",
@@ -495,22 +600,64 @@ export async function POST(req: NextRequest) {
       JSON.stringify(recentMessages),
       `User input: ${input}`,
     ].join("\n\n");
-    const response = await askOpenRouter({
+    const response = await askDeepSeek({
       model: commandRouterModel(),
       messages: [
         { role: "system", content: "You are Payna's AI command router. Return JSON only; no Markdown or commentary. Follow the user's supplied output schema exactly." },
         { role: "user", content: prompt },
       ],
       maxTokens: 900,
-      timeoutMs: 30_000,
+      timeoutMs: 25_000,
+      // Both settings exist to protect the parse below.
+      //
+      // Chain-of-thought is on by default and spends the same `max_tokens` as the answer, so at this
+      // budget it could consume the whole allowance and leave the JSON truncated. That failure is
+      // near-invisible: the parse fails, the deterministic fallback answers with regex results, and
+      // the response is still a 200 with no error logged — the router just quietly gets dumber.
+      thinking: false,
+      // Constrains the output to valid JSON, but not to a shape: DeepSeek has no `json_schema` mode,
+      // so `aiCommandResponseSchema` below is still the only thing checking the fields.
+      jsonObject: true,
     });
     const parsedOutput = aiCommandResponseSchema.safeParse(parseJsonObject(response.text));
     if (!parsedOutput.success) {
-      return NextResponse.json(deterministicCommandFallback(input, locale, recentMessages));
+      // The fallback below answers with a 200, so without this line a dead model path reads exactly
+      // like a healthy one in the logs. The raw tail matters too: a body that stops mid-token means
+      // `max_tokens` ran out (raise the budget), which is a different fix from well-formed JSON
+      // carrying the wrong fields (fix the prompt).
+      console.error("DeepSeek command router returned unusable JSON; falling back to rules.", {
+        issues: parsedOutput.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`),
+        rawLength: response.text.length,
+        rawTail: response.text.slice(-120),
+      });
+      return NextResponse.json({
+        ...deterministicCommandFallback(input, locale, recentMessages),
+        // Empty while `thinking` is off above, but this is the most valuable place to have a trace if
+        // it is ever turned back on — it is the branch where the model answered and we could not use
+        // what it said.
+        reasoning: response.reasoning || undefined,
+      });
     }
-    return NextResponse.json(commandRouterResult(parsedOutput.data, commandRouterModelProfile, locale));
+    // Valid JSON, wrong contract. `canonicalCommand` carries a zod `.default("")`, which the other
+    // intents legitimately need, so an `intent: "command"` with no command still passes safeParse.
+    // Left alone it reaches `parsePayCmd("")`, comes back as an unknown command, and gets rewritten
+    // into a clarify below — a plausible-looking question that the model never asked. Catching it
+    // here is what separates "the model ignored the output contract" from "the user was vague".
+    if (parsedOutput.data.intent === "command" && !parsedOutput.data.canonicalCommand.trim()) {
+      console.error("DeepSeek command router returned intent=command with no canonicalCommand; falling back to rules.", {
+        assistantTextLength: parsedOutput.data.assistantText.length,
+        missingFields: parsedOutput.data.missingFields,
+      });
+      return NextResponse.json({
+        ...deterministicCommandFallback(input, locale, recentMessages),
+        reasoning: response.reasoning || undefined,
+      });
+    }
+    return NextResponse.json(
+      commandRouterResult(parsedOutput.data, commandRouterModelProfile, locale, response.reasoning),
+    );
   } catch (error: any) {
-    console.error("OpenRouter command router failed:", error);
+    console.error("DeepSeek command router failed:", error);
     if (fallbackInput) return NextResponse.json(deterministicCommandFallback(fallbackInput, locale, fallbackRecentMessages));
     return NextResponse.json({ error: error.message || "Failed to parse AI command" }, { status: 500 });
   }

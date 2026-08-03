@@ -1,7 +1,5 @@
-export const commandRouterModelProfile = "inclusionai/ling-3.0-flash:free" as const;
-
-export const commandRouterModelLabel = "OpenRouter Free";
+export const commandRouterModelProfile = "deepseek-v4-flash" as const;
 
 export function commandRouterModel() {
-  return process.env.OPENROUTER_COMMAND_MODEL ?? commandRouterModelProfile;
+  return process.env.DEEPSEEK_COMMAND_MODEL ?? commandRouterModelProfile;
 }

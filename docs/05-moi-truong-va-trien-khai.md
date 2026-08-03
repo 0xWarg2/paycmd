@@ -61,25 +61,29 @@ CIRCLE_WALLET_SET_ID
 Biến môi trường AI:
 
 ```text
-OPENAI_API_KEY
-OPENAI_BASE_URL
-PAYCMD_DEFAULT_AI_MODEL_PROFILE
-
-SURF_API_KEY
-SURF_API_BASE_URL=https://api.asksurf.ai/gateway/v1
-SURF_TIMEOUT_MS=600000
+DEEPSEEK_API_KEY
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_COMMAND_MODEL=deepseek-v4-flash
+DEEPSEEK_INSTANT_MODEL=deepseek-v4-flash
+DEEPSEEK_STANDARD_MODEL=deepseek-v4-flash
+DEEPSEEK_DEEP_MODEL=deepseek-v4-pro
+DEEPSEEK_RESEARCH_TIMEOUT_MS=240000
 ```
 
-OpenAI dùng để route câu tự nhiên trong mode `Ra` thành command hoặc intent `crypto_research`. Khi user chọn mode `AskSurf`, câu hỏi không bắt đầu bằng `/` đi thẳng tới `/api/ai/crypto` để tránh route nhầm. Slash command luôn chạy Ra.
+DeepSeek chạy cả hai đường AI. Command router route câu tự nhiên trong mode `Ra` thành command hoặc intent `crypto_research`. Khi user chọn mode research, câu hỏi không bắt đầu bằng `/` đi thẳng tới `/api/ai/crypto` để tránh route nhầm. Slash command luôn chạy Ra.
 
-AskSurf public docs hiện liệt kê model Chat Completions chính thức trong family `surf-1.5`, không dùng public model tên `surf-2.0`. UI vẫn gọi gói research là `Research 2.0`, nhưng request thật map như sau:
+DeepSeek chỉ có đúng hai model: `deepseek-v4-flash` và `deepseek-v4-pro`. Reasoning (`reasoning_content`) **bật sẵn** trên cả hai, và token reasoning **rút từ chính `max_tokens`** — cùng budget với câu trả lời. Vì vậy các profile map như sau:
 
-- `Instant`: `surf-1.5-instant`, timeout 120 giây.
-- `Research 2.0 / Standard`: `surf-1.5`, `reasoning_effort=medium`, timeout theo `SURF_TIMEOUT_MS` mặc định 600 giây.
-- `Research 2.0 / Extended`: `surf-1.5`, `reasoning_effort=high`, timeout theo `SURF_TIMEOUT_MS` mặc định 600 giây.
-- `Research 2.0 / Maximum`: `surf-1.5-thinking`, `reasoning_effort=high`, timeout theo `SURF_TIMEOUT_MS` mặc định 600 giây.
+- Command router: flash, **thinking tắt** (`thinking: {type: "disabled"}`), `max_tokens` 900, timeout 25 giây. Tắt thinking là bắt buộc: nếu bật, chain-of-thought có thể ăn hết budget làm JSON bị cắt, zod fail, và route âm thầm rơi về `deterministicCommandFallback` với HTTP 200.
+- `Instant`: flash, thinking tắt, `max_tokens` 2.200, timeout 60 giây.
+- `Research / Standard`: flash, thinking bật, `max_tokens` 7.000, timeout theo `DEEPSEEK_RESEARCH_TIMEOUT_MS` mặc định 240 giây.
+- `Research / Deep`: pro, thinking bật, `max_tokens` 12.000, timeout theo `DEEPSEEK_RESEARCH_TIMEOUT_MS` mặc định 240 giây.
 
-Route `/api/ai/crypto` export `maxDuration = 600` để dùng đủ 10 phút khi Vercel plan cho phép. Trên Vercel Hobby có thể vẫn bị giới hạn khoảng 300 giây; muốn production chờ đủ 10 phút cần plan hỗ trợ/Fluid Compute hoặc chuyển AskSurf sang background job.
+DeepSeek **không hỗ trợ** `response_format: {type: "json_schema"}` (trả 400 `"This response_format type is unavailable now"`). Command router dùng `json_object`, nên zod schema trong `lib/paycmd/ai/schema.ts` là thứ duy nhất validate shape.
+
+Chuỗi timeout phải giữ đúng thứ tự `server < client < platform`: research 240s (server) < 270s (client abort) < 300s (`maxDuration` của `/api/ai/crypto`). Command route export `maxDuration = 60` để platform không giết handler trước khi fallback kịp chạy.
+
+Giá DeepSeek **nhân đôi** trong giờ cao điểm Bắc Kinh 09:00–12:00 và 14:00–18:00 (UTC+8). Muốn hạ chi phí giờ cao điểm mà không cần deploy, trỏ `DEEPSEEK_DEEP_MODEL` sang `deepseek-v4-flash`.
 
 `vercel.json` đang ép Vercel dùng `npm install --legacy-peer-deps` để khớp cách cài local của project.
 

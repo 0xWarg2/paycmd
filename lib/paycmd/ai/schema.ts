@@ -10,32 +10,8 @@ export const aiCommandResponseSchema = z.object({
 
 export type AiCommandResponse = z.infer<typeof aiCommandResponseSchema>;
 
-export const aiCommandJsonSchema = {
-  name: "paycmd_ai_command_response",
-  strict: true,
-  schema: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      intent: {
-        type: "string",
-        enum: ["command", "answer", "clarify", "crypto_research"],
-      },
-      canonicalCommand: {
-        type: "string",
-      },
-      assistantText: {
-        type: "string",
-      },
-      missingFields: {
-        type: "array",
-        items: { type: "string" },
-      },
-      suggestions: {
-        type: "array",
-        items: { type: "string" },
-      },
-    },
-    required: ["intent", "canonicalCommand", "assistantText", "missingFields", "suggestions"],
-  },
-} as const;
+// There is deliberately no provider-side JSON schema here. DeepSeek rejects
+// `response_format: {type: "json_schema"}` with a 400 ("This response_format type is unavailable
+// now"), so the only structured-output mode available is `json_object` — which constrains the
+// output to valid JSON but not to any particular shape. The zod schema above is therefore the only
+// thing validating that shape, and the caller must handle it failing.

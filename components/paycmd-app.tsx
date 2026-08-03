@@ -5,6 +5,7 @@ import { BridgeKit } from "@circle-fin/bridge-kit";
 import {
   BadgeDollarSign,
   Bot,
+  Brain,
   Check,
   Clipboard,
   Copy,
@@ -102,10 +103,16 @@ type EthereumProvider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
 };
 
+// These are legacy wire values, not display names. They are persisted in `chat_messages.metadata`
+// and read back through the hard allowlist in `normalizeAiProvider`, so every row already in the
+// database says "asksurf" — renaming the value would drop that history out of the rich research
+// renderer and show it as raw markdown. Rename what the user sees, not these.
 type AiProvider = "openai" | "asksurf" | "paycmd";
 type ChatMode = "paycmd" | "asksurf";
 type SurfMode = "instant" | "research";
-type SurfEffort = "standard" | "extended" | "maximum";
+// Two tiers, matching the two models available. `extended` and `maximum` were the pre-merge values;
+// `normalizeSurfEffort` folds them into `deep` when reading persisted rows.
+type SurfEffort = "standard" | "deep";
 
 type ChatCitation = {
   title?: string;
@@ -147,6 +154,9 @@ type ChatMessage = {
   effort?: SurfEffort;
   durationMs?: number;
   actions?: AssistantAction[];
+  // Chain-of-thought from the model, when it ran with thinking on. Capped to 4000 chars by the
+  // transport before it ever reaches here.
+  reasoning?: string;
 };
 
 type ExecutionItem = {
@@ -174,6 +184,9 @@ type AiCommandResult = {
   suggestions: string[];
   parsedCommand: ParsedCommand | null;
   modelProfile?: string;
+  // Always absent in practice: the router runs with thinking off so its token budget goes entirely
+  // to the JSON it has to return. Typed anyway because the route does forward it if enabled.
+  reasoning?: string;
 };
 
 type CryptoResearchResult = {
@@ -184,6 +197,7 @@ type CryptoResearchResult = {
   surfMode?: SurfMode;
   effort?: SurfEffort;
   durationMs?: number;
+  reasoning?: string;
 };
 
 type ChatMessageRow = {
@@ -226,21 +240,30 @@ const aiLoadingKeys: Record<AiProvider, string[]> = {
 };
 
 const surfEffortOptions: { id: SurfEffort; label: string; description: string }[] = [
-  { id: "standard", label: "Standard", description: "surf-1.5, medium reasoning" },
-  { id: "extended", label: "Extended", description: "surf-1.5, high reasoning" },
-  { id: "maximum", label: "Maximum", description: "surf-1.5-thinking, high reasoning" },
+  { id: "standard", label: "Standard", description: "deepseek-v4-flash, reasoning on" },
+  { id: "deep", label: "Deep", description: "deepseek-v4-pro, reasoning on" },
 ];
 
 function surfModeLabel(mode?: SurfMode) {
-  return mode === "instant" ? "Instant" : "Research 2.0";
+  return mode === "instant" ? "Instant" : "Research";
+}
+
+// Folds the pre-merge tiers into the two that remain. Without this, a stored `extended`/`maximum`
+// would miss the lookup below and fall through to "Standard" — mislabelling a heavier answer as the
+// cheapest tier, with nothing to indicate anything went wrong.
+function normalizeSurfEffort(value: unknown): SurfEffort {
+  return value === "deep" || value === "extended" || value === "maximum" ? "deep" : "standard";
 }
 
 function surfEffortLabel(effort?: SurfEffort) {
   return surfEffortOptions.find((option) => option.id === effort)?.label ?? "Standard";
 }
 
+// Deliberately longer than the server's own timeout for the same mode (60s instant, 240s research),
+// so the server gives up first and the user sees its real error instead of a client-side abort. Both
+// stay under the route's 300s platform ceiling.
 function surfClientTimeoutMs(mode: SurfMode) {
-  return mode === "instant" ? 120_000 : 600_000;
+  return mode === "instant" ? 120_000 : 270_000;
 }
 
 function formatDuration(ms?: number) {
@@ -321,10 +344,7 @@ function normalizeAssistantActions(value: unknown): AssistantAction[] | undefine
               : translateClient("asksurf.askButton"),
           query: item.query.trim(),
           surfMode: item.surfMode === "instant" || item.surfMode === "research" ? item.surfMode : "research",
-          effort:
-            item.effort === "standard" || item.effort === "extended" || item.effort === "maximum"
-              ? item.effort
-              : "standard",
+          effort: normalizeSurfEffort(item.effort),
         },
       ];
     });
@@ -332,9 +352,10 @@ function normalizeAssistantActions(value: unknown): AssistantAction[] | undefine
   return actions.length ? actions : undefined;
 }
 
+// Maps the legacy wire values above to what the user actually sees.
 function providerName(provider?: AiProvider) {
-  if (provider === "openai") return "OpenAI Router";
-  if (provider === "asksurf") return "AskSurf Research";
+  if (provider === "openai") return "DeepSeek Router";
+  if (provider === "asksurf") return "DeepSeek Research";
   if (provider === "paycmd") return "Payna";
   return "";
 }
@@ -2203,7 +2224,6 @@ export function PayCmdApp() {
   const [chatMode, setChatMode] = useState<ChatMode>("paycmd");
   const [selectedSurfMode, setSelectedSurfMode] = useState<SurfMode>("research");
   const [selectedSurfEffort, setSelectedSurfEffort] = useState<SurfEffort>("standard");
-  const selectedAiModel = "inclusionai/ling-3.0-flash:free";
   const [suggestionChips, setSuggestionChips] = useState<string[]>([]);
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -2281,14 +2301,16 @@ export function PayCmdApp() {
         metadata.surfMode === "instant" || metadata.surfMode === "research"
           ? metadata.surfMode
           : undefined,
-      effort:
-        metadata.effort === "standard" ||
-        metadata.effort === "extended" ||
-        metadata.effort === "maximum"
-          ? metadata.effort
-          : undefined,
+      // Normalized rather than allowlisted, so rows written under the old three-tier scheme keep
+      // their tier. Still undefined when the key is absent: most messages have no effort at all and
+      // should show no badge, which is different from having one that defaults to standard.
+      effort: typeof metadata.effort === "string" ? normalizeSurfEffort(metadata.effort) : undefined,
       durationMs: typeof metadata.durationMs === "number" ? metadata.durationMs : undefined,
       actions: normalizeAssistantActions(metadata.actions),
+      reasoning:
+        typeof metadata.reasoning === "string" && metadata.reasoning.trim()
+          ? metadata.reasoning
+          : undefined,
     };
   }
 
@@ -2374,6 +2396,9 @@ export function PayCmdApp() {
       effort: message.effort ?? null,
       durationMs: message.durationMs ?? null,
       actions: message.actions ?? null,
+      // Any key added here must also be added to the metadata object in `updateDraftState` below,
+      // which rewrites this whole object field by field. Omitting it there silently drops the value.
+      reasoning: message.reasoning ?? null,
     };
     const { data, error } = await supabase
       .from("chat_messages")
@@ -2438,6 +2463,9 @@ export function PayCmdApp() {
           effort: target.effort ?? null,
           durationMs: target.durationMs ?? null,
           actions: target.actions ?? null,
+          // This update replaces `metadata` wholesale rather than patching it, so every field
+          // `saveMessage` writes has to be repeated here or confirming a draft erases it.
+          reasoning: target.reasoning ?? null,
         },
       })
       .eq("id", messageId)
@@ -2524,15 +2552,16 @@ export function PayCmdApp() {
         citations: result.citations ?? [],
         model: result.model,
         surfMode: result.surfMode ?? surfMode,
-        effort: result.effort ?? effort,
+        effort: normalizeSurfEffort(result.effort ?? effort),
         durationMs: result.durationMs,
+        reasoning: result.reasoning,
       });
     } catch (error) {
       if ((error as { name?: string })?.name === "AbortError") {
         if (timedOut) {
           await saveMessage({
             role: "assistant",
-            text: `AskSurf timed out after ${Math.round(surfClientTimeoutMs(surfMode) / 1000)} seconds.`,
+            text: `Research timed out after ${Math.round(surfClientTimeoutMs(surfMode) / 1000)} seconds.`,
             provider: "asksurf",
             surfMode,
             effort,
@@ -2541,7 +2570,7 @@ export function PayCmdApp() {
         return;
       }
 
-      const message = error instanceof Error ? error.message : "AskSurf research failed";
+      const message = error instanceof Error ? error.message : "Research failed";
       await saveMessage({
         role: "assistant",
         text: t("asksurf.failed", { message }),
@@ -2576,7 +2605,6 @@ export function PayCmdApp() {
         signal: controller.signal,
         body: JSON.stringify({
           input: value,
-          modelProfile: selectedAiModel,
           recentMessages,
         }),
       })) as AiCommandResult;
@@ -2606,6 +2634,7 @@ export function PayCmdApp() {
           draftState: "active",
           provider: "openai",
           model: result.modelProfile,
+          reasoning: result.reasoning,
         });
         setActiveDraftId(previewMessage?.id ?? null);
         return;
@@ -2616,6 +2645,7 @@ export function PayCmdApp() {
         text: result.assistantText || t("ai.needsMoreInfo"),
         provider: "openai",
         model: result.modelProfile,
+        reasoning: result.reasoning,
       });
     } catch (error) {
       if ((error as { name?: string })?.name === "AbortError") {
@@ -4230,7 +4260,7 @@ function ComposerModeControls({
               }`}
             >
               <Search className="h-3.5 w-3.5" />
-              Research 2.0
+              Research
             </button>
           </div>
           <label className="flex h-10 items-center gap-1 rounded-2xl border bg-background/70 px-2 text-xs text-muted-foreground shadow-sm backdrop-blur">
@@ -4239,7 +4269,7 @@ function ComposerModeControls({
               value={surfEffort}
               onChange={(event) => onSurfEffortChange(event.target.value as SurfEffort)}
               className="max-w-[112px] bg-transparent text-xs font-medium text-foreground outline-none disabled:text-muted-foreground"
-              aria-label="AskSurf effort"
+              aria-label="Research effort"
               disabled={isBusy || surfMode === "instant"}
             >
               {surfEffortOptions.map((option) => (
@@ -4251,9 +4281,9 @@ function ComposerModeControls({
           </label>
         </div>
       ) : (
-        <div className="flex h-10 items-center gap-1 rounded-2xl border bg-background/70 px-3 text-xs text-muted-foreground shadow-sm backdrop-blur" title="OpenRouter free model is the fixed command-router model">
+        <div className="flex h-10 items-center gap-1 rounded-2xl border bg-background/70 px-3 text-xs text-muted-foreground shadow-sm backdrop-blur" title="deepseek-v4-flash is the fixed command-router model">
           <Bot className="h-3.5 w-3.5 text-primary" />
-          <span className="font-medium text-foreground">OpenRouter Free</span>
+          <span className="font-medium text-foreground">DeepSeek Flash</span>
         </div>
       )}
     </div>
@@ -4399,6 +4429,9 @@ function MessageBubble({
             durationMs={message.durationMs}
           />
         ) : null}
+        {/* Above the content branches rather than inside them, so one placement covers the research
+            renderer, the plain-text branch, previews and statuses alike. */}
+        {!isUser && message.reasoning ? <ReasoningDisclosure reasoning={message.reasoning} /> : null}
         {message.kind === "preview" && message.draft ? (
           <CommandPreviewCard
             draft={message.draft}
@@ -4534,6 +4567,26 @@ function ProviderBadge({
   );
 }
 
+// Native <details> rather than a custom toggle: it handles keyboard operation and announces its own
+// expanded state, which a div with an onClick would need rebuilt by hand.
+function ReasoningDisclosure({ reasoning }: { reasoning: string }) {
+  const { t } = useI18n();
+
+  return (
+    <details className="mb-2 rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-[11px] leading-5">
+      <summary className="flex cursor-pointer select-none items-center gap-1.5 font-medium text-muted-foreground">
+        <Brain className="h-3 w-3" />
+        {t("chat.reasoning.toggle")}
+      </summary>
+      {/* Capped height with its own scroll: a trace runs to thousands of characters and would
+          otherwise push the answer it belongs to off the screen. */}
+      <div className="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] text-muted-foreground">
+        {reasoning}
+      </div>
+    </details>
+  );
+}
+
 function CitationList({ citations }: { citations: ChatCitation[] }) {
   return (
     <div className="flex flex-wrap gap-2 border-t pt-2">
@@ -4574,16 +4627,20 @@ function AskSurfResearchContent({
   citations: ChatCitation[];
   onRelatedQuestion: (question: string) => void;
 }) {
+  const { t } = useI18n();
   const { bodyText, relatedQuestions } = extractRelatedQuestions(text);
-  const sections = extractResearchSections(bodyText, researchId);
+  // Build the anchor ids once and share them, so the nav links and the rendered heading ids can't drift.
+  const outline = buildResearchOutline(bodyText, researchId);
+  const sections = extractResearchSections(outline);
 
   return (
     <div className="space-y-4">
+      {/* The second badge here used to read "Surf sources/charts requested". There is no chart
+          renderer in this app, so it promised the user output that could never arrive. */}
       <div className="flex flex-wrap items-center gap-2 border-b border-emerald-400/15 pb-2 text-[11px] text-muted-foreground">
         <span className="rounded-full bg-emerald-500/10 px-2 py-1 font-medium text-emerald-700 dark:text-emerald-300">
-          Crypto intelligence
+          {t("research.badge")}
         </span>
-        <span>Surf sources/charts requested</span>
       </div>
       <ResearchEntityRail text={bodyText} citations={citations} />
       <div
@@ -4591,7 +4648,7 @@ function AskSurfResearchContent({
         className={sections.length ? "grid gap-4 md:grid-cols-[minmax(0,1fr)_240px]" : ""}
       >
         <div className="min-w-0">
-          <MarkdownContent researchId={researchId} text={bodyText} citations={citations} />
+          <MarkdownContent text={bodyText} citations={citations} outline={outline} />
         </div>
         {sections.length ? <ResearchSectionNav researchId={researchId} sections={sections} /> : null}
       </div>
@@ -4599,7 +4656,9 @@ function AskSurfResearchContent({
         <RelatedQuestions questions={relatedQuestions} onSelect={onRelatedQuestion} />
       ) : null}
       {citations.length ? <AskSurfSourceList citations={citations} /> : null}
-      <AskSurfResearchActions text={text} />
+      {/* `bodyText`, not `text`: the Related Questions block is rendered as pills above, so copying
+          or printing the raw `text` handed the user a trailing markdown list they never saw. */}
+      <AskSurfResearchActions researchId={researchId} text={bodyText} />
     </div>
   );
 }
@@ -4608,6 +4667,11 @@ type ResearchSection = {
   id: string;
   title: string;
   level: number;
+};
+
+// Superset of ResearchSection, so an outline can be handed straight to ResearchSectionNav.
+type ResearchOutlineEntry = ResearchSection & {
+  lineIndex: number;
 };
 
 function stripMarkdownDecorations(value: string) {
@@ -4619,9 +4683,27 @@ function stripMarkdownDecorations(value: string) {
     .trim();
 }
 
-function slugifyHeading(value: string) {
-  const slug = stripMarkdownDecorations(value)
+// Fold a heading down to bare ASCII lowercase so Vietnamese text survives both slugifying and
+// comparison. NFD splits most Vietnamese vowels into base + combining mark, but `đ` (U+0111) is its
+// own letter with no decomposition, so it needs the explicit map or it gets dropped like punctuation.
+function normalizeHeadingText(value: string) {
+  return stripMarkdownDecorations(value)
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[đĐ]/g, "d")
     .toLowerCase()
+    .trim();
+}
+
+function isRelatedQuestionsHeading(value: string) {
+  const normalized = normalizeHeadingText(value).replace(/[:?]+$/, "").trim();
+  return normalized === "related questions" || normalized === "related question" || normalized === "cau hoi lien quan";
+}
+
+function slugifyHeading(value: string) {
+  // Without the fold above, `[^a-z0-9]+` ate every accented character: "Đề xuất" collapsed to "xu-t",
+  // and a heading with no ASCII letters at all became the literal "section" for every such heading.
+  const slug = normalizeHeadingText(value)
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 
@@ -4636,25 +4718,49 @@ function nextHeadingId(value: string, counts: Map<string, number>, scope?: strin
   return count ? `${scopedBase}-${count + 1}` : scopedBase;
 }
 
-function extractResearchSections(text: string, researchId: string) {
+// Every consumer has to agree on line numbering for `lineIndex` to be a usable join key.
+function researchLines(text: string) {
+  return text.replace(/\r\n/g, "\n").split("\n");
+}
+
+// One pass over the document assigning every heading its anchor id. The nav and the renderer each
+// used to run their own `nextHeadingId` counter over the same text, but they disagree about which
+// headings to skip — the nav drops level 1 and the Related Questions block — so the two dedupe
+// counters drifted: an H1 and an H2 sharing a slug got `-x` then `-x-2` from the renderer while the
+// nav independently computed `-x` for that H2, and clicking it scrolled back to the title. Sharing
+// one pass is what keeps them in agreement; don't split this back into two counters.
+function buildResearchOutline(text: string, researchId: string): ResearchOutlineEntry[] {
   const counts = new Map<string, number>();
-  const sections: ResearchSection[] = [];
+  const outline: ResearchOutlineEntry[] = [];
+  let inCodeFence = false;
 
-  text.replace(/\r\n/g, "\n").split("\n").forEach((line, index) => {
+  researchLines(text).forEach((line, index) => {
+    // MarkdownContent consumes fenced blocks whole, so a `#` line inside one never becomes a
+    // heading there. Skipping them here too keeps the nav from listing a section with no anchor.
+    if (line.trim().startsWith("```")) {
+      inCodeFence = !inCodeFence;
+      return;
+    }
+    if (inCodeFence) return;
+
     const heading = parseResearchHeading(line, index);
-    if (!heading || heading.level === 1) return;
+    if (!heading) return;
 
-    const title = stripMarkdownDecorations(heading.title);
-    if (!title || /^related questions?$/i.test(title)) return;
-
-    sections.push({
+    outline.push({
+      lineIndex: index,
       id: nextHeadingId(heading.title, counts, researchId),
-      title,
+      title: stripMarkdownDecorations(heading.title),
       level: heading.level,
     });
   });
 
-  return sections.slice(0, 10);
+  return outline;
+}
+
+function extractResearchSections(outline: ResearchOutlineEntry[]) {
+  return outline
+    .filter((entry) => entry.level > 1 && entry.title && !isRelatedQuestionsHeading(entry.title))
+    .slice(0, 10);
 }
 
 function parseResearchHeading(line: string, index: number) {
@@ -4680,10 +4786,7 @@ function parseResearchHeading(line: string, index: number) {
 
 function extractRelatedQuestions(text: string) {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
-  const headingIndex = lines.findIndex((line) => {
-    const trimmed = stripMarkdownDecorations(line.replace(/^#{1,4}\s+/, "")).replace(/:$/, "");
-    return /^related questions?$/i.test(trimmed);
-  });
+  const headingIndex = lines.findIndex((line) => isRelatedQuestionsHeading(line.replace(/^#{1,4}\s+/, "")));
 
   if (headingIndex === -1) {
     return { bodyText: text, relatedQuestions: [] as string[] };
@@ -4707,6 +4810,7 @@ function extractRelatedQuestions(text: string) {
 }
 
 function ResearchSectionNav({ researchId, sections }: { researchId: string; sections: ResearchSection[] }) {
+  const { t } = useI18n();
   const [activeSectionId, setActiveSectionId] = useState(sections[0]?.id ?? "");
   const activeSectionIdRef = useRef(sections[0]?.id ?? "");
   const activeSectionFrameRef = useRef<number | null>(null);
@@ -4801,13 +4905,13 @@ function ResearchSectionNav({ researchId, sections }: { researchId: string; sect
     <>
       <details className="order-first rounded-2xl border bg-background/70 p-3 shadow-sm backdrop-blur md:hidden">
         <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
-          Sections of Research
+          {t("research.sections")}
         </summary>
         <div className="mt-2">{items}</div>
       </details>
       <nav className="payna-glass hidden self-start rounded-2xl p-3 md:sticky md:top-5 md:block">
         <div className="mb-2 text-[11px] font-medium uppercase tracking-normal text-muted-foreground">
-          Sections of Research
+          {t("research.sections")}
         </div>
         {items}
       </nav>
@@ -4822,9 +4926,13 @@ function RelatedQuestions({
   questions: string[];
   onSelect: (question: string) => void;
 }) {
+  const { t } = useI18n();
+
   return (
     <div className="space-y-2 border-t border-emerald-400/15 pt-3">
-      <div className="text-[11px] font-medium uppercase tracking-normal text-muted-foreground">Related Questions</div>
+      <div className="text-[11px] font-medium uppercase tracking-normal text-muted-foreground">
+        {t("research.relatedQuestions")}
+      </div>
       <div className="flex flex-wrap gap-2">
         {questions.map((question) => (
           <button
@@ -4841,7 +4949,8 @@ function RelatedQuestions({
   );
 }
 
-function AskSurfResearchActions({ text }: { text: string }) {
+function AskSurfResearchActions({ researchId, text }: { researchId: string; text: string }) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<"like" | "dislike" | null>(null);
 
@@ -4858,12 +4967,32 @@ function AskSurfResearchActions({ text }: { text: string }) {
       return;
     }
 
+    // Print the rendered article, not the markdown source. This used to dump `escapeHtml(text)` into
+    // a `white-space:pre-wrap` body, so the printout showed literal `## Heading` and `| a | b |` rows.
+    // Cloning is the only cheap way to get the real thing: MarkdownContent emits styled `<div>`s
+    // rather than `<h2>`/`<table>` semantics, so the markup carries no formatting without its
+    // stylesheets, and re-serializing markdown here would mean a second renderer to keep in sync.
+    const rendered = document
+      .querySelector(`[data-research-id="${researchId}"]`)
+      ?.querySelector(".min-w-0");
+    const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+      .map((node) => node.outerHTML)
+      .join("");
+    // Falls back to the markdown source if the container is somehow not in the DOM, so a failed
+    // lookup degrades to plain text instead of printing a blank sheet.
+    const head = rendered
+      ? `${styles}<style>body{padding:32px;background:#fff}</style>`
+      : "<style>body{font-family:system-ui,sans-serif;line-height:1.5;padding:32px;white-space:pre-wrap;color:#111}</style>";
+    const body = rendered ? rendered.innerHTML : escapeHtml(text);
+
     popup.document.write(
-      `<html><head><title>AskSurf Research</title><style>body{font-family:system-ui,sans-serif;line-height:1.5;padding:32px;white-space:pre-wrap;color:#111}</style></head><body>${escapeHtml(text)}</body></html>`,
+      `<html><head><title>${escapeHtml(t("research.printTitle"))}</title>${head}</head><body>${body}</body></html>`,
     );
     popup.document.close();
     popup.focus();
-    popup.print();
+    // Stylesheets are fetched asynchronously, so printing synchronously here raced them and produced
+    // an unstyled page. Waiting for load is what makes the cloned CSS actually apply.
+    popup.onload = () => popup.print();
   }
 
   return (
@@ -4871,20 +5000,20 @@ function AskSurfResearchActions({ text }: { text: string }) {
       <div className="flex flex-wrap gap-2">
         <Button type="button" variant="outline" size="sm" onClick={copyAnswer}>
           <Clipboard className="h-3.5 w-3.5" />
-          {copied ? "Copied" : "Copy"}
+          {copied ? t("research.copied") : t("research.copy")}
         </Button>
         <Button
           type="button"
           variant="outline"
           size="sm"
-          onClick={() => downloadTextFile("asksurf-research.md", text, "text/markdown;charset=utf-8")}
+          onClick={() => downloadTextFile("payna-research.md", text, "text/markdown;charset=utf-8")}
         >
           <Download className="h-3.5 w-3.5" />
-          Markdown
+          {t("research.markdown")}
         </Button>
         <Button type="button" variant="outline" size="sm" onClick={printAnswer}>
           <Printer className="h-3.5 w-3.5" />
-          PDF/Print
+          {t("research.print")}
         </Button>
       </div>
       <div className="flex gap-1">
@@ -4893,7 +5022,7 @@ function AskSurfResearchActions({ text }: { text: string }) {
           variant={feedback === "like" ? "secondary" : "ghost"}
           size="icon"
           className="h-8 w-8"
-          aria-label="Like AskSurf answer"
+          aria-label={t("research.like")}
           onClick={() => setFeedback(feedback === "like" ? null : "like")}
         >
           <ThumbsUp className="h-3.5 w-3.5" />
@@ -4903,7 +5032,7 @@ function AskSurfResearchActions({ text }: { text: string }) {
           variant={feedback === "dislike" ? "secondary" : "ghost"}
           size="icon"
           className="h-8 w-8"
-          aria-label="Dislike AskSurf answer"
+          aria-label={t("research.dislike")}
           onClick={() => setFeedback(feedback === "dislike" ? null : "dislike")}
         >
           <ThumbsDown className="h-3.5 w-3.5" />
@@ -4914,11 +5043,17 @@ function AskSurfResearchActions({ text }: { text: string }) {
 }
 
 function AskSurfSourceList({ citations }: { citations: ChatCitation[] }) {
+  const { t } = useI18n();
+
   return (
     <div className="space-y-2 border-t border-emerald-400/15 pt-3">
-      <div className="text-[11px] font-medium uppercase tracking-normal text-muted-foreground">Sources</div>
+      <div className="text-[11px] font-medium uppercase tracking-normal text-muted-foreground">
+        {t("research.sources")}
+      </div>
       <div className="grid gap-2 sm:grid-cols-2">
-        {citations.slice(0, 6).map((citation, index) => {
+        {/* Matches the server-side cap in lib/paycmd/ai/research.ts, which keeps 8. This used to
+            slice to 6, so two extracted sources were dropped with nothing indicating it. */}
+        {citations.slice(0, 8).map((citation, index) => {
           const label = citation.title || citation.url || `Source ${index + 1}`;
           if (!citation.url) {
             return (
@@ -4949,17 +5084,21 @@ function AskSurfSourceList({ citations }: { citations: ChatCitation[] }) {
 }
 
 function MarkdownContent({
-  researchId,
   text,
   citations = [],
+  outline,
 }: {
-  researchId: string;
   text: string;
   citations?: ChatCitation[];
+  // Anchor ids come from the caller's single `buildResearchOutline` pass rather than being recounted
+  // here. Omitted when there is no nav to link into, in which case headings render without ids.
+  outline?: ResearchOutlineEntry[];
 }) {
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const lines = researchLines(text);
   const blocks: ReactNode[] = [];
-  const headingCounts = new Map<string, number>();
+  // Keyed by line index, which is why `researchLines` has to be the only line splitter in play.
+  const headingIds = new Map<number, string>();
+  outline?.forEach((entry) => headingIds.set(entry.lineIndex, entry.id));
   let index = 0;
 
   while (index < lines.length) {
@@ -4989,7 +5128,7 @@ function MarkdownContent({
     if (heading) {
       const level = heading.level;
       const content = renderInlineMarkdown(stripMarkdownDecorations(heading.title), `heading_${index}`, text, citations);
-      const id = nextHeadingId(heading.title, headingCounts, researchId);
+      const id = headingIds.get(index);
       const className =
         level === 1
           ? "scroll-mt-24 text-xl font-semibold tracking-normal"
@@ -5042,8 +5181,17 @@ function MarkdownContent({
 
     if (isMarkdownTableStart(lines, index)) {
       const start = index;
-      const tableLines: string[] = [];
-      while (index < lines.length && lines[index].includes("|") && lines[index].trim()) {
+      // Header and alignment rows are already validated by isMarkdownTableStart.
+      const tableLines: string[] = [lines[index], lines[index + 1]];
+      index += 2;
+      // A body row has to look like a row, not merely contain a pipe. This loop used to absorb any
+      // non-blank line containing "|", so a sentence with a pipe in it right after the table was
+      // pulled in as a row. Tables written without leading pipes still work: the test follows
+      // whatever style the header used.
+      const headerHasLeadingPipe = /^\s*\|/.test(lines[start]);
+      while (index < lines.length && lines[index].trim()) {
+        const isRow = headerHasLeadingPipe ? /^\s*\|/.test(lines[index]) : lines[index].includes("|");
+        if (!isRow) break;
         tableLines.push(lines[index]);
         index += 1;
       }
@@ -5141,6 +5289,7 @@ function MarkdownTable({
   sourceText: string;
   citations: ChatCitation[];
 }) {
+  const { t } = useI18n();
   const headers = splitMarkdownRow(lines[0] ?? "");
   const body = lines.slice(2).map(splitMarkdownRow);
   const [copied, setCopied] = useState(false);
@@ -5182,10 +5331,10 @@ function MarkdownTable({
       <div className="flex items-center justify-between gap-2 border-b bg-muted/30 px-2 py-1.5">
         <div className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
           <Table2 className="h-3.5 w-3.5" />
-          Table
+          {t("research.table")}
         </div>
         <div className="flex gap-1">
-          <Button type="button" variant="ghost" size="icon" className="h-7 w-7" aria-label="Copy table" onClick={copyTable}>
+          <Button type="button" variant="ghost" size="icon" className="h-7 w-7" aria-label={t("research.table.copy")} onClick={copyTable}>
             {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
           </Button>
           <Button
@@ -5193,8 +5342,8 @@ function MarkdownTable({
             variant="ghost"
             size="icon"
             className="h-7 w-7"
-            aria-label="Download table CSV"
-            onClick={() => downloadTextFile("asksurf-table.csv", tableToCsv(headers, body), "text/csv;charset=utf-8")}
+            aria-label={t("research.table.csv")}
+            onClick={() => downloadTextFile("payna-table.csv", tableToCsv(headers, body), "text/csv;charset=utf-8")}
           >
             <FileDown className="h-3.5 w-3.5" />
           </Button>
@@ -5203,7 +5352,7 @@ function MarkdownTable({
             variant="ghost"
             size="icon"
             className="h-7 w-7"
-            aria-label="Download table PNG"
+            aria-label={t("research.table.png")}
             onClick={() => downloadTablePng(headers, body)}
           >
             <Download className="h-3.5 w-3.5" />
@@ -5213,7 +5362,7 @@ function MarkdownTable({
             variant="ghost"
             size="icon"
             className="h-7 w-7"
-            aria-label="Open table fullscreen"
+            aria-label={t("research.table.expand")}
             onClick={() => setIsFullscreen(true)}
           >
             <Maximize2 className="h-3.5 w-3.5" />
@@ -5226,9 +5375,9 @@ function MarkdownTable({
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="inline-flex items-center gap-2 text-sm font-medium">
               <Table2 className="h-4 w-4 text-emerald-600" />
-              AskSurf table
+              {t("research.table.fullscreenTitle")}
             </div>
-            <Button type="button" variant="ghost" size="icon" aria-label="Close table fullscreen" onClick={() => setIsFullscreen(false)}>
+            <Button type="button" variant="ghost" size="icon" aria-label={t("research.table.close")} onClick={() => setIsFullscreen(false)}>
               <X className="h-4 w-4" />
             </Button>
           </div>
@@ -5305,7 +5454,7 @@ function downloadTablePng(headers: string[], body: string[][]) {
   });
 
   const link = document.createElement("a");
-  link.download = "asksurf-table.png";
+  link.download = "payna-table.png";
   link.href = canvas.toDataURL("image/png");
   link.click();
 }
@@ -5482,6 +5631,7 @@ function EntityPreviewTrigger({
   sourceUrl?: string;
   sourceTitle?: string;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const context = extractEntityContext(sourceText, label);
   const tableRows = extractEntityTableRows(sourceText, label);
@@ -5503,10 +5653,12 @@ function EntityPreviewTrigger({
             {label}
           </span>
           <span className="mb-2 inline-flex rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
-            Research-backed
+            {t("research.entity.backed")}
           </span>
+          {/* The old fallback here explained that "no live price or chart was returned", which framed
+              a feature this app has never had as a missing result. */}
           <span className="block text-muted-foreground">
-            {context || "Linked from this AskSurf answer. No live price or chart was returned for this entity."}
+            {context || t("research.entity.noContext")}
           </span>
           {tableRows.length ? (
             <span className="mt-2 block space-y-1 border-t pt-2">
