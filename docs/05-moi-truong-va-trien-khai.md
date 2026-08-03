@@ -68,7 +68,23 @@ DEEPSEEK_INSTANT_MODEL=deepseek-v4-flash
 DEEPSEEK_STANDARD_MODEL=deepseek-v4-flash
 DEEPSEEK_DEEP_MODEL=deepseek-v4-pro
 DEEPSEEK_RESEARCH_TIMEOUT_MS=240000
+DEEPSEEK_QUOTA_ENABLED=false
 ```
+
+`DEEPSEEK_QUOTA_ENABLED=false` là mặc định trong giai đoạn test: mọi user đã đăng nhập dùng AI không giới hạn. Sau khi chạy migration `20260803000000_add_deepseek_quota_and_whitelist.sql`, bật giá trị này thành `true` để áp dụng 10 request DeepSeek trọn đời cho mỗi user thường. Các user trong `ai_user_whitelist` không bị trừ quota; usage đã dùng trước khi được whitelist vẫn giữ nguyên nếu sau đó bị gỡ khỏi whitelist.
+
+Không cấp quyền ghi bảng whitelist cho trình duyệt. Admin thêm/gỡ Access ID (UUID hiển thị trong Profile) bằng Supabase SQL Editor với quyền database admin hoặc một server dùng `service_role`:
+
+```sql
+insert into public.ai_user_whitelist (user_id, note)
+values ('<payna-access-id>', 'test team')
+on conflict (user_id) do nothing;
+
+delete from public.ai_user_whitelist
+where user_id = '<payna-access-id>';
+```
+
+RLS cùng `revoke` chặn `anon` và `authenticated` đọc/ghi trực tiếp hai bảng quota. Client chỉ gọi RPC gắn với `auth.uid()`; RPC không nhận `user_id`, nên biết tên bảng hay UUID người khác không thể tự thêm whitelist hoặc sửa quota.
 
 DeepSeek chạy cả hai đường AI. Command router route câu tự nhiên trong mode `Ra` thành command hoặc intent `crypto_research`. Khi user chọn mode research, câu hỏi không bắt đầu bằng `/` đi thẳng tới `/api/ai/crypto` để tránh route nhầm. Slash command luôn chạy Ra.
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { askResearch } from "@/lib/paycmd/ai/research";
+import { AiAccessError, runDeepSeekWithQuota } from "@/lib/paycmd/ai/access";
 import { createClient } from "@/lib/supabase/server";
 
 type CryptoResearchRequest = {
@@ -35,13 +36,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "input is required" }, { status: 400 });
     }
 
-    const result = await askResearch({
-      input,
-      recentMessages: body.recentMessages ?? [],
-      surfMode: body.surfMode,
-      effort: body.effort,
-      locale: body.locale,
-    });
+    const { result, quota } = await runDeepSeekWithQuota(supabase, () =>
+      askResearch({
+        input,
+        recentMessages: body.recentMessages ?? [],
+        surfMode: body.surfMode,
+        effort: body.effort,
+        locale: body.locale,
+      }),
+    );
 
     return NextResponse.json({
       ...result,
@@ -49,8 +52,15 @@ export async function POST(req: NextRequest) {
       // through a hard allowlist to pick its rich research renderer, so every message already in the
       // database says "asksurf" — renaming it would make that history render as raw markdown.
       provider: "asksurf",
+      quota,
     });
   } catch (error: any) {
+    if (error instanceof AiAccessError) {
+      return NextResponse.json(
+        { error: error.code, message: error.message, quota: error.quota },
+        { status: error.status },
+      );
+    }
     console.error("Research route failed:", error);
 
     if (error?.name === "TimeoutError") {

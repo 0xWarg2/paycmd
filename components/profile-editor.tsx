@@ -16,7 +16,6 @@ import {
   ShieldCheck,
   Sparkles,
   Wallet,
-  WalletCards,
 } from "lucide-react";
 import {
   ChangeEvent,
@@ -127,7 +126,10 @@ async function requestJson(path: string, init?: RequestInit) {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(data?.error ?? data?.message ?? `Request failed: ${response.status}`);
+    throw Object.assign(new Error(data?.message ?? data?.error ?? `Request failed: ${response.status}`), {
+      code: data?.error,
+      data,
+    });
   }
 
   return data;
@@ -424,6 +426,15 @@ export function ProfileEditor({
                 copyValue={externalWalletAddress}
                 copied={copiedKey === "metamask"}
                 onCopy={() => copyValue("metamask", externalWalletAddress)}
+              />
+              <InfoPanel
+                icon={KeyRound}
+                label={t("profile.paynaAccessId")}
+                value={shortAddress(userId, "")}
+                detail={t("profile.paynaAccessIdHelp")}
+                copyValue={userId}
+                copied={copiedKey === "payna-access-id"}
+                onCopy={() => copyValue("payna-access-id", userId)}
               />
               <InfoPanel
                 icon={ShieldCheck}

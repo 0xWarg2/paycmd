@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cctpBridgeChainConfigs, normalizeCctpBridgeChain } from "@/lib/paycmd/cctp-bridge";
 import { chainAliases, supportedChains } from "@/lib/paycmd/chains";
 import { askDeepSeek } from "@/lib/paycmd/ai/deepseek";
+import { AiAccessError, runDeepSeekWithQuota } from "@/lib/paycmd/ai/access";
 import { commandRouterModel, commandRouterModelProfile } from "@/lib/paycmd/ai/models";
 import { aiCommandResponseSchema } from "@/lib/paycmd/ai/schema";
 import { requestLocale, tr, type PayCmdLocale } from "@/lib/i18n/server";
@@ -600,25 +601,27 @@ export async function POST(req: NextRequest) {
       JSON.stringify(recentMessages),
       `User input: ${input}`,
     ].join("\n\n");
-    const response = await askDeepSeek({
-      model: commandRouterModel(),
-      messages: [
-        { role: "system", content: "You are Payna's AI command router. Return JSON only; no Markdown or commentary. Follow the user's supplied output schema exactly." },
-        { role: "user", content: prompt },
-      ],
-      maxTokens: 900,
-      timeoutMs: 25_000,
+    const { result: response, quota } = await runDeepSeekWithQuota(supabase, () =>
+      askDeepSeek({
+        model: commandRouterModel(),
+        messages: [
+          { role: "system", content: "You are Payna's AI command router. Return JSON only; no Markdown or commentary. Follow the user's supplied output schema exactly." },
+          { role: "user", content: prompt },
+        ],
+        maxTokens: 900,
+        timeoutMs: 25_000,
       // Both settings exist to protect the parse below.
       //
       // Chain-of-thought is on by default and spends the same `max_tokens` as the answer, so at this
       // budget it could consume the whole allowance and leave the JSON truncated. That failure is
       // near-invisible: the parse fails, the deterministic fallback answers with regex results, and
       // the response is still a 200 with no error logged — the router just quietly gets dumber.
-      thinking: false,
+        thinking: false,
       // Constrains the output to valid JSON, but not to a shape: DeepSeek has no `json_schema` mode,
       // so `aiCommandResponseSchema` below is still the only thing checking the fields.
-      jsonObject: true,
-    });
+        jsonObject: true,
+      }),
+    );
     const parsedOutput = aiCommandResponseSchema.safeParse(parseJsonObject(response.text));
     if (!parsedOutput.success) {
       // The fallback below answers with a 200, so without this line a dead model path reads exactly
@@ -636,6 +639,7 @@ export async function POST(req: NextRequest) {
         // it is ever turned back on — it is the branch where the model answered and we could not use
         // what it said.
         reasoning: response.reasoning || undefined,
+        quota,
       });
     }
     // Valid JSON, wrong contract. `canonicalCommand` carries a zod `.default("")`, which the other
@@ -651,12 +655,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         ...deterministicCommandFallback(input, locale, recentMessages),
         reasoning: response.reasoning || undefined,
+        quota,
       });
     }
     return NextResponse.json(
-      commandRouterResult(parsedOutput.data, commandRouterModelProfile, locale, response.reasoning),
+      { ...commandRouterResult(parsedOutput.data, commandRouterModelProfile, locale, response.reasoning), quota },
     );
   } catch (error: any) {
+    if (error instanceof AiAccessError) {
+      return NextResponse.json(
+        { error: error.code, message: error.message, quota: error.quota },
+        { status: error.status },
+      );
+    }
     console.error("DeepSeek command router failed:", error);
     if (fallbackInput) return NextResponse.json(deterministicCommandFallback(fallbackInput, locale, fallbackRecentMessages));
     return NextResponse.json({ error: error.message || "Failed to parse AI command" }, { status: 500 });

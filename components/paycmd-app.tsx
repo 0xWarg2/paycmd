@@ -160,6 +160,15 @@ type ChatMessage = {
   // Chain-of-thought from the model, when it ran with thinking on. Capped to 4000 chars by the
   // transport before it ever reaches here.
   reasoning?: string;
+  quota?: AiQuota;
+};
+
+type AiQuota = {
+  enabled: boolean;
+  unlimited: boolean;
+  limit: 10 | null;
+  used: number | null;
+  remaining: number | null;
 };
 
 type ExecutionItem = {
@@ -194,6 +203,7 @@ type AiCommandResult = {
   // Always absent in practice: the router runs with thinking off so its token budget goes entirely
   // to the JSON it has to return. Typed anyway because the route does forward it if enabled.
   reasoning?: string;
+  quota?: AiQuota;
 };
 
 type CryptoResearchResult = {
@@ -205,6 +215,7 @@ type CryptoResearchResult = {
   effort?: SurfEffort;
   durationMs?: number;
   reasoning?: string;
+  quota?: AiQuota;
 };
 
 type ChatMessageRow = {
@@ -317,6 +328,20 @@ function isNearViewportBottom(viewport: HTMLDivElement) {
 
 function normalizeAiProvider(value: unknown): AiProvider | undefined {
   return value === "openai" || value === "asksurf" || value === "paycmd" ? value : undefined;
+}
+
+function normalizeAiQuota(value: unknown): AiQuota | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const quota = value as Record<string, unknown>;
+  if (typeof quota.enabled !== "boolean" || typeof quota.unlimited !== "boolean") return undefined;
+  const numberOrNull = (entry: unknown) => (typeof entry === "number" || entry === null ? entry : null);
+  return {
+    enabled: quota.enabled,
+    unlimited: quota.unlimited,
+    limit: numberOrNull(quota.limit) === 10 ? 10 : null,
+    used: numberOrNull(quota.used),
+    remaining: numberOrNull(quota.remaining),
+  };
 }
 
 function normalizeAssistantActions(value: unknown): AssistantAction[] | undefined {
@@ -2366,6 +2391,7 @@ export function PayCmdApp() {
         typeof metadata.reasoning === "string" && metadata.reasoning.trim()
           ? metadata.reasoning
           : undefined,
+      quota: normalizeAiQuota(metadata.quota),
     };
   }
 
@@ -2454,6 +2480,7 @@ export function PayCmdApp() {
       // Any key added here must also be added to the metadata object in `updateDraftState` below,
       // which rewrites this whole object field by field. Omitting it there silently drops the value.
       reasoning: message.reasoning ?? null,
+      quota: message.quota ?? null,
     };
     const { data, error } = await supabase
       .from("chat_messages")
@@ -2521,6 +2548,7 @@ export function PayCmdApp() {
           // This update replaces `metadata` wholesale rather than patching it, so every field
           // `saveMessage` writes has to be repeated here or confirming a draft erases it.
           reasoning: target.reasoning ?? null,
+          quota: target.quota ?? null,
         },
       })
       .eq("id", messageId)
@@ -2610,6 +2638,7 @@ export function PayCmdApp() {
         effort: normalizeSurfEffort(result.effort ?? effort),
         durationMs: result.durationMs,
         reasoning: result.reasoning,
+        quota: result.quota,
       });
     } catch (error) {
       if ((error as { name?: string })?.name === "AbortError") {
@@ -2628,10 +2657,11 @@ export function PayCmdApp() {
       const message = error instanceof Error ? error.message : "Research failed";
       await saveMessage({
         role: "assistant",
-        text: t("asksurf.failed", { message }),
+        text: (error as { code?: string })?.code === "AI_QUOTA_EXHAUSTED" ? t("ai.quotaExhausted") : t("asksurf.failed", { message }),
         provider: "asksurf",
         surfMode,
         effort,
+        quota: normalizeAiQuota((error as { data?: { quota?: unknown } })?.data?.quota),
       });
     } finally {
       window.clearTimeout(timeout);
@@ -2690,6 +2720,7 @@ export function PayCmdApp() {
           provider: "openai",
           model: result.modelProfile,
           reasoning: result.reasoning,
+          quota: result.quota,
         });
         setActiveDraftId(previewMessage?.id ?? null);
         return;
@@ -2701,6 +2732,7 @@ export function PayCmdApp() {
         provider: "openai",
         model: result.modelProfile,
         reasoning: result.reasoning,
+        quota: result.quota,
       });
     } catch (error) {
       if ((error as { name?: string })?.name === "AbortError") {
@@ -2710,10 +2742,13 @@ export function PayCmdApp() {
       const message = error instanceof Error ? error.message : "AI command parsing failed";
       await saveMessage({
         role: "assistant",
-        text: looksLikeResearchQuestion(value)
+        text: (error as { code?: string })?.code === "AI_QUOTA_EXHAUSTED"
+          ? t("ai.quotaExhausted")
+          : looksLikeResearchQuestion(value)
           ? t("ai.researchModeHint")
           : t("ai.unhandled", { message }),
         provider: "openai",
+        quota: normalizeAiQuota((error as { data?: { quota?: unknown } })?.data?.quota),
         actions: looksLikeResearchQuestion(value)
           ? [
               {
@@ -4510,6 +4545,7 @@ function MessageBubble({
             surfMode={message.surfMode}
             effort={message.effort}
             durationMs={message.durationMs}
+            quota={message.quota}
           />
         ) : null}
         {/* Above the content branches rather than inside them, so one placement covers the research
@@ -4624,13 +4660,16 @@ function ProviderBadge({
   surfMode,
   effort,
   durationMs,
+  quota,
 }: {
   provider: AiProvider;
   model?: string;
   surfMode?: SurfMode;
   effort?: SurfEffort;
   durationMs?: number;
+  quota?: AiQuota;
 }) {
+  const { t } = useI18n();
   const Icon = provider === "asksurf" ? Waypoints : provider === "openai" ? Bot : Sparkles;
   const tone =
     provider === "asksurf"
@@ -4648,6 +4687,11 @@ function ProviderBadge({
       ) : null}
       {model ? <span className="text-muted-foreground">· {model}</span> : null}
       {durationMs ? <span className="text-muted-foreground">· {formatDuration(durationMs)}</span> : null}
+      {quota ? (
+        <span className="text-muted-foreground">
+          · {quota.unlimited ? t("ai.quotaUnlimited") : t("ai.quotaRemaining", { remaining: quota.remaining ?? 0, limit: quota.limit ?? 10 })}
+        </span>
+      ) : null}
     </div>
   );
 }
