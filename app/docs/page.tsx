@@ -13,8 +13,6 @@ import {
   MessageSquareText,
   Network,
   ShieldCheck,
-  WalletCards,
-  Waypoints,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -43,7 +41,7 @@ const docs = {
     heroEyebrow: "Payna Docs",
     title: "Build, fund, and move USDC from one chatbox",
     description:
-      "Payna combines Circle wallet rails, MetaMask CCTP v2 bridge, AskSurf research, and an Arc Testnet proof contract into a chat-first dapp.",
+      "Payna combines Circle wallet rails, MetaMask CCTP v2 bridge, AskPayna research, and an Arc Testnet proof contract into a chat-first dapp.",
     quickLinks: "Quick links",
     launch: "Launch app",
     faucet: "Circle Faucet",
@@ -58,7 +56,7 @@ const docs = {
       "Payna is a stablecoin copilot. The first screen inside the app is not a dashboard: it is a chatbox that can understand payment intent.",
       "Payna supports Circle wallet actions such as create wallet, check balance, pay contacts, payment requests, and cross-chain transfer flows.",
       "For MetaMask users, Payna supports CCTP v2 bridge flows and records bridge/swap activity in app history.",
-      "For research questions, AskSurf mode bypasses payment routing and returns sourced crypto research with sections and follow-up questions.",
+      "For research questions, AskPayna mode bypasses payment routing and returns crypto research with verified references, sections, and follow-up questions.",
     ],
     stackTitle: "Technology map",
     stack: [
@@ -69,7 +67,7 @@ const docs = {
       ["CCTP v2 / Bridge Kit", "MetaMask bridge flow for supported testnet routes."],
       ["Payna Swap Adapter", "Arc Testnet swap adapter for USDC, EURC, and cirBTC with MetaMask signing."],
       ["Arc Testnet contract", "Payna receipt proof contract emits public transaction proof events."],
-      ["AskSurf", "Crypto research mode with sources, markdown sections, tables, and related questions."],
+      ["AskPayna", "Crypto research mode with verified references, markdown sections, tables, and related questions."],
     ],
     fundingTitle: "How to fund and prepare wallets",
     fundingSteps: [
@@ -91,7 +89,7 @@ const docs = {
       ["/bridge 5 usdc from base to arc on my metamask", "Bridge USDC through MetaMask with CCTP v2."],
       ["/swap 1 USDC to EURC", "Swap on Arc Testnet through the Payna adapter using MetaMask."],
       ["/swap 0.001 cirBTC to USDC", "Swap cirBTC back to USDC on Arc and record the swap in history."],
-      ["Monad la gi?", "Switch to AskSurf mode for sourced crypto research."],
+      ["Monad la gi?", "Switch to AskPayna mode for crypto research with verified references."],
     ],
     swapTitle: "Swap on Arc",
     swapIntro:
@@ -124,7 +122,7 @@ const docs = {
       "Natural language can parse intent, but it does not execute money movement by itself.",
       "Every payment-like command becomes a preview first. The user must confirm before the backend or MetaMask executes.",
       "MetaMask bridge/fund actions require the connected wallet to sign on the correct chain.",
-      "AskSurf research mode is separated from Payna command mode so research questions do not accidentally route as transactions.",
+      "AskPayna research mode is separated from Payna command mode so research questions do not accidentally route as transactions.",
       "This is a testnet dapp and not financial advice.",
     ],
     faqTitle: "FAQ",
@@ -142,8 +140,8 @@ const docs = {
         "CCTP-style flows have a source-side burn/message transaction and a destination-side mint/receive transaction. Payna displays both so the route is inspectable on explorers.",
       ],
       [
-        "When should I use Payna mode versus AskSurf mode?",
-        "Use Payna for actions such as pay, transfer, bridge, swap, balance, and wallet operations. Use AskSurf for crypto research questions that need sources and sections.",
+        "When should I use Payna mode versus AskPayna mode?",
+        "Use Payna for actions such as pay, transfer, bridge, swap, balance, and wallet operations. Use AskPayna for crypto research with verified references and sections.",
       ],
       [
         "Which tokens can I swap on Arc?",
@@ -171,7 +169,7 @@ const docs = {
     heroEyebrow: "Tài liệu Payna",
     title: "Build, nạp tiền và chuyển USDC từ một chatbox",
     description:
-      "Payna kết hợp Circle wallet rails, MetaMask bridge bằng CCTP v2, AskSurf research và contract proof trên Arc Testnet vào một dapp chat-first.",
+      "Payna kết hợp Circle wallet rails, MetaMask bridge bằng CCTP v2, AskPayna research và contract proof trên Arc Testnet vào một dapp chat-first.",
     quickLinks: "Liên kết nhanh",
     launch: "Mở app",
     faucet: "Circle Faucet",
@@ -186,7 +184,7 @@ const docs = {
       "Payna là stablecoin copilot. Màn hình chính trong app không phải dashboard truyền thống mà là chatbox hiểu ý định thanh toán.",
       "Payna hỗ trợ các thao tác Circle wallet như tạo ví, xem balance, pay contact, tạo payment request và transfer cross-chain.",
       "Với MetaMask, Payna hỗ trợ bridge bằng CCTP v2 và lưu lịch sử bridge/swap trong app.",
-      "Với câu hỏi research, mode AskSurf bỏ qua router thanh toán và trả bài nghiên cứu crypto có nguồn, sections và câu hỏi liên quan.",
+      "Với câu hỏi research, mode AskPayna bỏ qua router thanh toán và trả bài nghiên cứu crypto với nguồn đã kiểm duyệt, sections và câu hỏi liên quan.",
     ],
     stackTitle: "Bản đồ công nghệ",
     stack: [
@@ -197,7 +195,7 @@ const docs = {
       ["CCTP v2 / Bridge Kit", "Luồng bridge bằng MetaMask cho các testnet route được hỗ trợ."],
       ["Payna Swap Adapter", "Swap adapter trên Arc Testnet cho USDC, EURC và cirBTC, ký bằng MetaMask."],
       ["Arc Testnet contract", "Contract proof của Payna phát event receipt công khai trên blockchain."],
-      ["AskSurf", "Mode research crypto có sources, markdown sections, tables và related questions."],
+      ["AskPayna", "Mode research crypto có nguồn đã kiểm duyệt, markdown sections, tables và related questions."],
     ],
     fundingTitle: "Cách nạp tiền và chuẩn bị ví",
     fundingSteps: [
@@ -219,7 +217,7 @@ const docs = {
       ["/bridge 5 usdc from base to arc on my metamask", "Bridge USDC bằng MetaMask qua CCTP v2."],
       ["/swap 1 USDC to EURC", "Swap trên Arc Testnet qua Payna adapter bằng MetaMask."],
       ["/swap 0.001 cirBTC to USDC", "Swap cirBTC về USDC trên Arc và lưu vào history."],
-      ["Monad la gi?", "Chuyển sang AskSurf mode để hỏi research crypto có nguồn."],
+      ["Monad la gi?", "Chuyển sang AskPayna mode để hỏi research crypto có nguồn đã kiểm duyệt."],
     ],
     swapTitle: "Swap trên Arc",
     swapIntro:
@@ -252,7 +250,7 @@ const docs = {
       "Ngôn ngữ tự nhiên chỉ dùng để hiểu ý định, không tự động chuyển tiền.",
       "Mọi lệnh liên quan payment đều thành preview trước. User phải confirm thì backend hoặc MetaMask mới chạy.",
       "Bridge/fund qua MetaMask yêu cầu ví đang connect ký trên đúng chain.",
-      "AskSurf research mode tách khỏi Payna command mode để câu hỏi research không bị route nhầm thành giao dịch.",
+      "AskPayna research mode tách khỏi Payna command mode để câu hỏi research không bị route nhầm thành giao dịch.",
       "Đây là testnet dapp, không phải lời khuyên tài chính.",
     ],
     faqTitle: "FAQ",
@@ -270,8 +268,8 @@ const docs = {
         "Luồng CCTP thường có transaction ở source chain để burn/gửi message và transaction ở destination chain để mint/receive. Payna hiển thị cả hai để bạn inspect trên explorer.",
       ],
       [
-        "Khi nào dùng Payna mode, khi nào dùng AskSurf?",
-        "Dùng Payna cho action như pay, transfer, bridge, swap, balance và wallet. Dùng AskSurf cho câu hỏi research crypto cần nguồn, sections và câu hỏi liên quan.",
+        "Khi nào dùng Payna mode, khi nào dùng AskPayna?",
+        "Dùng Payna cho action như pay, transfer, bridge, swap, balance và wallet. Dùng AskPayna cho câu hỏi research crypto có nguồn đã kiểm duyệt, sections và câu hỏi liên quan.",
       ],
       [
         "Swap trên Arc hỗ trợ token nào?",

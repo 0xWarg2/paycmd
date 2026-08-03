@@ -88,21 +88,41 @@ function compactRecentMessages(messages: { role: string; text: string }[]) {
     .filter((message) => message.content);
 }
 
-function extractCitations(text: string): ResearchCitation[] {
-  const citations: ResearchCitation[] = [];
-  const seen = new Set<string>();
-  // Matches the client-side citation scan in components/paycmd-app.tsx: the leading `!` is excluded
-  // so an inline image doesn't get listed as a source. This used to accept `!?[…]`, so the two sides
-  // disagreed about what counted as a citation.
-  const pattern = /(?<!!)\[([^\]]{2,80})\]\((https?:\/\/[^)\s]+)\)/g;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(text))) {
-    if (!seen.has(match[2])) {
-      seen.add(match[2]);
-      citations.push({ title: match[1], url: match[2] });
-    }
+const TRUSTED_SOURCES = {
+  circleGateway: { title: "Circle Gateway documentation", url: "https://developers.circle.com/gateway" },
+  circleCctp: { title: "Circle CCTP documentation", url: "https://developers.circle.com/cctp" },
+  circleUsdc: { title: "Circle USDC documentation", url: "https://developers.circle.com/stablecoins" },
+  ethereum: { title: "Ethereum.org", url: "https://ethereum.org/en/" },
+  uniswap: { title: "Uniswap documentation", url: "https://docs.uniswap.org/" },
+  coingecko: { title: "CoinGecko API documentation", url: "https://docs.coingecko.com/" },
+  defillama: { title: "DefiLlama protocol data", url: "https://defillama.com/" },
+} satisfies Record<string, Required<ResearchCitation>>;
+
+function trustedCitations(input: string): ResearchCitation[] {
+  const query = input.toLowerCase();
+  if (/\b(gateway|circle gateway|deposit|withdraw)\b/.test(query)) {
+    return [TRUSTED_SOURCES.circleGateway, TRUSTED_SOURCES.circleUsdc];
   }
-  return citations.slice(0, 8);
+  if (/\b(cctp|bridge|burn|mint)\b/.test(query)) {
+    return [TRUSTED_SOURCES.circleCctp, TRUSTED_SOURCES.circleUsdc];
+  }
+  if (/\b(swap|uniswap|amm|dex)\b/.test(query)) {
+    return [TRUSTED_SOURCES.uniswap, TRUSTED_SOURCES.defillama];
+  }
+  if (/\b(price|market|token|coin|crypto|tvl|volume)\b/.test(query)) {
+    return [TRUSTED_SOURCES.coingecko, TRUSTED_SOURCES.defillama];
+  }
+  return [TRUSTED_SOURCES.ethereum, TRUSTED_SOURCES.coingecko];
+}
+
+function removeUnverifiedLinks(text: string) {
+  // DeepSeek has no browsing tool in this integration. Do not render a plausible-looking URL that
+  // it generated from model memory: it can be stale or a 404. The verified source rail below is
+  // built only from the canonical URLs in TRUSTED_SOURCES.
+  return text
+    .replace(/(?<!!)\[([^\]]+)\]\(https?:\/\/[^)\s]+\)/g, "$1")
+    .replace(/\bhttps?:\/\/[^\s)<]+/g, "")
+    .replace(/[ \t]+\n/g, "\n");
 }
 
 export async function askResearch({ input, recentMessages = [], surfMode, effort, locale }: ResearchOptions) {
@@ -123,10 +143,10 @@ export async function askResearch({ input, recentMessages = [], surfMode, effort
     "Structure the answer in Markdown exactly like this:",
     "- One `#` line for the title, and nothing else at level 1.",
     "- Each section starts with `##`. Use `###` only for subsections.",
-    "- Cite every source as an inline Markdown link, [short label](https://…), inside the sentence it supports. Do not write a Sources section and do not paste bare URLs.",
+    "- Do not write URLs, Markdown links, or a Sources section. Payna attaches verified canonical references separately.",
     "- When comparing numbers, chains, or options, use a Markdown table with a `|---|---|` alignment row.",
     "- End with a `## Related Questions` heading (keep that heading in English) followed by 3 to 5 `-` bullets.",
-    "Only cite URLs you are certain about; state clearly when current or live data is unavailable.",
+    "State clearly when current or live data is unavailable.",
     depth,
   ].join("\n\n");
   const response = await askDeepSeek({
@@ -137,8 +157,8 @@ export async function askResearch({ input, recentMessages = [], surfMode, effort
     thinking: profile.thinking,
   });
   return {
-    assistantText: response.text,
-    citations: extractCitations(response.text),
+    assistantText: removeUnverifiedLinks(response.text),
+    citations: trustedCitations(input),
     model: response.model,
     surfMode: resolvedSurfMode,
     effort: resolvedEffort,

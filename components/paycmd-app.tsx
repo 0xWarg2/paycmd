@@ -387,7 +387,7 @@ function normalizeAssistantActions(value: unknown): AssistantAction[] | undefine
 // Maps the legacy wire values above to what the user actually sees.
 function providerName(provider?: AiProvider) {
   if (provider === "openai") return "DeepSeek Router";
-  if (provider === "asksurf") return "DeepSeek Research";
+  if (provider === "asksurf") return "AskPayna · DeepSeek";
   if (provider === "paycmd") return "Payna";
   return "";
 }
@@ -4340,7 +4340,7 @@ function ComposerModeControls({
           }`}
         >
           <Waypoints className="h-3.5 w-3.5" />
-          AskSurf
+          AskPayna
         </button>
       </div>
 

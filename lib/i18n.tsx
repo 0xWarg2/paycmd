@@ -193,7 +193,7 @@ const dictionaries: Record<Locale, TranslationMap> = {
     "asksurf.slowBody": "{mode}{effort} đang chạy{duration}. Bạn có thể đóng thông báo này.",
     "asksurf.hideNotice": "Ẩn thông báo Research",
     "asksurf.failed": "Research chưa lấy được thông tin: {message}",
-    "asksurf.askButton": "Hỏi bằng Research",
+    "asksurf.askButton": "Hỏi bằng AskPayna",
 
     "request.insufficientGasDefault": "Wallet thực thi giao dịch chưa có native gas token.",
     "request.fundGasAddress": "Nạp gas vào ví: {address}.",
@@ -245,7 +245,7 @@ const dictionaries: Record<Locale, TranslationMap> = {
     "missing.default": "Bạn cần bổ sung {field}.",
 
     "ai.needsMoreInfo": "Mình cần thêm thông tin để tạo command.",
-    "ai.researchModeHint": "Payna đang ở chế độ lệnh/thanh toán nên OpenAI Router chưa xử lý được câu hỏi research này. Chuyển sang AskSurf để hỏi trực tiếp và nhận bài research có nguồn, sections, bảng nếu có dữ liệu.",
+    "ai.researchModeHint": "Payna đang ở chế độ lệnh/thanh toán nên AI router chưa xử lý được câu hỏi research này. Chuyển sang AskPayna để hỏi trực tiếp và nhận bài research với nguồn đã kiểm duyệt.",
     "ai.unhandled": "AI chưa xử lý được câu này: {message}",
     "ai.quotaRemaining": "Còn {remaining}/{limit} lượt AI",
     "ai.quotaUnlimited": "Không giới hạn",
@@ -690,7 +690,7 @@ const dictionaries: Record<Locale, TranslationMap> = {
     "asksurf.slowBody": "{mode}{effort} is running{duration}. You can dismiss this notice.",
     "asksurf.hideNotice": "Hide research notice",
     "asksurf.failed": "Research could not fetch the data: {message}",
-    "asksurf.askButton": "Ask with Research",
+    "asksurf.askButton": "Ask with AskPayna",
 
     "request.insufficientGasDefault": "The transaction executor wallet does not have native gas.",
     "request.fundGasAddress": "Fund gas to wallet: {address}.",
@@ -742,7 +742,7 @@ const dictionaries: Record<Locale, TranslationMap> = {
     "missing.default": "Add the missing field: {field}.",
 
     "ai.needsMoreInfo": "I need more information to create the command.",
-    "ai.researchModeHint": "Payna is in command/payment mode, so OpenAI Router did not handle this research question. Switch to AskSurf to ask directly and get sourced research with sections and tables when data is available.",
+    "ai.researchModeHint": "Payna is in command/payment mode, so the AI router did not handle this research question. Switch to AskPayna for research with vetted references.",
     "ai.unhandled": "AI could not handle this message: {message}",
     "ai.quotaRemaining": "{remaining}/{limit} AI calls left",
     "ai.quotaUnlimited": "Unlimited",
