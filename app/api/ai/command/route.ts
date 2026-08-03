@@ -38,6 +38,25 @@ function gatewayChainPromptHints() {
     .join(", ");
 }
 
+function mentionedChain(input: string) {
+  const aliases = Object.keys(chainAliases).sort((left, right) => right.length - left.length);
+  for (const alias of aliases) {
+    const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`(?:^|[^a-z0-9-])${escaped}(?:$|[^a-z0-9-])`, "i").test(input)) {
+      return chainAliases[alias];
+    }
+  }
+  return "";
+}
+
+function preserveNamedBalanceChain(canonicalCommand: string, input: string) {
+  if (!/^\/?balance\b/i.test(canonicalCommand)) return canonicalCommand;
+  const chain = mentionedChain(input);
+  // The user-supplied chain is authoritative. This protects against both a router omission
+  // (`/balance`) and a wrong model-selected chain (`/balance on base` for an Arc request).
+  return chain ? `/balance on ${chain}` : canonicalCommand;
+}
+
 function isContactIntent(value: string) {
   return /\bcontact\b|danh\s*bạ|thêm\s+(?:người\s+)?liên\s+hệ|add\s+(?:a\s+)?contact|lưu\s+(?:người\s+)?nhận/i.test(
     value,
@@ -505,6 +524,7 @@ function commandRouterResult(
   modelProfile: string,
   locale: PayCmdLocale,
   reasoning?: string,
+  input?: string,
 ) {
   if (aiResult.intent !== "command") {
     return {
@@ -515,12 +535,13 @@ function commandRouterResult(
     };
   }
 
-  const parsedCommand = parsePayCmd(aiResult.canonicalCommand, locale);
+  const canonicalCommand = preserveNamedBalanceChain(aiResult.canonicalCommand, input ?? "");
+  const parsedCommand = parsePayCmd(canonicalCommand, locale);
 
   if (parsedCommand.missingFields.length || parsedCommand.status !== "draft_ready") {
     return {
       intent: "clarify",
-      canonicalCommand: aiResult.canonicalCommand,
+      canonicalCommand,
       assistantText:
         aiResult.assistantText ||
         tr(locale, "ai.missingFields", { fields: parsedCommand.missingFields.join(", ") }),
@@ -534,6 +555,7 @@ function commandRouterResult(
 
   return {
     ...aiResult,
+    canonicalCommand,
     parsedCommand,
     modelProfile,
     reasoning: reasoning || undefined,
@@ -589,6 +611,7 @@ export async function POST(req: NextRequest) {
       "If the user asks general product/help questions, intent must be answer.",
       "If required information is missing, intent must be clarify and assistantText must ask one concise question.",
       "If the message could be a Payna action such as pay, transfer, swap, fund, deposit, withdraw, balance, wallet, contact, gas, payroll, or payment request, prefer command or clarify over crypto_research.",
+      "For a balance request that names a chain or testnet, canonicalCommand must be /balance on <that chain>; never widen it to /balance.",
       "All payment/fund/deposit/withdraw/transfer/payroll commands will be previewed and confirmed by the user later.",
       `Gateway chains: ${gatewayChainPromptHints()}.`,
       `Bridge chains (testnet MetaMask rail): ${cctpBridgeChainConfigs.map((chain) => `${chain.aliases[0]} -> ${chain.key}`).join(", ")}.`,
@@ -659,7 +682,7 @@ export async function POST(req: NextRequest) {
       });
     }
     return NextResponse.json(
-      { ...commandRouterResult(parsedOutput.data, commandRouterModelProfile, locale, response.reasoning), quota },
+      { ...commandRouterResult(parsedOutput.data, commandRouterModelProfile, locale, response.reasoning, input), quota },
     );
   } catch (error: any) {
     if (error instanceof AiAccessError) {

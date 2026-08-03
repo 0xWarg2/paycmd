@@ -2160,13 +2160,13 @@ async function executeCommand(draft: ParsedCommand) {
       return requestJson("/api/wallet-set", { method: "POST", body: JSON.stringify({}) });
     }
     if (draft.fields.action === "balance") {
-      return requestJson("/api/gateway/balance", { method: "POST", body: JSON.stringify({}) });
+      return requestJson("/api/gateway/balance", { method: "POST", body: JSON.stringify({ chain: draft.fields.chain || undefined }) });
     }
     return requestJson("/api/wallet/status");
   }
 
   if (draft.command === "balance") {
-    return requestJson("/api/gateway/balance", { method: "POST", body: JSON.stringify({}) });
+    return requestJson("/api/gateway/balance", { method: "POST", body: JSON.stringify({ chain: draft.fields.chain || undefined }) });
   }
 
   if (draft.command === "deposit") {
@@ -2272,7 +2272,7 @@ async function executeCommand(draft: ParsedCommand) {
 
   if (draft.command === "gateway") {
     if (draft.fields.action === "balance") {
-      return requestJson("/api/gateway/balance", { method: "POST", body: JSON.stringify({}) });
+      return requestJson("/api/gateway/balance", { method: "POST", body: JSON.stringify({ chain: draft.fields.chain || undefined }) });
     }
     return requestJson("/api/gateway/info");
   }

@@ -18,6 +18,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { fetchGatewayBalance, getUsdcBalance, CHAIN_BY_DOMAIN, supportedGatewayChains } from "@/lib/circle/gateway-sdk";
+import { isSupportedChain, type PayCmdChain } from "@/lib/paycmd/chains";
 import { createClient } from "@/lib/supabase/server";
 import type { Address } from "viem";
 
@@ -32,7 +33,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { addresses: requestAddresses } = await req.json().catch(() => ({}));
+    const { addresses: requestAddresses, chain: requestedChain } = await req.json().catch(() => ({}));
+    if (requestedChain && (typeof requestedChain !== "string" || !isSupportedChain(requestedChain))) {
+      return NextResponse.json({ error: "Unsupported chain" }, { status: 400 });
+    }
+    const chainFilter = requestedChain as PayCmdChain | undefined;
     let addresses = requestAddresses;
 
     if (!addresses || !Array.isArray(addresses) || addresses.length === 0) {
@@ -59,7 +64,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const supportedChains = supportedGatewayChains;
+    const chainsToCheck = chainFilter ? [chainFilter] : supportedGatewayChains;
 
     // Fetch balances for all addresses
     const balancePromises = addresses.map(async (address: string) => {
@@ -88,7 +93,7 @@ export async function POST(req: NextRequest) {
               chain: chainName,
               address,
             };
-          });
+          }).filter((balance) => !chainFilter || balance.chain === chainFilter);
 
           gatewayTotal = gatewayBalances.reduce((sum, b) => sum + b.balance, 0);
           console.log(`Total Gateway balance for ${address}: ${gatewayTotal} USDC`);
@@ -100,7 +105,7 @@ export async function POST(req: NextRequest) {
 
         // Fetch on-chain USDC balances (wallet balances not yet deposited)
         const chainBalances = await Promise.all(
-          supportedChains.map(async (chain) => {
+          chainsToCheck.map(async (chain) => {
             try {
               const balance = await getUsdcBalance(address as Address, chain);
               return {
@@ -146,7 +151,7 @@ export async function POST(req: NextRequest) {
           error: error.message,
           totalBalance: 0,
           // Nothing was read for this address, so every chain counts as unchecked.
-          failedChains: [...supportedChains] as string[],
+          failedChains: [...chainsToCheck] as string[],
           gatewayUnavailable: true,
         };
       }
