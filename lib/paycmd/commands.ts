@@ -5,6 +5,7 @@ import {
   bridgeSpeedFrom,
   normalizeCctpBridgeChain,
 } from "@/lib/paycmd/cctp-bridge";
+import { chainAliases } from "@/lib/paycmd/chains";
 import { normalizeSwapToken } from "@/lib/paycmd/swap";
 
 export const commandNames = [
@@ -155,19 +156,9 @@ function commandText(locale: CommandLocale | undefined, key: string, params?: Re
   const template = commandMessages[resolvedLocale][key] ?? commandMessages.en[key] ?? key;
   return template.replace(/\{(\w+)\}/g, (_, name: string) => params?.[name] ?? "");
 }
-const chainAliases = {
-  arc: "arcTestnet",
-  arctestnet: "arcTestnet",
-  "arc-testnet": "arcTestnet",
-  base: "baseSepolia",
-  basesepolia: "baseSepolia",
-  "base-sepolia": "baseSepolia",
-  avalanche: "avalancheFuji",
-  avax: "avalancheFuji",
-  fuji: "avalancheFuji",
-  avalanchefuji: "avalancheFuji",
-  "avalanche-fuji": "avalancheFuji",
-} as const;
+// A local copy of this map used to live here listing only arc/base/avalanche, so 9 of the 12
+// supported chains were unparseable no matter what the user typed. Importing the single source
+// in lib/paycmd/chains.ts means adding a chain there is enough to make it parseable here.
 
 function tokenFrom(input: string) {
   const token = input.match(/\b(USDC|EURC|USYC|cirBTC|Circle\s*BTC|BTC)\b/i)?.[1] ?? "USDC";
@@ -220,27 +211,40 @@ function swapFieldsFrom(input: string) {
   return { amount, tokenIn, tokenOut };
 }
 
-function chainFrom(input: string) {
-  const token = input
-    .match(/\b(arc(?:-?testnet)?|base(?:-?sepolia)?|avalanche(?:-?fuji)?|avax|fuji)\b/i)?.[1]
-    ?.toLowerCase();
+// Built from chainAliases instead of a hardcoded literal. The old regex only listed
+// arc/base/avalanche, so the 8 other supported chains parsed as "" — indistinguishable from
+// "user named no chain" — and every per-chain command silently widened to all 12 chains.
+// Longest alias first so "base-sepolia" is not shadowed by "base".
+const chainTokenPattern = Object.keys(chainAliases)
+  .sort((a, b) => b.length - a.length)
+  .map((alias) => alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  .join("|");
 
-  return token ? chainAliases[token as keyof typeof chainAliases] ?? "" : "";
+// Prepositions are matched in both locales: the UI defaults to Vietnamese, so "trên base"
+// has to reach the same field as "on base" or the chain is dropped and the total comes back.
+function chainTokenFrom(input: string, prefix?: string) {
+  const pattern = prefix
+    ? new RegExp(String.raw`\b(?:${prefix})\s+(${chainTokenPattern})\b`, "i")
+    : new RegExp(String.raw`\b(${chainTokenPattern})\b`, "i");
+  const token = input.match(pattern)?.[1]?.toLowerCase();
+
+  return token ? chainAliases[token] ?? "" : "";
+}
+
+function chainFrom(input: string) {
+  return chainTokenFrom(input);
 }
 
 function sourceChainFrom(input: string) {
-  const token = input.match(/\bfrom\s+(arc(?:-?testnet)?|base(?:-?sepolia)?|avalanche(?:-?fuji)?|avax|fuji)\b/i)?.[1];
-  return token ? chainAliases[token.toLowerCase() as keyof typeof chainAliases] ?? "" : "";
+  return chainTokenFrom(input, String.raw`from|từ|tu`);
 }
 
 function destinationChainFrom(input: string) {
-  const token = input.match(/\bto\s+(arc(?:-?testnet)?|base(?:-?sepolia)?|avalanche(?:-?fuji)?|avax|fuji)\b/i)?.[1];
-  return token ? chainAliases[token.toLowerCase() as keyof typeof chainAliases] ?? "" : "";
+  return chainTokenFrom(input, String.raw`to|sang|tới|toi|đến|den`);
 }
 
 function onChainFrom(input: string) {
-  const token = input.match(/\bon\s+(arc(?:-?testnet)?|base(?:-?sepolia)?|avalanche(?:-?fuji)?|avax|fuji)\b/i)?.[1];
-  return token ? chainAliases[token.toLowerCase() as keyof typeof chainAliases] ?? "" : "";
+  return chainTokenFrom(input, String.raw`on|trên|tren`);
 }
 
 function recipientFrom(input: string) {
@@ -299,7 +303,12 @@ export const commandRegistry: PayCmdCommand[] = [
   {
     name: "wallet",
     aliases: ["/wallet", "wallet"],
-    title: commandText("vi", "wallet.title"),
+    // `title` is prompt metadata, not UI text: the only consumer is `commandCatalog()` in
+    // app/api/ai/command/route.ts, which serializes it into an otherwise all-English prompt.
+    // These used to resolve through `commandText("vi", …)`, which leaked Vietnamese into the
+    // catalog even when the route asked the model to answer in English. Output language is
+    // controlled separately by `responseLanguageInstruction`, so keep these literal and English.
+    title: "Manage Circle wallet",
     sample: "/wallet status",
     requiredFields: ["action"],
     parse(input, locale) {
@@ -376,7 +385,7 @@ export const commandRegistry: PayCmdCommand[] = [
   {
     name: "balance",
     aliases: ["/balance", "balance"],
-    title: "Xem unified balance",
+    title: "Check unified balance",
     sample: "/balance",
     requiredFields: [],
     parse(input, locale) {
@@ -396,7 +405,7 @@ export const commandRegistry: PayCmdCommand[] = [
   {
     name: "deposit",
     aliases: ["/deposit", "deposit"],
-    title: commandText("vi", "deposit.draft"),
+    title: "Create a Gateway deposit draft",
     sample: "/deposit 50 from arc",
     requiredFields: ["amount", "sourceChain"],
     parse(input, locale) {
@@ -421,7 +430,7 @@ export const commandRegistry: PayCmdCommand[] = [
   {
     name: "withdraw",
     aliases: ["/withdraw", "withdraw"],
-    title: commandText("vi", "withdraw.draft"),
+    title: "Create a Gateway withdraw draft",
     sample: "/withdraw 5 from base",
     requiredFields: ["amount", "sourceChain"],
     parse(input, locale) {
@@ -446,7 +455,7 @@ export const commandRegistry: PayCmdCommand[] = [
   {
     name: "transfer",
     aliases: ["/transfer", "transfer"],
-    title: commandText("vi", "transfer.draft"),
+    title: "Create a Gateway transfer draft",
     sample: "/transfer 10 from base to arc",
     requiredFields: ["amount", "sourceChain", "destinationChain"],
     parse(input, locale) {
@@ -472,7 +481,7 @@ export const commandRegistry: PayCmdCommand[] = [
   {
     name: "bridge",
     aliases: ["/bridge", "bridge"],
-    title: commandText("vi", "bridge.draft"),
+    title: "Create a CCTP bridge draft from MetaMask",
     sample: "/bridge 10 USDC from base to arc",
     requiredFields: ["amount", "sourceChain", "destinationChain"],
     parse(input, locale) {
@@ -513,7 +522,7 @@ export const commandRegistry: PayCmdCommand[] = [
   {
     name: "swap",
     aliases: ["/swap", "swap", "đổi", "doi", "convert"],
-    title: commandText("vi", "swap.draft"),
+    title: "Create an Arc Testnet swap draft",
     sample: "/swap 1 USDC to EURC",
     requiredFields: ["amount", "tokenIn", "tokenOut"],
     parse(input, locale) {
@@ -649,7 +658,7 @@ export const commandRegistry: PayCmdCommand[] = [
   {
     name: "gas",
     aliases: ["/gas", "gas"],
-    title: commandText("vi", "gas.draft"),
+    title: "Check wallet gas",
     sample: "/gas check arc",
     requiredFields: ["action", "chain"],
     parse(input, locale) {
@@ -695,7 +704,7 @@ export const commandRegistry: PayCmdCommand[] = [
   {
     name: "history",
     aliases: ["/history", "history"],
-    title: commandText("vi", "history.all"),
+    title: "View Gateway transaction history",
     sample: "/history",
     requiredFields: [],
     parse(input, locale) {

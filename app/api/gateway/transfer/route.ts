@@ -40,6 +40,7 @@ import { createClient } from "@/lib/supabase/server";
 import { maxUint256, type Address } from "viem";
 import { Transaction } from "@circle-fin/developer-controlled-wallets";
 import { circleDeveloperSdk } from "@/lib/circle/sdk";
+import { chainCommandAlias } from "@/lib/paycmd/chains";
 import { requestLocale, tr, type PayCmdLocale } from "@/lib/i18n/server";
 import { recordRaReceipt, updateRaProofColumns } from "@/lib/ra/receipt-registry";
 
@@ -104,14 +105,6 @@ function buildBurnIntentPreview(params: {
       hookData: "0x" as `0x${string}`,
     },
   };
-}
-
-function chainCommandAlias(chain: SupportedChain) {
-  return chain === "arcTestnet"
-    ? "arc"
-    : chain === "baseSepolia"
-      ? "base"
-      : "avalanche";
 }
 
 function finalityHint(chain: SupportedChain, locale: PayCmdLocale) {

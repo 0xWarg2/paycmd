@@ -69,6 +69,27 @@ export const chainAliases: Record<string, PayCmdChain> = {
   "world-chain-sepolia": "worldChainSepolia",
 };
 
+/**
+ * Reverse of chainAliases: the shortest alias is what users actually type, so it is what a
+ * suggested or retry command should echo back.
+ *
+ * Two API routes each carried a hand-written ternary here that returned "avalanche" for every
+ * chain that was not arc or base, so a retry hint on the other 9 chains pointed at the wrong
+ * chain. Deriving it guarantees the alias round-trips back through normalizeChain.
+ */
+const shortestAliasByChain = supportedChains.reduce(
+  (acc, chain) => {
+    const aliases = Object.keys(chainAliases).filter((alias) => chainAliases[alias] === chain);
+    acc[chain] = aliases.sort((a, b) => a.length - b.length || a.localeCompare(b))[0] ?? chain;
+    return acc;
+  },
+  {} as Record<PayCmdChain, string>,
+);
+
+export function chainCommandAlias(chain: PayCmdChain): string {
+  return shortestAliasByChain[chain] ?? chain;
+}
+
 export function normalizeChain(value?: string | null): PayCmdChain | "" {
   const token = (value ?? "").trim().toLowerCase();
   return chainAliases[token] ?? "";

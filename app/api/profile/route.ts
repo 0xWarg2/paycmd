@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { requestLocale, tr, type PayCmdLocale } from "@/lib/i18n/server";
+import { supportedChains } from "@/lib/paycmd/chains";
 import { createClient } from "@/lib/supabase/server";
 
 const handlePattern = /^[a-z0-9][a-z0-9_-]{2,31}$/;
-const validChains = ["arcTestnet", "baseSepolia", "avalancheFuji"] as const;
+// Was a 3-entry literal, so picking any of the other 9 supported chains was silently
+// coerced back to arcTestnet on save — the user saw their choice revert with no error.
+const validChains = supportedChains;
 
 type ProfilePatch = {
   displayName?: string;

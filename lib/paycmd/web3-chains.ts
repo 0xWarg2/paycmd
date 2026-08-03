@@ -60,7 +60,10 @@ export const web3Chains: Record<PayCmdChain, PayCmdWeb3Chain> = {
     rpcUrl: "https://api.avax-test.network/ext/bc/C/rpc",
     blockExplorerUrl: "https://testnet.snowtrace.io",
     nativeCurrency: { name: "Avalanche", symbol: "AVAX", decimals: 18 },
-    usdcAddress: "0x5425890298aed601595a70ab815c96711a31bc65",
+    // EIP-55 checksummed. This was all-lowercase while GATEWAY_CHAIN_CONFIGS held the
+    // checksummed form; now that the Gateway map derives its address from here, the
+    // canonical casing has to live here.
+    usdcAddress: "0x5425890298aed601595a70AB815c96711a31Bc65",
   },
   hyperEvmTestnet: {
     id: 998,

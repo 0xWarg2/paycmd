@@ -31,6 +31,8 @@ import {
 } from "viem";
 import * as chains from "viem/chains";
 import { circleDeveloperSdk } from "@/lib/circle/sdk";
+import { type PayCmdChain } from "@/lib/paycmd/chains";
+import { web3Chains } from "@/lib/paycmd/web3-chains";
 import {
   Transaction,
   Blockchain,
@@ -94,104 +96,124 @@ const sonicTestnet = defineChain({
   testnet: true,
 });
 
+/**
+ * Gateway-rail data only. `label` and `usdcAddress` are derived from web3Chains rather than
+ * restated here: they used to be duplicated, and the copies had already drifted (the Avalanche
+ * Fuji USDC address was EIP-55 checksummed here but all-lowercase there).
+ *
+ * `satisfies Record<PayCmdChain, ...>` is the drift guard — adding a chain to
+ * lib/paycmd/chains.ts without adding it here is a typecheck failure, not a runtime surprise.
+ * rpcUrl is deliberately NOT shared: this module reads the server-only ARC_TESTNET_RPC_KEY
+ * while web3Chains reads the NEXT_PUBLIC_ one.
+ */
 export const GATEWAY_CHAIN_CONFIGS = {
   arcTestnet: {
     domain: 26,
-    label: "Arc Testnet",
-    usdcAddress: "0x3600000000000000000000000000000000000000",
+    label: web3Chains.arcTestnet.name,
+    usdcAddress: web3Chains.arcTestnet.usdcAddress,
     viemChain: arcTestnet,
     circleBlockchain: Blockchain.ArcTestnet,
     eoaWalletBlockchain: "ARC-TESTNET",
   },
   arbitrumSepolia: {
     domain: 3,
-    label: "Arbitrum Sepolia",
-    usdcAddress: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
+    label: web3Chains.arbitrumSepolia.name,
+    usdcAddress: web3Chains.arbitrumSepolia.usdcAddress,
     viemChain: chains.arbitrumSepolia,
     circleBlockchain: Blockchain.ArbSepolia,
     eoaWalletBlockchain: "ARB-SEPOLIA",
   },
   avalancheFuji: {
     domain: 1,
-    label: "Avalanche Fuji",
-    usdcAddress: "0x5425890298aed601595a70AB815c96711a31Bc65",
+    label: web3Chains.avalancheFuji.name,
+    usdcAddress: web3Chains.avalancheFuji.usdcAddress,
     viemChain: chains.avalancheFuji,
     circleBlockchain: Blockchain.AvaxFuji,
     eoaWalletBlockchain: "AVAX-FUJI",
   },
   baseSepolia: {
     domain: 6,
-    label: "Base Sepolia",
-    usdcAddress: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    label: web3Chains.baseSepolia.name,
+    usdcAddress: web3Chains.baseSepolia.usdcAddress,
     viemChain: chains.baseSepolia,
     circleBlockchain: Blockchain.BaseSepolia,
     eoaWalletBlockchain: "BASE-SEPOLIA",
   },
   sepolia: {
     domain: 0,
-    label: "Ethereum Sepolia",
-    usdcAddress: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+    label: web3Chains.sepolia.name,
+    usdcAddress: web3Chains.sepolia.usdcAddress,
     viemChain: chains.sepolia,
     circleBlockchain: Blockchain.EthSepolia,
     eoaWalletBlockchain: "ETH-SEPOLIA",
   },
   hyperEvmTestnet: {
     domain: 19,
-    label: "HyperEVM Testnet",
-    usdcAddress: "0x2B3370eE501B4a559b57D449569354196457D8Ab",
+    label: web3Chains.hyperEvmTestnet.name,
+    usdcAddress: web3Chains.hyperEvmTestnet.usdcAddress,
     viemChain: hyperEvmTestnet,
     circleBlockchain: null,
     eoaWalletBlockchain: null,
   },
   optimismSepolia: {
     domain: 2,
-    label: "OP Sepolia",
-    usdcAddress: "0x5fd84259d66Cd46123540766Be93DFE6D43130D7",
+    label: web3Chains.optimismSepolia.name,
+    usdcAddress: web3Chains.optimismSepolia.usdcAddress,
     viemChain: chains.optimismSepolia,
     circleBlockchain: Blockchain.OpSepolia,
     eoaWalletBlockchain: "OP-SEPOLIA",
   },
   polygonAmoy: {
     domain: 7,
-    label: "Polygon Amoy",
-    usdcAddress: "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582",
+    label: web3Chains.polygonAmoy.name,
+    usdcAddress: web3Chains.polygonAmoy.usdcAddress,
     viemChain: chains.polygonAmoy,
     circleBlockchain: Blockchain.MaticAmoy,
     eoaWalletBlockchain: "MATIC-AMOY",
   },
   seiAtlantic: {
     domain: 16,
-    label: "Sei Atlantic",
-    usdcAddress: "0x4fCF1784B31630811181f670Aea7A7bEF803eaED",
+    label: web3Chains.seiAtlantic.name,
+    usdcAddress: web3Chains.seiAtlantic.usdcAddress,
     viemChain: seiAtlantic,
     circleBlockchain: null,
     eoaWalletBlockchain: null,
   },
   sonicTestnet: {
     domain: 13,
-    label: "Sonic Testnet",
-    usdcAddress: "0x0BA304580ee7c9a980CF72e55f5Ed2E9fd30Bc51",
+    label: web3Chains.sonicTestnet.name,
+    usdcAddress: web3Chains.sonicTestnet.usdcAddress,
     viemChain: sonicTestnet,
     circleBlockchain: null,
     eoaWalletBlockchain: null,
   },
   unichainSepolia: {
     domain: 10,
-    label: "Unichain Sepolia",
-    usdcAddress: "0x31d0220469e10c4E71834a79b1f276d740d3768F",
+    label: web3Chains.unichainSepolia.name,
+    usdcAddress: web3Chains.unichainSepolia.usdcAddress,
     viemChain: chains.unichainSepolia,
     circleBlockchain: Blockchain.UniSepolia,
     eoaWalletBlockchain: "UNI-SEPOLIA",
   },
   worldChainSepolia: {
     domain: 14,
-    label: "World Chain Sepolia",
-    usdcAddress: "0x66145f38cBAC35Ca6F1Dfb4914dF98F1614aeA88",
+    label: web3Chains.worldChainSepolia.name,
+    usdcAddress: web3Chains.worldChainSepolia.usdcAddress,
     viemChain: chains.worldchainSepolia,
     circleBlockchain: null,
     eoaWalletBlockchain: null,
   },
-} as const;
+} as const satisfies Record<
+  PayCmdChain,
+  {
+    domain: number;
+    label: string;
+    usdcAddress: Address;
+    viemChain: Chain;
+    circleBlockchain: Blockchain | null;
+    eoaWalletBlockchain: string | null;
+  }
+>;
 
 export type SupportedChain = keyof typeof GATEWAY_CHAIN_CONFIGS;
 

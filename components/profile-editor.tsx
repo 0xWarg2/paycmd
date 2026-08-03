@@ -28,6 +28,8 @@ import {
   type ReactNode,
 } from "react";
 
+import { getChainMeta } from "@/components/chain-identity";
+import { supportedChains } from "@/lib/paycmd/chains";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -78,11 +80,12 @@ type ProfileEditorProps = {
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
-const chainLabels: Record<string, string> = {
-  arcTestnet: "Arc Testnet",
-  baseSepolia: "Base Sepolia",
-  avalancheFuji: "Avalanche Fuji",
-};
+// Was a 3-entry literal, so a profile defaulting to any of the other 9 supported chains
+// displayed the raw key ("optimismSepolia"). getChainMeta covers all 12 and derives its
+// labels from web3Chains.
+function chainLabel(chain: string) {
+  return getChainMeta(chain)?.label ?? chain;
+}
 
 function fallbackHandle(email: string, userId: string) {
   const base = email.split("@")[0]?.toLowerCase().replace(/[^a-z0-9_-]/g, "") || "paycmd";
@@ -329,7 +332,7 @@ export function ProfileEditor({
                       </span>
                       <span className="inline-flex items-center gap-1 rounded-full border bg-background/60 px-2.5 py-1">
                         <ShieldCheck className="h-4 w-4 text-primary" />
-                        {chainLabels[defaultChain] ?? defaultChain}
+                        {chainLabel(defaultChain)}
                       </span>
                     </div>
                     <div className="mt-4 max-w-md">
@@ -351,7 +354,7 @@ export function ProfileEditor({
               <div className="grid gap-px bg-border md:grid-cols-3">
                 <Metric label={t("profile.circleWallet")} value={shortAddress(scaAddress, notConnected)} />
                 <Metric label={t("profile.contacts")} value={contactsCount.toString()} />
-                <Metric label={t("profile.defaultRail")} value={chainLabels[defaultChain] ?? defaultChain} />
+                <Metric label={t("profile.defaultRail")} value={chainLabel(defaultChain)} />
               </div>
             </div>
 
@@ -520,9 +523,20 @@ export function ProfileEditor({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="arcTestnet">Arc Testnet</SelectItem>
-                      <SelectItem value="baseSepolia">Base Sepolia</SelectItem>
-                      <SelectItem value="avalancheFuji">Avalanche Fuji</SelectItem>
+                      {/* Was 3 hardcoded items, so the other 9 supported chains were unreachable
+                          from the UI even though the API accepted them. */}
+                      {supportedChains.map((chain) => {
+                        const meta = getChainMeta(chain);
+                        const Icon = meta?.Icon;
+                        return (
+                          <SelectItem key={chain} value={chain}>
+                            <span className="flex items-center gap-2">
+                              {Icon ? <Icon className="size-4 shrink-0" /> : null}
+                              {meta?.label ?? chain}
+                            </span>
+                          </SelectItem>
+                        );
+                      })}
                     </SelectContent>
                   </Select>
                 </Field>

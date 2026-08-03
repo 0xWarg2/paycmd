@@ -35,6 +35,7 @@ import {
   type SupportedChain,
 } from "@/lib/circle/gateway-sdk";
 import { circleDeveloperSdk } from "@/lib/circle/sdk";
+import { chainCommandAlias } from "@/lib/paycmd/chains";
 import { requestLocale, tr, type PayCmdLocale } from "@/lib/i18n/server";
 import { createClient } from "@/lib/supabase/server";
 import { maxUint256, zeroAddress, type Address } from "viem";
@@ -93,14 +94,6 @@ function buildBurnIntentPreview(params: {
       hookData: "0x" as `0x${string}`,
     },
   };
-}
-
-function chainCommandAlias(chain: SupportedChain) {
-  return chain === "arcTestnet"
-    ? "arc"
-    : chain === "baseSepolia"
-      ? "base"
-      : "avalanche";
 }
 
 function finalityHint(chain: SupportedChain, locale: PayCmdLocale) {

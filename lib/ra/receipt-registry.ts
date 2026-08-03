@@ -14,6 +14,8 @@ import {
   type Hash,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { normalizeChain } from "@/lib/paycmd/chains";
+import { web3Chains } from "@/lib/paycmd/web3-chains";
 
 export const raReceiptRegistryAbi = [
   {
@@ -68,14 +70,15 @@ export type RaReceiptResult =
       reason: string;
     };
 
-const chainIds: Record<string, bigint> = {
-  arc: 5042002n,
-  arcTestnet: 5042002n,
-  base: 84532n,
-  baseSepolia: 84532n,
-  avalanche: 43113n,
-  avalancheFuji: 43113n,
-};
+/**
+ * Was a hand-written map holding only arc/base/avalanche, so a receipt on any of the other 9
+ * supported chains was recorded onchain with chainId 0 — permanently, since receipts are
+ * immutable. Resolving through normalizeChain covers every alias and every supported chain.
+ */
+function evmChainId(value?: string | null): bigint {
+  const key = normalizeChain(value);
+  return key ? BigInt(web3Chains[key].id) : 0n;
+}
 
 const actionTypes: Record<RaReceiptAction, number> = {
   bridge: 1,
@@ -201,8 +204,8 @@ export async function recordRaReceipt(input: RaReceiptInput): Promise<RaReceiptR
       toAddress(input.userAddress),
       toAddress(input.recipientAddress),
       amountAtomic(input),
-      chainIds[input.sourceChain] ?? 0n,
-      chainIds[input.destinationChain] ?? 0n,
+      evmChainId(input.sourceChain),
+      evmChainId(input.destinationChain),
       toHash(input.sourceTxHash),
       toHash(input.destinationTxHash),
       metadataHash(input),
