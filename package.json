@@ -13,7 +13,8 @@
     "contract:test": "hardhat test",
     "contract:deploy:arc": "hardhat run scripts/deploy-ra-receipt-registry.cjs --network arcTestnet",
     "contract:deploy:swap:arc": "hardhat run scripts/deploy-payna-swap-stack.cjs --network arcTestnet",
-    "chain:check": "node scripts/check-bridge-chains.cjs"
+    "chain:check": "node scripts/check-bridge-chains.cjs",
+    "gateway:webhook:configure": "node scripts/configure-circle-gateway-webhook.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-viem-v2": "^1.1.1",
