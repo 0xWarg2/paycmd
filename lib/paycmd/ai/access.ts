@@ -51,6 +51,23 @@ function row(data: unknown): Reservation | null {
   return Array.isArray(data) && data[0] && typeof data[0] === "object" ? (data[0] as Reservation) : null;
 }
 
+export async function getDeepSeekQuota(client: SupabaseRpcClient): Promise<AiQuota> {
+  if (!enabled()) return unlimitedQuota();
+
+  const snapshotResult = await client.rpc("get_deepseek_quota");
+  const snapshot = row(snapshotResult.data);
+  if (snapshotResult.error || !snapshot) {
+    throw new AiAccessError(
+      "Unable to check AI access",
+      503,
+      "AI_ACCESS_CHECK_FAILED",
+      { enabled: true, unlimited: false, limit: 10, used: null, remaining: null },
+    );
+  }
+
+  return quotaFrom(snapshot);
+}
+
 export async function runDeepSeekWithQuota<T>(client: SupabaseRpcClient, call: () => Promise<T>) {
   if (!enabled()) return { result: await call(), quota: unlimitedQuota() };
 

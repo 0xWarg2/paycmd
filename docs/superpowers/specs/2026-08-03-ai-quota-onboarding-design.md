@@ -14,7 +14,7 @@ Tell a new, limited user that Payna is in beta and includes 10 free lifetime AI 
 
 ## Data and Security
 
-- Add nullable `profiles.ai_quota_notice_seen_at timestamptz`.
+- Add nullable `user_profiles.ai_quota_notice_seen_at timestamptz`.
 - Add an authenticated, `security definer` RPC that derives identity from `auth.uid()`, reads whitelist and successful usage, and returns a non-consuming quota snapshot. It accepts no user ID.
 - Keep whitelist and reservation tables inaccessible directly to `anon` and `authenticated`.
 - Add `/api/ai/quota`: `GET` returns `{ quota, noticeSeenAt }`; `POST` updates the authenticated user's notice timestamp. Authentication or access-check failures must fail closed and leave the banner hidden.

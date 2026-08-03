@@ -67,6 +67,11 @@ import { createClient } from "@/lib/supabase/client";
 import { localeRequestHeaders, translateClient, useI18n } from "@/lib/i18n";
 import { balanceBreakdown } from "@/lib/paycmd/balance-breakdown";
 import {
+  normalizeQuotaOnboardingState,
+  shouldShowQuotaOnboarding,
+  type QuotaOnboardingState,
+} from "@/lib/paycmd/ai/quota-onboarding";
+import {
   balanceRequestBody,
   executionBalanceChainFilter,
 } from "@/lib/paycmd/balance-scope";
@@ -2316,6 +2321,7 @@ export function PayCmdApp() {
   const [activeAskSurfMode, setActiveAskSurfMode] = useState<SurfMode>("research");
   const [activeAskSurfEffort, setActiveAskSurfEffort] = useState<SurfEffort>("standard");
   const [isSlowAskSurfNoticeDismissed, setIsSlowAskSurfNoticeDismissed] = useState(false);
+  const [quotaOnboarding, setQuotaOnboarding] = useState<QuotaOnboardingState | null>(null);
   const [, setExecutions] = useState<ExecutionItem[]>([]);
   const [scrollMetrics, setScrollMetrics] = useState({ top: 0, height: 1, client: 1 });
   const scrollMetricsRef = useRef(scrollMetrics);
@@ -2339,6 +2345,34 @@ export function PayCmdApp() {
     .filter((message) => message.role === "user")
     .map((message) => message.text.trim())
     .filter(Boolean);
+
+  useEffect(() => {
+    if (!userId || isLoadingHistory || messages.length > 0) {
+      setQuotaOnboarding(null);
+      return;
+    }
+
+    let cancelled = false;
+    void requestJson("/api/ai/quota")
+      .then((data) => {
+        if (!cancelled) setQuotaOnboarding(normalizeQuotaOnboardingState(data));
+      })
+      .catch(() => {
+        if (!cancelled) setQuotaOnboarding(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoadingHistory, messages.length, userId]);
+
+  function dismissQuotaOnboarding() {
+    const noticeSeenAt = new Date().toISOString();
+    setQuotaOnboarding((current) => current ? { ...current, noticeSeenAt } : null);
+    void requestJson("/api/ai/quota", { method: "POST", body: JSON.stringify({}) }).catch((error) => {
+      console.error("Could not persist AI quota onboarding dismissal:", error);
+    });
+  }
   const scrollThumbHeight = Math.max(
     36,
     Math.min(100, (scrollMetrics.client / scrollMetrics.height) * 100),
@@ -3983,7 +4017,11 @@ export function PayCmdApp() {
                 </>
               ) : (
                 <>
-                  <OnboardingGuide onSelect={selectCommand} />
+                  <OnboardingGuide
+                    onSelect={selectCommand}
+                    showQuotaNotice={shouldShowQuotaOnboarding(quotaOnboarding)}
+                    onDismissQuotaNotice={dismissQuotaOnboarding}
+                  />
                   {activeAiProvider ? (
                     <AiLoadingBubble
                       provider={activeAiProvider}
@@ -5964,7 +6002,15 @@ function SlowAskSurfNotice({
   );
 }
 
-function OnboardingGuide({ onSelect }: { onSelect: (sample: string) => void }) {
+function OnboardingGuide({
+  onSelect,
+  showQuotaNotice,
+  onDismissQuotaNotice,
+}: {
+  onSelect: (sample: string) => void;
+  showQuotaNotice: boolean;
+  onDismissQuotaNotice: () => void;
+}) {
   const { t } = useI18n();
 
   return (
@@ -5982,6 +6028,30 @@ function OnboardingGuide({ onSelect }: { onSelect: (sample: string) => void }) {
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
             {t("onboarding.description")}
           </p>
+          {showQuotaNotice ? (
+            <div className="mt-4 flex items-start gap-3 rounded-xl border border-emerald-400/30 bg-emerald-500/10 p-3" role="status">
+              <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-emerald-500" />
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-medium uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
+                  {t("onboarding.aiBetaBadge")}
+                </div>
+                <div className="mt-0.5 font-semibold">{t("onboarding.aiBetaTitle")}</div>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  {t("onboarding.aiBetaDescription")}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="-mr-1 -mt-1 h-8 w-8 shrink-0"
+                onClick={onDismissQuotaNotice}
+                aria-label={t("onboarding.aiBetaDismiss")}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : null}
         </div>
       </div>
       <div className="grid gap-2 border-t bg-background/45 p-3 md:grid-cols-2">
