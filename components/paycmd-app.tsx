@@ -54,6 +54,8 @@ import {
 } from "@/components/chain-identity";
 import { PayCmdShell } from "@/components/paycmd-shell";
 import {
+  balanceBreakdown,
+  balanceBreakdownText,
   bridgeErrorWithFaucet,
   isForegroundOnlyCommand,
   partialBalanceSuffix,
@@ -81,6 +83,7 @@ import {
   ParsedCommand,
   requiresConfirmation,
 } from "@/lib/paycmd/commands";
+import { chainCommandAlias, isSupportedChain } from "@/lib/paycmd/chains";
 import { web3Chains } from "@/lib/paycmd/web3-chains";
 import {
   getSwapAdapterAddress,
@@ -174,6 +177,10 @@ type ExecutionItem = {
   txHash?: string;
   result?: unknown;
   error?: string;
+  // Which chain the user asked about, when they named one. The balance route always reads all 12
+  // chains, so this is the only record of "/balance on base" being narrower than "/balance" — the
+  // renderer cannot recover it from the response.
+  chainFilter?: string;
 };
 
 type AiCommandResult = {
@@ -771,6 +778,54 @@ function receiptLinks(...links: Array<ExecutionReceiptLink | null | undefined>) 
     seen.add(link.txHash);
     return true;
   });
+}
+
+/**
+ * "What now?" after a command lands. Derived from the execution at render time rather than stored
+ * on the message, for the same reason buildExecutionReceipt is: the execution is already persisted
+ * whole, so deriving costs nothing, needs no new metadata field in either writer, and applies to
+ * statuses written before this existed.
+ *
+ * Every suggestion here is deliberately read-only (/balance, /history). A chip is one click with
+ * no preview step behind it, so offering /deposit or /transfer would put a funds-moving command a
+ * single stray click away — those stay in the composer where the confirm card guards them.
+ */
+function executionFollowUps(execution: ExecutionItem, t: TranslateFn) {
+  if (execution.status !== "success") return [];
+
+  // Where the money ended up is the chain worth looking at, so destination wins over source.
+  // Anything not in the supported list degrades to the unscoped /balance rather than emitting a
+  // command that would parse with no chain and silently mean something else.
+  const rawChain = executionDestinationChain(execution) ?? executionSourceChain(execution);
+  const chain = rawChain && isSupportedChain(rawChain) ? rawChain : "";
+  const balanceOnChain = chain
+    ? {
+        // chainCommandAlias round-trips through normalizeChain, so the text this produces parses
+        // back to the same chain it came from.
+        command: `/balance on ${chainCommandAlias(chain)}`,
+        label: t("action.checkBalanceOn", { chain: getChainMeta(chain)?.label ?? chain }),
+      }
+    : { command: "/balance", label: t("action.checkBalance") };
+  const history = { command: "/history", label: t("action.viewHistory") };
+
+  switch (execution.command) {
+    case "deposit":
+    case "withdraw":
+    case "transfer":
+    case "bridge":
+    case "swap":
+      return [balanceOnChain];
+    case "pay":
+    case "payroll":
+      return [balanceOnChain, history];
+    case "fund":
+    case "wallet":
+      return [{ command: "/balance", label: t("action.checkBalance") }];
+    // No chip after /balance or /history: the answer is already on screen, and suggesting the
+    // command the user just ran reads like the UI lost track of what happened.
+    default:
+      return [];
+  }
 }
 
 function buildExecutionReceipt(execution: ExecutionItem, t: TranslateFn): ExecutionReceipt | null {
@@ -2689,6 +2744,7 @@ export function PayCmdApp() {
       status: "queued",
       title: draft.summary,
       createdAt: now.toISOString(),
+      chainFilter: draft.fields.chain || undefined,
       gateway: {
         network: "Circle Gateway testnets",
         rail: "Circle Gateway",
@@ -2787,13 +2843,7 @@ export function PayCmdApp() {
     }
 
     if (draft.command === "balance") {
-      const chain = draft.fields.chain;
-      const balances = result?.balances ?? [];
-      if (chain) {
-        const chainTotal = totalBalanceSource(balances, "unified", chain);
-        return `${chain}: ${formatDecimalAmount(chainTotal)} USDC.${partialBalanceSuffix(result, t, "unified", chain)}`;
-      }
-      return `Unified balance: ${formatDecimalAmount(result?.totalUnified)} USDC.${partialBalanceSuffix(result, t, "unified")}`;
+      return balanceBreakdownText(result, t, draft.fields.chain || undefined);
     }
 
     if (draft.command === "deposit") {
@@ -3439,6 +3489,30 @@ export function PayCmdApp() {
     })();
   }
 
+  // Runs a follow-up chip from a finished execution. Goes through submitValue rather than
+  // runCommand so the chip behaves exactly like the user typing it: the command lands in the
+  // transcript, and anything needing confirmation still gets its preview card. executionFollowUps
+  // only offers read-only commands today, but routing through the same path means that stays true
+  // by construction rather than by remembering.
+  function submitSuggestedCommand(command: string) {
+    const value = command.trim();
+    if (!value || submitLockRef.current) return;
+
+    void (async () => {
+      submitLockRef.current = true;
+      setIsSubmitting(true);
+      // A slash command must not be rerouted into research by a leftover AskSurf mode.
+      setChatMode("paycmd");
+
+      try {
+        await submitValue(value);
+      } finally {
+        submitLockRef.current = false;
+        setIsSubmitting(false);
+      }
+    })();
+  }
+
   // Re-runs a command that failed before any on-chain state changed. The retry action
   // is only attached to such failures (see runForegroundCommand's catch), so this never
   // re-submits a bridge whose burn already landed.
@@ -3842,7 +3916,7 @@ export function PayCmdApp() {
                 </div>
               ) : messages.length ? (
                 <>
-                  {messages.map((message) => (
+                  {messages.map((message, index) => (
                     <MessageBubble
                       key={message.id}
                       message={message}
@@ -3852,10 +3926,12 @@ export function PayCmdApp() {
                           ? latestStatusMessageIdByExecution[message.execution.id] === message.id
                           : false
                       }
+                      isLastMessage={index === messages.length - 1}
                       onConfirm={confirmDraft}
                       onCancel={cancelDraft}
                       onRelatedQuestion={submitRelatedQuestion}
                       onRetryCommand={retryCommand}
+                      onSuggestedCommand={submitSuggestedCommand}
                     />
                   ))}
                   {activeAiProvider ? (
@@ -4384,18 +4460,25 @@ function MessageBubble({
   message,
   activeDraftId,
   isLatestExecutionStatus,
+  isLastMessage,
   onConfirm,
   onCancel,
   onRelatedQuestion,
   onRetryCommand,
+  onSuggestedCommand,
 }: {
   message: ChatMessage;
   activeDraftId: string | null;
   isLatestExecutionStatus: boolean;
+  // Distinct from isLatestExecutionStatus, which is per-execution: a transfer's success card stays
+  // "latest" for that execution forever. Follow-up chips need "last thing in the thread" so they
+  // do not pile up under every past transaction.
+  isLastMessage: boolean;
   onConfirm: (messageId: string, draft: ParsedCommand) => void;
   onCancel: (messageId: string) => void;
   onRelatedQuestion: (question: string) => void;
   onRetryCommand: (draft: ParsedCommand) => void;
+  onSuggestedCommand: (command: string) => void;
 }) {
   const isUser = message.role === "user";
   const isSystem = message.role === "system";
@@ -4448,6 +4531,8 @@ function MessageBubble({
             execution={message.execution}
             text={message.text}
             isLatest={isLatestExecutionStatus}
+            showFollowUps={isLastMessage}
+            onSuggestedCommand={onSuggestedCommand}
           />
         ) : (
           <div className="space-y-3">
@@ -6604,14 +6689,134 @@ function CommandPreviewCard({
   );
 }
 
+/**
+ * `/balance` printed an indented text tree, which made the two numbers the user acts on — SCA
+ * (needs /deposit first) versus Gateway (spendable now) — read as one undifferentiated list.
+ *
+ * Shares balanceBreakdown() with balanceBreakdownText so the table and the persisted text can
+ * never disagree. `text` stays the fallback: rows saved before this component existed have no
+ * `execution.result` to render from, and their text is still correct.
+ */
+function BalanceBreakdownTable({
+  result,
+  chainFilter,
+  fallbackText,
+}: {
+  result: unknown;
+  chainFilter?: string;
+  fallbackText: string;
+}) {
+  const { t } = useI18n();
+  const hasData = Array.isArray(recordFrom(result).balances);
+
+  if (!hasData) {
+    return <div className="whitespace-pre-wrap leading-7">{fallbackText}</div>;
+  }
+
+  const { scaTotal, gatewayTotal, total, rows, chainsChecked } = balanceBreakdown(
+    result,
+    chainFilter,
+  );
+  const partial = partialBalanceSuffix(result, t, "unified", chainFilter);
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl border bg-background/60 p-3">
+        <div className="text-xs text-muted-foreground">{t("runtime.balanceTableTotal")}</div>
+        <div className="text-xl font-semibold tabular-nums">
+          {formatDecimalAmount(total)} <span className="text-sm font-normal">USDC</span>
+        </div>
+        {partial ? <div className="mt-0.5 text-xs text-amber-600 dark:text-amber-400">{partial}</div> : null}
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          {[
+            { label: "Circle SCA", amount: scaTotal, hint: t("runtime.balanceScaHint") },
+            { label: "Gateway", amount: gatewayTotal, hint: t("runtime.balanceGatewayHint") },
+          ].map((tile) => (
+            <div key={tile.label} className="rounded-lg bg-muted/50 px-2.5 py-2">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-xs font-medium">{tile.label}</span>
+                <span className="text-sm font-semibold tabular-nums">
+                  {formatDecimalAmount(tile.amount)}
+                </span>
+              </div>
+              <div className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{tile.hint}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="text-sm text-muted-foreground">
+          {t("runtime.balanceEmpty", { count: chainsChecked })}
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-xl border">
+          <div className="border-b bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
+            {t("runtime.balanceByChain", { count: chainsChecked })}
+          </div>
+          <table className="w-full text-sm">
+            <caption className="sr-only">{t("runtime.balanceByChain", { count: chainsChecked })}</caption>
+            <thead>
+              <tr className="border-b text-xs text-muted-foreground">
+                <th scope="col" className="px-3 py-1.5 text-left font-medium">
+                  {t("runtime.balanceTableChain")}
+                </th>
+                <th scope="col" className="px-2 py-1.5 text-right font-medium">Circle SCA</th>
+                <th scope="col" className="px-2 py-1.5 text-right font-medium">Gateway</th>
+                <th scope="col" className="px-3 py-1.5 text-right font-medium">
+                  {t("runtime.balanceTableTotal")}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                // Unknown keys keep the raw key and skip the logo rather than dropping the row, so
+                // a chain added upstream still shows its money before it has an icon here.
+                const meta = getChainMeta(row.chain);
+                const Icon = meta?.Icon;
+                return (
+                  <tr key={row.chain} className="border-b last:border-0">
+                    <th scope="row" className="px-3 py-1.5 text-left font-normal">
+                      <span className="flex items-center gap-2">
+                        {Icon ? <Icon className="size-4 shrink-0" /> : null}
+                        {meta?.label ?? row.chain}
+                      </span>
+                    </th>
+                    <td className="px-2 py-1.5 text-right tabular-nums">
+                      {row.sca > 0 ? formatDecimalAmount(row.sca) : <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">
+                      {row.gateway > 0 ? formatDecimalAmount(row.gateway) : <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-medium tabular-nums">
+                      {formatDecimalAmount(row.sca + row.gateway)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ExecutionStatus({
   execution,
   text,
   isLatest,
+  showFollowUps,
+  onSuggestedCommand,
 }: {
   execution: ExecutionItem;
   text: string;
   isLatest: boolean;
+  // Gated by the caller to the last message in the thread. Every successful execution keeps its own
+  // status card in history, so rendering chips on all of them would stack a fresh "check balance"
+  // prompt under each past transfer.
+  showFollowUps: boolean;
+  onSuggestedCommand: (command: string) => void;
 }) {
   const { t } = useI18n();
   const done = execution.status === "success";
@@ -6622,6 +6827,7 @@ function ExecutionStatus({
   const txLinks = executionTxLinks(execution, t);
   const rail = inferRailFromCommand(execution.command);
   const receipt = buildExecutionReceipt(execution, t);
+  const followUps = showFollowUps ? executionFollowUps(execution, t) : [];
 
   return (
     <div className="space-y-2">
@@ -6641,6 +6847,15 @@ function ExecutionStatus({
       </div>
       {receipt ? (
         <ExecutionReceiptCard receipt={receipt} rail={rail} />
+      ) : execution.command === "balance" ? (
+        // buildExecutionReceipt only covers the money-moving commands, so balance lands here.
+        // chainFilter comes from the draft because the route always reads all 12 chains — the
+        // response alone cannot tell "/balance on base" apart from "/balance".
+        <BalanceBreakdownTable
+          result={execution.result}
+          chainFilter={execution.chainFilter}
+          fallbackText={text}
+        />
       ) : (
         <div className="whitespace-pre-wrap leading-7">{text}</div>
       )}
@@ -6662,6 +6877,22 @@ function ExecutionStatus({
               <span>{link.label}</span>
               <ExplorerTxLink chain={link.chain} txHash={link.txHash} compact />
             </div>
+          ))}
+        </div>
+      ) : null}
+      {showFollowUps && followUps.length ? (
+        <div className="flex flex-wrap items-center gap-2 border-t pt-2.5 text-xs">
+          <span className="text-muted-foreground">{t("action.nextStep")}</span>
+          {followUps.map((followUp) => (
+            <button
+              key={followUp.command}
+              type="button"
+              className="payna-subtle-lift inline-flex items-center gap-1.5 rounded-full border bg-background/75 px-3 py-1 text-muted-foreground backdrop-blur transition hover:border-primary hover:text-foreground"
+              onClick={() => onSuggestedCommand(followUp.command)}
+            >
+              <Sparkles className="h-3 w-3" />
+              {followUp.label}
+            </button>
           ))}
         </div>
       ) : null}

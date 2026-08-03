@@ -34,6 +34,10 @@ export type ExecutionItem = {
   txHash?: string;
   result?: unknown;
   error?: string;
+  // Mirrors the ExecutionItem in components/paycmd-app.tsx, which renders it. Kept in sync here
+  // because the two declarations are assigned to each other structurally — a field on only one
+  // side compiles fine and then reads as undefined at the render site.
+  chainFilter?: string;
 };
 
 export type NotificationItem = {
@@ -255,6 +259,105 @@ export function partialBalanceSuffix(
   return ` (${translate("common.balancePartial", { sources: sources.join(", ") })})`;
 }
 
+/**
+ * `/balance` used to print a single number ("Unified balance: 51.628953 USDC"), which hid the two
+ * facts the user acts on: how much sits in the Circle SCA wallet (needs a deposit before Gateway
+ * can spend it) versus already on Gateway (spendable on any chain now), and which chain holds it.
+ * Both were already in the balance response — per-address `chainBalances` and `gatewayBalances` —
+ * just never rendered.
+ *
+ * Shared by the two `resultText` implementations (this file and components/paycmd-app.tsx) that
+ * had drifted into byte-identical copies of the old one-liner.
+ */
+export type BalanceBreakdownRow = { chain: string; sca: number; gateway: number };
+
+export type BalanceBreakdown = {
+  scaTotal: number;
+  gatewayTotal: number;
+  total: number;
+  rows: BalanceBreakdownRow[];
+  chainsChecked: number;
+};
+
+/**
+ * The numeric half of balanceBreakdownText, split out so BalanceBreakdownTable renders the same
+ * figures the plain-text fallback prints. Two implementations would drift the moment either side
+ * changed how a null RPC read is treated.
+ */
+export function balanceBreakdown(result: any, chain?: string): BalanceBreakdown {
+  const balances: any[] = Array.isArray(result?.balances) ? result.balances : [];
+  const scaTotal = totalBalanceSource(balances, "wallet", chain);
+  const gatewayTotal = totalBalanceSource(balances, "gateway", chain);
+  const perChain = new Map<string, { sca: number; gateway: number }>();
+  // Derived from the response rather than from `supportedChains`, so the count cannot drift if the
+  // route's chain list changes. Includes chains whose read failed — those are unchecked, not empty.
+  const chainsChecked = new Set<string>();
+
+  for (const entry of balances) {
+    for (const item of entry?.chainBalances ?? []) {
+      // Counted after the filter, so `/balance on base` reports 1 chain checked rather than the 12
+      // the route always reads.
+      if (chain && item.chain !== chain) continue;
+      chainsChecked.add(item.chain);
+      // `balance: null` means the RPC failed. Coercing it to 0 would render an unchecked chain as
+      // an empty one; partialBalanceSuffix reports those separately.
+      if (item.balance === null || item.balance === undefined) continue;
+      const row = perChain.get(item.chain) ?? { sca: 0, gateway: 0 };
+      row.sca += Number(item.balance) || 0;
+      perChain.set(item.chain, row);
+    }
+    for (const item of entry?.gatewayBalances ?? []) {
+      if (chain && item.chain !== chain) continue;
+      chainsChecked.add(item.chain);
+      const row = perChain.get(item.chain) ?? { sca: 0, gateway: 0 };
+      row.gateway += Number(item.balance) || 0;
+      perChain.set(item.chain, row);
+    }
+  }
+
+  return {
+    scaTotal,
+    gatewayTotal,
+    total: scaTotal + gatewayTotal,
+    rows: [...perChain.entries()]
+      .map(([chainKey, row]) => ({ chain: chainKey, ...row }))
+      .filter((row) => row.sca > 0 || row.gateway > 0)
+      .sort((a, b) => b.sca + b.gateway - (a.sca + a.gateway)),
+    chainsChecked: chainsChecked.size,
+  };
+}
+
+export function balanceBreakdownText(result: any, translate: Translator, chain?: string) {
+  const { scaTotal, gatewayTotal, rows, chainsChecked } = balanceBreakdown(result, chain);
+
+  const lines = [
+    translate("runtime.balanceTotal", { amount: formatDecimalAmount(scaTotal + gatewayTotal) }) +
+      partialBalanceSuffix(result, translate, "unified", chain),
+    `  ${translate("runtime.balanceSca", { amount: formatDecimalAmount(scaTotal) })}`,
+    `  ${translate("runtime.balanceGateway", { amount: formatDecimalAmount(gatewayTotal) })}`,
+  ];
+
+  if (rows.length === 0) {
+    lines.push(`  ${translate("runtime.balanceEmpty", { count: chainsChecked })}`);
+    return lines.join("\n");
+  }
+
+  lines.push(`  ${translate("runtime.balanceByChain", { count: chainsChecked })}`);
+  for (const row of rows) {
+    // getChainMeta turns "baseSepolia" into "Base Sepolia"; unknown keys fall through to the raw
+    // key rather than dropping the row, so a new chain still shows up before it has an icon.
+    const label = getChainMeta(row.chain)?.label ?? row.chain;
+    // "SCA" and "Gateway" stay literal: both are product names, untranslated in every other key.
+    const parts = [
+      row.sca > 0 ? `SCA ${formatDecimalAmount(row.sca)}` : "",
+      row.gateway > 0 ? `Gateway ${formatDecimalAmount(row.gateway)}` : "",
+    ].filter(Boolean);
+    lines.push(`    ${label}: ${parts.join(" · ")} USDC`);
+  }
+
+  return lines.join("\n");
+}
+
 function commandTitle(draft: ParsedCommand, t: Translator) {
   if (draft.command === "transfer") {
     return t("transfer.title", {
@@ -406,13 +509,7 @@ export function resultText(draft: ParsedCommand, result: any, t?: Translator) {
   }
 
   if (draft.command === "balance") {
-    const chain = draft.fields.chain;
-    const balances = result?.balances ?? [];
-    if (chain) {
-      const chainTotal = totalBalanceSource(balances, "unified", chain);
-      return `${chain}: ${formatDecimalAmount(chainTotal)} USDC.${partialBalanceSuffix(result, translate, "unified", chain)}`;
-    }
-    return `Unified balance: ${formatDecimalAmount(result?.totalUnified)} USDC.${partialBalanceSuffix(result, translate, "unified")}`;
+    return balanceBreakdownText(result, translate, draft.fields.chain || undefined);
   }
 
   if (draft.command === "deposit") {
