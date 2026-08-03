@@ -22,6 +22,11 @@ import { isSupportedChain, type PayCmdChain } from "@/lib/paycmd/chains";
 import { createClient } from "@/lib/supabase/server";
 import type { Address } from "viem";
 
+type BalanceRequest = {
+  addresses?: string[];
+  chain?: PayCmdChain;
+};
+
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient();
@@ -33,7 +38,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { addresses: requestAddresses, chain: requestedChain } = await req.json().catch(() => ({}));
+    const body = (await req.json().catch(() => ({}))) as BalanceRequest;
+    const { addresses: requestAddresses, chain: requestedChain } = body;
     if (requestedChain && (typeof requestedChain !== "string" || !isSupportedChain(requestedChain))) {
       return NextResponse.json({ error: "Unsupported chain" }, { status: 400 });
     }

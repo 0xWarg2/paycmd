@@ -54,7 +54,6 @@ import {
 } from "@/components/chain-identity";
 import { PayCmdShell } from "@/components/paycmd-shell";
 import {
-  balanceBreakdown,
   balanceBreakdownText,
   bridgeErrorWithFaucet,
   isForegroundOnlyCommand,
@@ -66,6 +65,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import { localeRequestHeaders, translateClient, useI18n } from "@/lib/i18n";
+import { balanceBreakdown } from "@/lib/paycmd/balance-breakdown";
+import {
+  balanceRequestBody,
+  executionBalanceChainFilter,
+} from "@/lib/paycmd/balance-scope";
 import {
   cctpBridgeChainMap,
   bridgeModeFrom,
@@ -83,7 +87,7 @@ import {
   ParsedCommand,
   requiresConfirmation,
 } from "@/lib/paycmd/commands";
-import { chainCommandAlias, isSupportedChain } from "@/lib/paycmd/chains";
+import { chainCommandAlias, isSupportedChain, type PayCmdChain } from "@/lib/paycmd/chains";
 import { web3Chains } from "@/lib/paycmd/web3-chains";
 import {
   getSwapAdapterAddress,
@@ -186,10 +190,8 @@ type ExecutionItem = {
   txHash?: string;
   result?: unknown;
   error?: string;
-  // Which chain the user asked about, when they named one. The balance route always reads all 12
-  // chains, so this is the only record of "/balance on base" being narrower than "/balance" — the
-  // renderer cannot recover it from the response.
-  chainFilter?: string;
+  // Persisted with each status message so the one-chain scope survives a chat reload.
+  chainFilter?: PayCmdChain;
 };
 
 type AiCommandResult = {
@@ -2160,13 +2162,13 @@ async function executeCommand(draft: ParsedCommand) {
       return requestJson("/api/wallet-set", { method: "POST", body: JSON.stringify({}) });
     }
     if (draft.fields.action === "balance") {
-      return requestJson("/api/gateway/balance", { method: "POST", body: JSON.stringify({ chain: draft.fields.chain || undefined }) });
+      return requestJson("/api/gateway/balance", { method: "POST", body: JSON.stringify(balanceRequestBody(draft)) });
     }
     return requestJson("/api/wallet/status");
   }
 
   if (draft.command === "balance") {
-    return requestJson("/api/gateway/balance", { method: "POST", body: JSON.stringify({ chain: draft.fields.chain || undefined }) });
+    return requestJson("/api/gateway/balance", { method: "POST", body: JSON.stringify(balanceRequestBody(draft)) });
   }
 
   if (draft.command === "deposit") {
@@ -2272,7 +2274,7 @@ async function executeCommand(draft: ParsedCommand) {
 
   if (draft.command === "gateway") {
     if (draft.fields.action === "balance") {
-      return requestJson("/api/gateway/balance", { method: "POST", body: JSON.stringify({ chain: draft.fields.chain || undefined }) });
+      return requestJson("/api/gateway/balance", { method: "POST", body: JSON.stringify(balanceRequestBody(draft)) });
     }
     return requestJson("/api/gateway/info");
   }
@@ -2779,7 +2781,7 @@ export function PayCmdApp() {
       status: "queued",
       title: draft.summary,
       createdAt: now.toISOString(),
-      chainFilter: draft.fields.chain || undefined,
+      chainFilter: executionBalanceChainFilter(draft),
       gateway: {
         network: "Circle Gateway testnets",
         rail: "Circle Gateway",
@@ -6747,7 +6749,7 @@ function BalanceBreakdownTable({
   fallbackText,
 }: {
   result: unknown;
-  chainFilter?: string;
+  chainFilter?: PayCmdChain;
   fallbackText: string;
 }) {
   const { t } = useI18n();
@@ -6893,8 +6895,7 @@ function ExecutionStatus({
         <ExecutionReceiptCard receipt={receipt} rail={rail} />
       ) : execution.command === "balance" ? (
         // buildExecutionReceipt only covers the money-moving commands, so balance lands here.
-        // chainFilter comes from the draft because the route always reads all 12 chains — the
-        // response alone cannot tell "/balance on base" apart from "/balance".
+        // The persisted filter keeps the requested testnet scope intact after a chat reload.
         <BalanceBreakdownTable
           result={execution.result}
           chainFilter={execution.chainFilter}

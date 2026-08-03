@@ -15,6 +15,12 @@ import { formatUnits } from "viem";
 
 import { getChainMeta } from "@/components/chain-identity";
 import { localeRequestHeaders, translateClient, useI18n } from "@/lib/i18n";
+import { balanceBreakdown } from "@/lib/paycmd/balance-breakdown";
+import {
+  balanceRequestBody,
+  executionBalanceChainFilter,
+} from "@/lib/paycmd/balance-scope";
+import type { PayCmdChain } from "@/lib/paycmd/chains";
 import { faucetHint, isKnownTestnetChain } from "@/lib/paycmd/cctp-bridge";
 import { createClient } from "@/lib/supabase/client";
 import { ParsedCommand } from "@/lib/paycmd/commands";
@@ -37,7 +43,7 @@ export type ExecutionItem = {
   // Mirrors the ExecutionItem in components/paycmd-app.tsx, which renders it. Kept in sync here
   // because the two declarations are assigned to each other structurally — a field on only one
   // side compiles fine and then reads as undefined at the render site.
-  chainFilter?: string;
+  chainFilter?: PayCmdChain;
 };
 
 export type NotificationItem = {
@@ -269,64 +275,6 @@ export function partialBalanceSuffix(
  * Shared by the two `resultText` implementations (this file and components/paycmd-app.tsx) that
  * had drifted into byte-identical copies of the old one-liner.
  */
-export type BalanceBreakdownRow = { chain: string; sca: number; gateway: number };
-
-export type BalanceBreakdown = {
-  scaTotal: number;
-  gatewayTotal: number;
-  total: number;
-  rows: BalanceBreakdownRow[];
-  chainsChecked: number;
-};
-
-/**
- * The numeric half of balanceBreakdownText, split out so BalanceBreakdownTable renders the same
- * figures the plain-text fallback prints. Two implementations would drift the moment either side
- * changed how a null RPC read is treated.
- */
-export function balanceBreakdown(result: any, chain?: string): BalanceBreakdown {
-  const balances: any[] = Array.isArray(result?.balances) ? result.balances : [];
-  const scaTotal = totalBalanceSource(balances, "wallet", chain);
-  const gatewayTotal = totalBalanceSource(balances, "gateway", chain);
-  const perChain = new Map<string, { sca: number; gateway: number }>();
-  // Derived from the response rather than from `supportedChains`, so the count cannot drift if the
-  // route's chain list changes. Includes chains whose read failed — those are unchecked, not empty.
-  const chainsChecked = new Set<string>();
-
-  for (const entry of balances) {
-    for (const item of entry?.chainBalances ?? []) {
-      // Counted after the filter, so `/balance on base` reports 1 chain checked rather than the 12
-      // the route always reads.
-      if (chain && item.chain !== chain) continue;
-      chainsChecked.add(item.chain);
-      // `balance: null` means the RPC failed. Coercing it to 0 would render an unchecked chain as
-      // an empty one; partialBalanceSuffix reports those separately.
-      if (item.balance === null || item.balance === undefined) continue;
-      const row = perChain.get(item.chain) ?? { sca: 0, gateway: 0 };
-      row.sca += Number(item.balance) || 0;
-      perChain.set(item.chain, row);
-    }
-    for (const item of entry?.gatewayBalances ?? []) {
-      if (chain && item.chain !== chain) continue;
-      chainsChecked.add(item.chain);
-      const row = perChain.get(item.chain) ?? { sca: 0, gateway: 0 };
-      row.gateway += Number(item.balance) || 0;
-      perChain.set(item.chain, row);
-    }
-  }
-
-  return {
-    scaTotal,
-    gatewayTotal,
-    total: scaTotal + gatewayTotal,
-    rows: [...perChain.entries()]
-      .map(([chainKey, row]) => ({ chain: chainKey, ...row }))
-      .filter((row) => row.sca > 0 || row.gateway > 0)
-      .sort((a, b) => b.sca + b.gateway - (a.sca + a.gateway)),
-    chainsChecked: chainsChecked.size,
-  };
-}
-
 export function balanceBreakdownText(result: any, translate: Translator, chain?: string) {
   const { scaTotal, gatewayTotal, rows, chainsChecked } = balanceBreakdown(result, chain);
 
@@ -645,13 +593,13 @@ async function executeServerCommand(draft: ParsedCommand) {
       return requestJson("/api/wallet-set", { method: "POST", body: JSON.stringify({}) });
     }
     if (draft.fields.action === "balance") {
-      return requestJson("/api/gateway/balance", { method: "POST", body: JSON.stringify({}) });
+      return requestJson("/api/gateway/balance", { method: "POST", body: JSON.stringify(balanceRequestBody(draft)) });
     }
     return requestJson("/api/wallet/status");
   }
 
   if (draft.command === "balance") {
-    return requestJson("/api/gateway/balance", { method: "POST", body: JSON.stringify({}) });
+    return requestJson("/api/gateway/balance", { method: "POST", body: JSON.stringify(balanceRequestBody(draft)) });
   }
 
   if (draft.command === "deposit") {
@@ -757,7 +705,7 @@ async function executeServerCommand(draft: ParsedCommand) {
 
   if (draft.command === "gateway") {
     if (draft.fields.action === "balance") {
-      return requestJson("/api/gateway/balance", { method: "POST", body: JSON.stringify({}) });
+      return requestJson("/api/gateway/balance", { method: "POST", body: JSON.stringify(balanceRequestBody(draft)) });
     }
     return requestJson("/api/gateway/info");
   }
@@ -779,6 +727,7 @@ function executionFromDraft(draft: ParsedCommand, id: string, createdAt?: string
     status: "queued",
     title: draft.summary,
     createdAt: createdAt ?? new Date().toISOString(),
+    chainFilter: executionBalanceChainFilter(draft),
     gateway: {
       network: "Circle Gateway testnets",
       rail: "Circle Gateway",
