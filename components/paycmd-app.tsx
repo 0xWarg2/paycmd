@@ -71,6 +71,7 @@ import {
   shouldShowQuotaOnboarding,
   type QuotaOnboardingState,
 } from "@/lib/paycmd/ai/quota-onboarding";
+import { AI_QUOTA_X_PROFILE_URL, shouldShowQuotaContactCta } from "@/lib/paycmd/ai/quota-contact";
 import {
   balanceRequestBody,
   executionBalanceChainFilter,
@@ -170,6 +171,7 @@ type ChatMessage = {
   // transport before it ever reaches here.
   reasoning?: string;
   quota?: AiQuota;
+  quotaContactCta?: boolean;
 };
 
 type AiQuota = {
@@ -2428,6 +2430,7 @@ export function PayCmdApp() {
           ? metadata.reasoning
           : undefined,
       quota: normalizeAiQuota(metadata.quota),
+      quotaContactCta: metadata.quotaContactCta === true,
     };
   }
 
@@ -2517,6 +2520,7 @@ export function PayCmdApp() {
       // which rewrites this whole object field by field. Omitting it there silently drops the value.
       reasoning: message.reasoning ?? null,
       quota: message.quota ?? null,
+      quotaContactCta: message.quotaContactCta ?? null,
     };
     const { data, error } = await supabase
       .from("chat_messages")
@@ -2585,6 +2589,7 @@ export function PayCmdApp() {
           // `saveMessage` writes has to be repeated here or confirming a draft erases it.
           reasoning: target.reasoning ?? null,
           quota: target.quota ?? null,
+          quotaContactCta: target.quotaContactCta ?? null,
         },
       })
       .eq("id", messageId)
@@ -2691,13 +2696,15 @@ export function PayCmdApp() {
       }
 
       const message = error instanceof Error ? error.message : "Research failed";
+      const quotaExhausted = (error as { code?: string })?.code === "AI_QUOTA_EXHAUSTED";
       await saveMessage({
         role: "assistant",
-        text: (error as { code?: string })?.code === "AI_QUOTA_EXHAUSTED" ? t("ai.quotaExhausted") : t("asksurf.failed", { message }),
+        text: quotaExhausted ? t("ai.quotaExhausted") : t("asksurf.failed", { message }),
         provider: "asksurf",
         surfMode,
         effort,
         quota: normalizeAiQuota((error as { data?: { quota?: unknown } })?.data?.quota),
+        quotaContactCta: quotaExhausted,
       });
     } finally {
       window.clearTimeout(timeout);
@@ -2776,15 +2783,17 @@ export function PayCmdApp() {
       }
 
       const message = error instanceof Error ? error.message : "AI command parsing failed";
+      const quotaExhausted = (error as { code?: string })?.code === "AI_QUOTA_EXHAUSTED";
       await saveMessage({
         role: "assistant",
-        text: (error as { code?: string })?.code === "AI_QUOTA_EXHAUSTED"
+        text: quotaExhausted
           ? t("ai.quotaExhausted")
           : looksLikeResearchQuestion(value)
           ? t("ai.researchModeHint")
           : t("ai.unhandled", { message }),
         provider: "openai",
         quota: normalizeAiQuota((error as { data?: { quota?: unknown } })?.data?.quota),
+        quotaContactCta: quotaExhausted,
         actions: looksLikeResearchQuestion(value)
           ? [
               {
@@ -4555,6 +4564,7 @@ function MessageBubble({
   onRetryCommand: (draft: ParsedCommand) => void;
   onSuggestedCommand: (command: string) => void;
 }) {
+  const { t } = useI18n();
   const isUser = message.role === "user";
   const isSystem = message.role === "system";
   const isAskSurf = message.provider === "asksurf";
@@ -4622,6 +4632,17 @@ function MessageBubble({
             ) : (
               <span className="block whitespace-pre-wrap break-words">{message.text}</span>
             )}
+            {shouldShowQuotaContactCta(message) ? (
+              <a
+                href={AI_QUOTA_X_PROFILE_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 rounded-md border border-sky-400/50 bg-sky-500/10 px-3 py-2 text-sm font-medium text-sky-700 transition hover:bg-sky-500/20 dark:text-sky-300"
+              >
+                <MessageCircle className="h-4 w-4" />
+                {t("ai.quotaExhaustedCta")}
+              </a>
+            ) : null}
             {message.actions?.length ? (
               <AssistantActionBar
                 actions={message.actions}

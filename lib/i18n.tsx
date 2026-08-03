@@ -253,7 +253,8 @@ const dictionaries: Record<Locale, TranslationMap> = {
     "ai.unhandled": "AI chưa xử lý được câu này: {message}",
     "ai.quotaRemaining": "Còn {remaining}/{limit} lượt AI",
     "ai.quotaUnlimited": "Không giới hạn",
-    "ai.quotaExhausted": "Bạn đã dùng hết 10 lượt AI miễn phí. Liên hệ Payna admin để được thêm vào whitelist.",
+    "ai.quotaExhausted": "Bạn đã dùng hết 10 lượt AI miễn phí. Để được cấp thêm quyền truy cập, hãy DM trực tiếp cho mình trên X.",
+    "ai.quotaExhaustedCta": "DM @0xWarg__ trên X",
 
     "commandPalette.commands": "Commands",
     "commandPalette.filter": "Filter: {query}",
@@ -754,7 +755,8 @@ const dictionaries: Record<Locale, TranslationMap> = {
     "ai.unhandled": "AI could not handle this message: {message}",
     "ai.quotaRemaining": "{remaining}/{limit} AI calls left",
     "ai.quotaUnlimited": "Unlimited",
-    "ai.quotaExhausted": "You have used all 10 free AI calls. Contact a Payna admin to be added to the whitelist.",
+    "ai.quotaExhausted": "You have used all 10 free AI calls. To request continued access, DM me directly on X.",
+    "ai.quotaExhaustedCta": "DM @0xWarg__ on X",
 
     "commandPalette.commands": "Commands",
     "commandPalette.filter": "Filter: {query}",
