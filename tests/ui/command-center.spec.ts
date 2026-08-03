@@ -82,6 +82,26 @@ test("disables progress animation when reduced motion is requested", async ({ pa
   await expect.poll(() => activeProgressIcon.evaluate((element) => getComputedStyle(element).animationName)).toBe("none");
 });
 
+test("historical execution snapshots stop animating and read as completed steps", async ({ page }) => {
+  await page.goto("/dev/ui-preview");
+
+  const historical = page.getByTestId("historical-running-status");
+  await expect(historical.getByText("Step completed", { exact: true })).toBeVisible();
+  await expect(historical.locator(".animate-spin")).toHaveCount(0);
+});
+
+test("desktop toolbar stays above chat content without overlap", async ({ page }, testInfo) => {
+  test.skip(!/desktop-1024/.test(testInfo.project.name), "1024px desktop geometry assertion");
+  await page.goto("/dev/ui-preview");
+
+  const toolbarBox = await page.getByTestId("desktop-command-toolbar").boundingBox();
+  const contentBox = await page.getByTestId("command-center-content").boundingBox();
+
+  expect(toolbarBox).not.toBeNull();
+  expect(contentBox).not.toBeNull();
+  expect(toolbarBox!.y + toolbarBox!.height).toBeLessThanOrEqual(contentBox!.y);
+});
+
 test("matches the command center visual baseline", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/dev/ui-preview");

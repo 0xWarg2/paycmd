@@ -99,14 +99,16 @@ export function ExecutionTimeline({
   waitingMessage,
   fundsMoved = false,
   submitted = false,
+  isLive = true,
 }: {
   status: ExecutionDisplayStatus;
   labels?: Record<ExecutionStepKey, string>;
   waitingMessage?: ReactNode;
   fundsMoved?: boolean;
   submitted?: boolean;
+  isLive?: boolean;
 }) {
-  const steps = executionStepsForStatus(status, { fundsMoved, submitted });
+  const steps = executionStepsForStatus(status, { fundsMoved, submitted, historical: !isLive });
 
   return (
     <div className="space-y-3" aria-live="polite" aria-label={`Transaction status: ${status}`}>
@@ -122,7 +124,7 @@ export function ExecutionTimeline({
               {index ? (
                 <span
                   className={cn(
-                    "absolute right-1/2 top-3 h-px w-full",
+                    "absolute right-1/2 top-3 h-px w-full transition-colors duration-500 ease-out motion-reduce:transition-none",
                     isComplete || isActive ? "bg-primary/70" : "bg-border",
                   )}
                   aria-hidden="true"
@@ -130,13 +132,20 @@ export function ExecutionTimeline({
               ) : null}
               <span
                 className={cn(
-                  "relative z-10 mx-auto flex h-6 w-6 items-center justify-center rounded-full border bg-background",
+                  "relative z-10 mx-auto flex h-6 w-6 items-center justify-center rounded-full border bg-background transition-[background-color,border-color,color,transform] duration-500 ease-out motion-reduce:transition-none",
                   isComplete && "border-primary bg-primary text-primary-foreground",
                   isActive && "border-info text-info",
                   isFailed && "border-danger bg-danger/10 text-danger",
                 )}
               >
-                <Icon className={cn("h-3.5 w-3.5", isActive && "animate-spin motion-reduce:animate-none")} aria-hidden="true" />
+                <Icon
+                  className={cn(
+                    "h-3.5 w-3.5 transition-transform duration-500 ease-out motion-reduce:transition-none",
+                    isActive && isLive && "animate-spin motion-reduce:animate-none",
+                    isComplete && "scale-100",
+                  )}
+                  aria-hidden="true"
+                />
               </span>
               <span
                 className={cn(
@@ -151,7 +160,7 @@ export function ExecutionTimeline({
           );
         })}
       </ol>
-      {status === "waiting_gateway" ? (
+      {status === "waiting_gateway" && isLive ? (
         <div className="flex items-start gap-2 rounded-xl border border-waiting/35 bg-waiting/10 px-3 py-2 text-xs leading-5 text-waiting-foreground">
           <Clock3 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           <span>{waitingMessage ?? "Finality can take several minutes. You can leave this screen and follow progress in Activity."}</span>

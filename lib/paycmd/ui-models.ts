@@ -201,7 +201,7 @@ const activeStepIndex: Record<Exclude<ExecutionDisplayStatus, "success" | "faile
 
 export function executionStepsForStatus(
   status: ExecutionDisplayStatus,
-  context: { fundsMoved?: boolean; submitted?: boolean } = {},
+  context: { fundsMoved?: boolean; submitted?: boolean; historical?: boolean } = {},
 ): ExecutionStep[] {
   if (status === "success") {
     return executionStepKeys.map((key) => ({ key, state: "complete" }));
@@ -215,6 +215,14 @@ export function executionStepsForStatus(
       : status === "waiting_gateway" && !context.submitted
         ? 1
         : activeStepIndex[status];
+
+  if (context.historical && status !== "failed") {
+    return executionStepKeys.map((key, index) => ({
+      key,
+      state: index <= activeIndex ? "complete" : "upcoming",
+    }));
+  }
+
   return executionStepKeys.map((key, index) => ({
     key,
     state:

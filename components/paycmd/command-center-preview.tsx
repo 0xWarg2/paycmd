@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, Bell, Contact, MessageCircle, MoreHorizontal, ShieldCheck, WalletCards } from "lucide-react";
+import { Activity, Bell, ChevronDown, Contact, MessageCircle, MoreHorizontal, Network, ShieldCheck, Wallet, WalletCards } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -84,19 +84,32 @@ export function CommandCenterPreview() {
         </aside>
 
         <section className="flex min-h-0 flex-col pb-20 lg:pb-0">
-          <header className="flex h-16 items-center justify-between border-b border-border/55 bg-surface/78 px-4 backdrop-blur-xl md:px-7">
+          <header
+            data-testid="desktop-command-toolbar"
+            className="flex h-16 min-w-0 items-center justify-between gap-3 overflow-hidden border-b border-border/55 bg-surface/78 px-4 backdrop-blur-xl md:px-7"
+          >
             <div>
               <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Design fixture</div>
               <h1 className="text-base font-semibold md:text-lg">Command center UI states</h1>
             </div>
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" className="rounded-full border-success/35 bg-success/10 text-success">Systems ready</Badge>
-              <Button type="button" variant="outline" className="hidden rounded-xl sm:inline-flex">Base Sepolia</Button>
+            <div className="flex min-w-0 shrink-0 items-center gap-1.5">
+              <Badge variant="outline" className="hidden rounded-full border-success/35 bg-success/10 text-success xl:inline-flex">Systems ready</Badge>
+              <Button type="button" variant="outline" className="hidden max-w-32 gap-2 rounded-xl px-2.5 sm:inline-flex" aria-label="Switch network: Arc Testnet">
+                <Network className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                <span className="xl:hidden">Arc</span><span className="hidden xl:inline">Arc Testnet</span>
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+              </Button>
+              <Button type="button" variant="outline" className="hidden max-w-64 gap-2 rounded-xl px-2.5 sm:inline-flex" aria-label="Wallet 0x83…6877, balance 148.49 USDC">
+                <Wallet className="h-4 w-4 shrink-0 text-info" aria-hidden="true" />
+                <span className="truncate">0x83…6877</span>
+                <span className="hidden text-muted-foreground xl:inline">· 148.49 USDC</span>
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+              </Button>
               <ThemeSwitcher />
             </div>
           </header>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-7">
+          <div data-testid="command-center-content" className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-7">
             <div className="mx-auto grid max-w-5xl gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(280px,.75fr)]">
               <Card className="command-panel overflow-hidden">
                 <CardContent className="space-y-5 p-5 md:p-6">
@@ -146,16 +159,22 @@ export function CommandCenterPreview() {
               <TransactionHistory initialTransactions={previewTransactions} />
             </div>
             <section className="mx-auto mt-5 grid max-w-5xl gap-4 md:grid-cols-2 xl:grid-cols-3" aria-label="Additional interface states">
-              <Card className="command-panel">
+              <Card className="command-panel" data-testid="historical-running-status">
                 <CardContent className="p-5">
-                  <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Wallet approval</div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Running</div>
+                    <Badge variant="success" className="rounded-full">Step completed</Badge>
+                  </div>
                   <div className="mt-2 font-semibold">Approve 50 USDC in MetaMask</div>
-                  <div className="mt-4"><ExecutionTimeline status="running" /></div>
+                  <div className="mt-4"><ExecutionTimeline status="running" isLive={false} /></div>
                 </CardContent>
               </Card>
               <Card className="command-panel border-success/30">
                 <CardContent className="p-5">
-                  <div className="text-xs font-medium uppercase tracking-[0.14em] text-success">Receipt ready</div>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-xs font-medium uppercase tracking-[0.14em] text-success">Receipt ready</div>
+                    <Badge variant="success" className="rounded-full">Completed</Badge>
+                  </div>
                   <div className="mt-2 font-semibold">50 USDC delivered on Arc</div>
                   <div className="mt-4"><ExecutionTimeline status="success" /></div>
                 </CardContent>

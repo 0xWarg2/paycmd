@@ -95,6 +95,16 @@ test("gateway waiting only marks finalizing after submission is confirmed", () =
   assert.equal(afterSubmission.find((step) => step.key === "complete")?.state, "upcoming");
 });
 
+test("historical progress snapshots complete their reached step without staying active", () => {
+  const queued = executionStepsForStatus("queued", { historical: true });
+  const running = executionStepsForStatus("running", { historical: true });
+
+  assert.equal(queued.find((step) => step.key === "prepared")?.state, "complete");
+  assert.equal(queued.some((step) => step.state === "active"), false);
+  assert.equal(running.find((step) => step.key === "wallet_approval")?.state, "complete");
+  assert.equal(running.some((step) => step.state === "active"), false);
+});
+
 test("failed execution marks the active lifecycle step as failed", () => {
   const steps = executionStepsForStatus("failed");
 

@@ -7074,6 +7074,7 @@ function ExecutionStatus({
   const done = execution.status === "success";
   const failed = execution.status === "failed";
   const active = isLatest && !done && !failed;
+  const historical = !isLatest && !done && !failed;
   const sourceChain = executionSourceChain(execution);
   const destinationChain = executionDestinationChain(execution);
   const txLinks = executionTxLinks(execution, t);
@@ -7095,7 +7096,7 @@ function ExecutionStatus({
   return (
     <div className="space-y-3" aria-live="polite">
       <div className="flex items-center gap-2 font-medium">
-        {done ? (
+        {done || historical ? (
           <Check className="h-4 w-4 text-emerald-500" />
         ) : failed ? (
           <Clock3 className="h-4 w-4 text-destructive" />
@@ -7104,15 +7105,17 @@ function ExecutionStatus({
         ) : (
           <Clock3 className="h-4 w-4 text-muted-foreground" />
         )}
-        <span className={active ? "text-muted-foreground" : done ? "text-emerald-600 dark:text-emerald-300" : ""}>
-          {statusLabel(execution.status, t)}
+        <span className={active ? "text-muted-foreground" : done || historical ? "text-emerald-600 dark:text-emerald-300" : ""}>
+          {done ? t("execution.completed") : statusLabel(execution.status, t)}
         </span>
+        {historical ? <Badge variant="success" className="rounded-full">{t("execution.stepCompleted")}</Badge> : null}
       </div>
       {showsTransactionTimeline ? (
         <ExecutionTimeline
           status={execution.status}
           fundsMoved={execution.fundsMoved}
           submitted={Boolean(execution.txHash || execution.fundsMoved)}
+          isLive={active}
           waitingMessage={t("execution.waitingHelp")}
           labels={{
             prepared: t("execution.prepared"),

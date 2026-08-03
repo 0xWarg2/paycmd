@@ -179,6 +179,11 @@ export function PayCmdShell({ children, sidebarPanel }: { children: ReactNode; s
     ? activeChainMeta?.shortLabel ?? activeChain?.name ?? t("common.selectChain")
     : t("common.selectChain");
   const walletBalanceLabel = isMounted ? formatWalletBalance(walletBalance) : "";
+  const walletIdentityLabel = isMounted
+    ? address
+      ? shortenAddress(address)
+      : email || t("common.account")
+    : t("common.account");
   const accountLabel = isMounted
     ? address
       ? [shortenAddress(address), walletBalanceLabel].filter(Boolean).join(" · ")
@@ -214,27 +219,34 @@ export function PayCmdShell({ children, sidebarPanel }: { children: ReactNode; s
   }
 
   const desktopToolbar = (
-    <header className="hidden min-h-16 items-center justify-end gap-1.5 border-b border-border/55 bg-surface/88 px-5 backdrop-blur-xl lg:flex">
+    <header
+      data-testid="desktop-command-toolbar"
+      className="hidden min-h-16 min-w-0 items-center justify-end gap-1.5 overflow-hidden border-b border-border/55 bg-surface/88 px-3 backdrop-blur-xl xl:px-5 lg:flex"
+    >
         {isMounted ? (
           <>
             <Badge
               variant={pendingGatewayDepositCount > 0 ? "waiting" : "success"}
-              className="h-9 gap-1.5 px-3"
+              aria-label={pendingGatewayDepositCount > 0 ? gatewayDepositsPendingLabel : t("shell.systemReady")}
+              className="h-9 shrink-0 gap-1.5 px-2.5"
             >
               {pendingGatewayDepositCount > 0 ? <Clock3 className="h-3.5 w-3.5" /> : <ShieldCheck className="h-3.5 w-3.5" />}
-              {pendingGatewayDepositCount > 0 ? gatewayDepositsPendingLabel : t("shell.systemReady")}
+              <span className="hidden xl:inline">
+                {pendingGatewayDepositCount > 0 ? gatewayDepositsPendingLabel : t("shell.systemReady")}
+              </span>
             </Badge>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   type="button"
                   variant="outline"
-                  className="h-10 gap-2 rounded-xl border-transparent bg-transparent px-2.5 shadow-none hover:border-border hover:bg-accent/60"
+                  aria-label={`${t("common.switchNetwork")}: ${activeChainLabel}`}
+                  className="h-10 max-w-36 shrink-0 gap-2 rounded-xl border-transparent bg-transparent px-2 shadow-none hover:border-border hover:bg-accent/60 xl:px-2.5"
                 >
                   <span className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-foreground">
                     <ActiveChainIcon className="h-4 w-4" size={18} variant="branded" />
                   </span>
-                  <span className="max-w-36 truncate font-semibold">
+                  <span className="max-w-20 truncate font-semibold xl:max-w-36">
                     {activeChainLabel}
                   </span>
                   <ChevronDown className="h-4 w-4 text-muted-foreground" />
@@ -261,14 +273,16 @@ export function PayCmdShell({ children, sidebarPanel }: { children: ReactNode; s
                 <Button
                   type="button"
                   variant="outline"
-                  className="h-10 gap-2 rounded-xl border-transparent bg-transparent px-2.5 shadow-none hover:border-border hover:bg-accent/60"
+                  aria-label={accountLabel}
+                  className="h-10 min-w-0 max-w-48 shrink gap-2 rounded-xl border-transparent bg-transparent px-2 shadow-none hover:border-border hover:bg-accent/60 xl:max-w-72 xl:px-2.5"
                 >
                   <span className="flex h-7 w-7 items-center justify-center rounded-full bg-sky-400/80 text-white">
                     <Wallet className="h-4 w-4" />
                   </span>
-                  <span className="max-w-56 truncate font-semibold">
-                    {accountLabel}
+                  <span className="min-w-0 truncate font-semibold">
+                    {walletIdentityLabel}
                   </span>
+                  {walletBalanceLabel ? <span className="hidden shrink-0 text-muted-foreground xl:inline">· {walletBalanceLabel}</span> : null}
                   <ChevronDown className="h-4 w-4 text-muted-foreground" />
                 </Button>
               </DropdownMenuTrigger>
@@ -278,6 +292,11 @@ export function PayCmdShell({ children, sidebarPanel }: { children: ReactNode; s
                 <div className="px-2 py-1.5 text-xs text-muted-foreground">
                   <div className="truncate">{email || t("common.signedIn")}</div>
                   {address ? <div className="mt-1 truncate font-mono">{address}</div> : null}
+                  {walletBalanceLabel ? (
+                    <div className="mt-2 rounded-lg bg-muted/50 px-2.5 py-2 text-sm font-semibold text-foreground">
+                      {walletBalanceLabel}
+                    </div>
+                  ) : null}
                 </div>
                 {address ? (
                   <DropdownMenuItem onClick={copyAddress} className="gap-2">
@@ -443,7 +462,7 @@ export function PayCmdShell({ children, sidebarPanel }: { children: ReactNode; s
           </div>
         </header>
 
-        <section className="min-h-0 overflow-hidden lg:col-start-2 lg:row-start-2">{children}</section>
+        <section data-testid="command-center-content" className="min-h-0 overflow-hidden lg:col-start-2 lg:row-start-2">{children}</section>
 
         <nav aria-label="Mobile navigation" className="grid grid-cols-4 border-t border-border/65 bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl lg:hidden">
           {mobileNavigation.map((item) => {
