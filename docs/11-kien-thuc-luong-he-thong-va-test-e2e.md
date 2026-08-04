@@ -141,13 +141,13 @@ Command router lỗi / trả JSON sai
 
 Reasoning của DeepSeek bật sẵn trên cả hai model và token reasoning **rút từ chính `max_tokens`**. Command router vì vậy phải tắt thinking: nếu bật, chain-of-thought có thể ăn hết budget làm JSON bị cắt và route âm thầm rơi về rules fallback với HTTP 200. Reasoning trả về ở `choices[0].message.reasoning_content`, được cắt còn 4.000 ký tự ở transport và persist trong `chat_messages.metadata.reasoning`.
 
-Locale UI quyết định ngôn ngữ `assistantText`: English UI trả English, Vietnamese UI trả Vietnamese. Backend research là DeepSeek; không có live web/on-chain search hay citation đã xác minh.
+Locale UI quyết định ngôn ngữ `assistantText`: English UI trả English, Vietnamese UI trả Vietnamese. Backend research dùng DeepSeek để tổng hợp evidence từ Payna Tutorial, Circle MCP, Arc MCP và Tavily. Hệ thống hỗ trợ live web search và chỉ hiển thị citation lấy từ các nguồn retrieval; model không được tự tạo URL. AskPayna chưa truy vấn on-chain trực tiếp theo địa chỉ ví hoặc transaction hash.
 
 ## 4. Chuẩn bị test
 
 1. Apply Supabase migrations; cấu hình `NEXT_PUBLIC_SUPABASE_URL` và `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
 2. Cấu hình Circle: `CIRCLE_API_KEY`, `CIRCLE_ENTITY_SECRET`, `CIRCLE_WALLET_SET_ID`.
-3. Để test AI, set `DEEPSEEK_API_KEY` (và các `DEEPSEEK_*_MODEL` nếu muốn override) trong `.env.local`.
+3. Để test AI, set `DEEPSEEK_API_KEY`, một `TAVILY_API_KEY` mới chưa từng bị lộ (và các `DEEPSEEK_*_MODEL` nếu muốn override) trong `.env.local`.
 4. Chạy `npm install` rồi `npm run dev`; mở `http://localhost:3000`.
 5. Chuẩn bị account A (payer) và B (recipient). Login mỗi account một lần để bootstrap Circle SCA wallet; kiểm tra bằng `/wallet status`.
 6. Nạp testnet USDC và native gas vào các ví/chain cần test. Khi test MetaMask fund, account MetaMask phải có USDC testnet và native gas.
@@ -226,7 +226,7 @@ Ghi nhớ: nếu Gateway source balance thiếu, transfer chat có thể auto-de
 - Không auto-execute payment khi chưa confirm.
 - Payroll chạy tuần tự trong request, chưa có queue/worker riêng.
 - Schedule chưa có cron thật; budget là demo static.
-- Research DeepSeek không có live web/on-chain search; câu trả lời dựa trên kiến thức model, không có citation đã xác minh.
+- Research có live web search qua Tavily và tài liệu chính thức qua Circle/Arc MCP, nhưng chưa truy vấn on-chain trực tiếp theo địa chỉ ví hoặc transaction hash. Nếu retrieval lỗi hoặc chưa được cấu hình, response phải hiển thị trạng thái `partial` hoặc `unavailable` thay vì coi dữ liệu hiện tại là đã xác minh.
 - Không có retry ở transport. Một request lỗi là lỗi luôn, user phải hỏi lại.
 - Giá DeepSeek nhân đôi giờ cao điểm Bắc Kinh 09:00–12:00 và 14:00–18:00 (UTC+8).
 

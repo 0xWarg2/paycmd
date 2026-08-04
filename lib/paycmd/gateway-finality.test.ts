@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
 import test from "node:test";
 
+import * as gatewayWebhook from "../circle/gateway-webhook.ts";
+import * as gatewayFinalityModule from "./gateway-finality.ts";
 import {
   gatewayDepositPollingIntervalMs,
   reconciliationDecision,
@@ -31,6 +33,68 @@ const finalizedPayload = {
   timestamp: "2026-08-03T12:05:00.000Z",
   version: 2,
 };
+
+const webhookTestPayload = {
+  subscriptionId: "00000000-0000-0000-0000-000000000000",
+  notificationId: "00000000-0000-0000-0000-000000000000",
+  notificationType: "webhooks.test",
+  notification: { hello: "world" },
+  timestamp: "2026-08-04T04:42:39.000Z",
+  version: 2,
+};
+
+test("recognizes Circle's signed endpoint-verification notification", () => {
+  const recognizesTestNotification = (
+    gatewayWebhook as Record<string, unknown>
+  ).isCircleWebhookTestNotification;
+
+  assert.equal(typeof recognizesTestNotification, "function");
+  assert.equal(
+    (recognizesTestNotification as (input: unknown) => boolean)(webhookTestPayload),
+    true,
+  );
+});
+
+test("requires an existing Circle subscription in update-only mode", () => {
+  const resolveRequest = (
+    gatewayWebhook as Record<string, unknown>
+  ).resolveGatewayWebhookSubscriptionRequest;
+
+  assert.equal(typeof resolveRequest, "function");
+  assert.throws(
+    () =>
+      (resolveRequest as (input: unknown) => unknown)({
+        subscriptionId: undefined,
+        updateOnly: true,
+      }),
+    /CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_ID is required in update-only mode/,
+  );
+});
+
+test("updates an existing Circle subscription without creating a duplicate", () => {
+  const resolveRequest = (
+    gatewayWebhook as Record<string, unknown>
+  ).resolveGatewayWebhookSubscriptionRequest as (input: unknown) => unknown;
+
+  assert.deepEqual(
+    resolveRequest({ subscriptionId: "subscription-123", updateOnly: true }),
+    {
+      method: "PATCH",
+      url: "https://api.circle.com/v2/notifications/subscriptions/permissionless/subscription-123",
+    },
+  );
+});
+
+test("allows the manual configure command to create the first Circle subscription", () => {
+  const resolveRequest = (
+    gatewayWebhook as Record<string, unknown>
+  ).resolveGatewayWebhookSubscriptionRequest as (input: unknown) => unknown;
+
+  assert.deepEqual(resolveRequest({ subscriptionId: undefined, updateOnly: false }), {
+    method: "POST",
+    url: "https://api.circle.com/v2/notifications/subscriptions/permissionless",
+  });
+});
 
 test("accepts only a matching Circle Gateway deposit-finalized event", () => {
   const parsed = parseGatewayDepositFinalized(finalizedPayload, "testnet");
@@ -152,4 +216,49 @@ test("polling backs off while webhook remains the primary completion path", () =
   assert.equal(gatewayDepositPollingIntervalMs(30_000), 15_000);
   assert.equal(gatewayDepositPollingIntervalMs(3 * 60_000), 30_000);
   assert.equal(gatewayDepositPollingIntervalMs(12 * 60_000), 60_000);
+});
+
+test("builds a catch-up snapshot from a webhook-settled chat message", () => {
+  const buildSnapshots = (
+    gatewayFinalityModule as Record<string, unknown>
+  ).gatewayDepositSettlementSnapshotsFromMessages;
+
+  assert.equal(typeof buildSnapshots, "function");
+  assert.deepEqual(
+    (buildSnapshots as (rows: unknown[]) => unknown[])([
+      {
+        content: "1 USDC is available in Gateway.",
+        metadata: {
+          execution: {
+            command: "deposit",
+            status: "success",
+            txHash: "0xABC",
+            finalitySource: "circle_webhook",
+          },
+        },
+      },
+      {
+        content: "Still waiting",
+        metadata: {
+          execution: { command: "deposit", status: "waiting_gateway", txHash: "0xDEF" },
+        },
+      },
+    ]),
+    [{ txHash: "0xABC", message: "1 USDC is available in Gateway." }],
+  );
+});
+
+test("uses settled snapshots when polling missed the realtime completion", () => {
+  const readSettlements = (
+    gatewayFinalityModule as Record<string, unknown>
+  ).gatewayDepositSettlementsFromSync;
+
+  assert.equal(typeof readSettlements, "function");
+  assert.deepEqual(
+    (readSettlements as (payload: unknown) => unknown[])({
+      completed: [],
+      settled: [{ txHash: "0xABC", message: "Deposit complete" }],
+    }),
+    [{ txHash: "0xABC", message: "Deposit complete" }],
+  );
 });

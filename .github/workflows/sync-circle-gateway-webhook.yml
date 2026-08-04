@@ -1,0 +1,81 @@
+name: Sync Circle Gateway production webhook
+
+on:
+  deployment_status:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: circle-gateway-production-webhook
+  cancel-in-progress: true
+
+jobs:
+  sync-subscription:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.deployment_status.state == 'success' &&
+       github.event.deployment.environment == 'Production' &&
+       github.event.deployment.creator.login == 'vercel[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          ref: main
+
+      - name: Confirm this is the current main deployment
+        id: deployment
+        env:
+          DEPLOYED_SHA: ${{ github.event.deployment.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          elif [ "$DEPLOYED_SHA" = "$(git rev-parse HEAD)" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Skipping stale production deployment $DEPLOYED_SHA."
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Node
+        if: steps.deployment.outputs.current == 'true'
+        uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.deployment.outputs.current == 'true'
+        run: npm ci --legacy-peer-deps
+
+      - name: Wait for the production webhook route
+        if: steps.deployment.outputs.current == 'true'
+        run: |
+          for attempt in $(seq 1 18); do
+            status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              https://heypayna.xyz/api/webhooks/circle-gateway)"
+            if [ "$status" = "405" ]; then
+              exit 0
+            fi
+            echo "Attempt $attempt: webhook route returned HTTP $status; retrying."
+            sleep 10
+          done
+          echo "Production webhook route did not become ready."
+          exit 1
+
+      - name: Update Circle Gateway subscription
+        if: steps.deployment.outputs.current == 'true'
+        run: npm run gateway:webhook:update
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CIRCLE_API_KEY: ${{ secrets.CIRCLE_API_KEY }}
+          CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_ID: ${{ secrets.CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_ID }}
+          CIRCLE_GATEWAY_ENVIRONMENT: TEST
+          CIRCLE_GATEWAY_WEBHOOK_URL: https://heypayna.xyz/api/webhooks/circle-gateway
+          CIRCLE_GATEWAY_DOMAINS: 26,3,1,6,0,19,2,7,16,13,10,14

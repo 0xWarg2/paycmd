@@ -13,7 +13,10 @@ import {
   type PendingGatewayDeposit,
   type SettledGatewayDeposit,
 } from "@/lib/paycmd/gateway-deposit-settlement";
-import { reconciliationDecision } from "@/lib/paycmd/gateway-finality";
+import {
+  gatewayDepositSettlementSnapshotsFromMessages,
+  reconciliationDecision,
+} from "@/lib/paycmd/gateway-finality";
 import { createClient } from "@/lib/supabase/server";
 
 export async function POST(req: NextRequest) {
@@ -28,6 +31,25 @@ export async function POST(req: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const loadSettlementSnapshots = async () => {
+      const { data, error } = await supabase
+        .from("chat_messages")
+        .select("content, metadata, created_at")
+        .eq("user_id", user.id)
+        .eq("kind", "status")
+        .eq("metadata->execution->>command", "deposit")
+        .eq("metadata->execution->>status", "success")
+        .order("created_at", { ascending: false })
+        .limit(25);
+
+      if (error) {
+        console.error("Failed to load settled Gateway deposit snapshots:", error);
+        return [];
+      }
+
+      return gatewayDepositSettlementSnapshotsFromMessages(data ?? []);
+    };
 
     const { data: pendingRows, error } = await supabase
       .from("transaction_history")
@@ -53,7 +75,12 @@ export async function POST(req: NextRequest) {
       // sync could clean up, because by then there is nothing left to complete. Observed live:
       // both deposits settled, yet the waiting notification stayed unread.
       await archivePendingGatewayNotifications(supabase, user.id);
-      return NextResponse.json({ success: true, completed: [], pending: [] });
+      return NextResponse.json({
+        success: true,
+        completed: [],
+        settled: await loadSettlementSnapshots(),
+        pending: [],
+      });
     }
 
     // `GatewayWallet.deposit()` credits the *calling* wallet, and `/deposit` calls it from the
@@ -99,6 +126,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         success: true,
         completed: [],
+        settled: await loadSettlementSnapshots(),
         pending: pending.map((row) => row.id),
         reason: "No wallet address found. Run /wallet create first.",
       });
@@ -197,6 +225,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       completed,
+      settled: await loadSettlementSnapshots(),
       pending: stillPending,
     });
   } catch (error) {

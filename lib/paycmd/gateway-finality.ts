@@ -40,3 +40,67 @@ export function gatewayDepositPollingIntervalMs(ageMs: number) {
   if (ageMs < 10 * 60_000) return 30_000;
   return 60_000;
 }
+
+export type GatewayDepositSettlementSignal = {
+  txHash: string;
+  message: string;
+};
+
+function settlementSignal(input: unknown): GatewayDepositSettlementSignal | null {
+  if (!input || typeof input !== "object") return null;
+  const value = input as Record<string, unknown>;
+  if (typeof value.txHash !== "string" || typeof value.message !== "string") return null;
+  if (!value.txHash.trim() || !value.message.trim()) return null;
+  return { txHash: value.txHash, message: value.message };
+}
+
+export function gatewayDepositSettlementSnapshotsFromMessages(
+  rows: unknown[],
+): GatewayDepositSettlementSignal[] {
+  const snapshots: GatewayDepositSettlementSignal[] = [];
+  const seen = new Set<string>();
+
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const record = row as Record<string, unknown>;
+    const metadata = record.metadata;
+    if (!metadata || typeof metadata !== "object") continue;
+    const execution = (metadata as Record<string, unknown>).execution;
+    if (!execution || typeof execution !== "object") continue;
+    const detail = execution as Record<string, unknown>;
+    if (detail.command !== "deposit" || detail.status !== "success") continue;
+
+    const signal = settlementSignal({ txHash: detail.txHash, message: record.content });
+    if (!signal) continue;
+    const normalized = normalizeTransactionHash(signal.txHash);
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    snapshots.push(signal);
+  }
+
+  return snapshots;
+}
+
+export function gatewayDepositSettlementsFromSync(
+  payload: unknown,
+): GatewayDepositSettlementSignal[] {
+  if (!payload || typeof payload !== "object") return [];
+  const value = payload as Record<string, unknown>;
+  const candidates = [
+    ...(Array.isArray(value.completed) ? value.completed : []),
+    ...(Array.isArray(value.settled) ? value.settled : []),
+  ];
+  const settlements: GatewayDepositSettlementSignal[] = [];
+  const seen = new Set<string>();
+
+  for (const candidate of candidates) {
+    const signal = settlementSignal(candidate);
+    if (!signal) continue;
+    const normalized = normalizeTransactionHash(signal.txHash);
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    settlements.push(signal);
+  }
+
+  return settlements;
+}

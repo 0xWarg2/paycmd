@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import {
   fetchCircleNotificationPublicKey,
+  isCircleWebhookTestNotification,
   parseGatewayDepositFinalized,
   verifyCircleWebhookSignature,
   type CircleEnvironment,
@@ -42,7 +43,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid Circle webhook signature." }, { status: 401 });
     }
 
-    const event = parseGatewayDepositFinalized(JSON.parse(rawBody), configuredEnvironment());
+    const payload = JSON.parse(rawBody) as unknown;
+    if (isCircleWebhookTestNotification(payload)) {
+      return NextResponse.json({ success: true, test: true });
+    }
+
+    const event = parseGatewayDepositFinalized(payload, configuredEnvironment());
     const supabase = createAdminClient();
     const auditRow = {
       notification_id: event.notificationId,

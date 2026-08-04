@@ -22,7 +22,10 @@ import {
 } from "@/lib/paycmd/balance-scope";
 import type { PayCmdChain } from "@/lib/paycmd/chains";
 import { faucetHint, isKnownTestnetChain } from "@/lib/paycmd/cctp-bridge";
-import { gatewayDepositPollingIntervalMs } from "@/lib/paycmd/gateway-finality";
+import {
+  gatewayDepositPollingIntervalMs,
+  gatewayDepositSettlementsFromSync,
+} from "@/lib/paycmd/gateway-finality";
 import { createClient } from "@/lib/supabase/client";
 import { ParsedCommand } from "@/lib/paycmd/commands";
 
@@ -842,9 +845,19 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({}),
       });
       const completedCount = Array.isArray(data?.completed) ? data.completed.length : 0;
+      const settlements = gatewayDepositSettlementsFromSync(data);
       // The route has always returned `pending` on every path; nothing read it until now. It
       // drives both the sidebar badge and the polling interval below.
       setPendingGatewayDepositCount(Array.isArray(data?.pending) ? data.pending.length : 0);
+
+      if (settlements.length > 0) {
+        // Realtime is the fast path, but a tab can disconnect exactly while Circle finalizes.
+        // The sync response includes persisted success snapshots so the next poll can repair a
+        // stale in-memory card without a reload or a duplicate success toast.
+        window.dispatchEvent(
+          new CustomEvent("ra:gateway-deposit-settled", { detail: settlements }),
+        );
+      }
 
       if (completedCount > 0) {
         const firstCompleted = data.completed[0];
@@ -861,9 +874,6 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
         // not re-read it — so the card that announced this deposit would keep spinning until a
         // manual reload. Hand the settled deposits to `paycmd-app` for an in-place patch; it
         // joins on `txHash`, the one field the chat message and the deposit row share.
-        window.dispatchEvent(
-          new CustomEvent("ra:gateway-deposit-settled", { detail: data.completed }),
-        );
         await refreshNotifications();
         await refreshBalance();
       }

@@ -1,7 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 import nextEnv from "@next/env";
 
-import { buildGatewayWebhookSubscription } from "../lib/circle/gateway-webhook.ts";
+import {
+  buildGatewayWebhookSubscription,
+  resolveGatewayWebhookSubscriptionRequest,
+} from "../lib/circle/gateway-webhook.ts";
 
 nextEnv.loadEnvConfig(process.cwd());
 
@@ -40,11 +43,12 @@ async function main() {
   });
 
   const subscriptionId = process.env.CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_ID;
-  const url = subscriptionId
-    ? `https://api.circle.com/v2/notifications/subscriptions/permissionless/${subscriptionId}`
-    : "https://api.circle.com/v2/notifications/subscriptions/permissionless";
-  const response = await fetch(url, {
-    method: subscriptionId ? "PATCH" : "POST",
+  const request = resolveGatewayWebhookSubscriptionRequest({
+    subscriptionId,
+    updateOnly: process.argv.includes("--update-only"),
+  });
+  const response = await fetch(request.url, {
+    method: request.method,
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",

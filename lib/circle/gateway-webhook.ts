@@ -55,6 +55,36 @@ function requiredString(value: unknown, field: string) {
   return value;
 }
 
+export function isCircleWebhookTestNotification(input: unknown) {
+  if (!input || typeof input !== "object") return false;
+  return (input as Record<string, unknown>).notificationType === "webhooks.test";
+}
+
+const CIRCLE_GATEWAY_SUBSCRIPTIONS_URL =
+  "https://api.circle.com/v2/notifications/subscriptions/permissionless";
+
+export function resolveGatewayWebhookSubscriptionRequest({
+  subscriptionId,
+  updateOnly,
+}: {
+  subscriptionId?: string;
+  updateOnly: boolean;
+}) {
+  const normalizedSubscriptionId = subscriptionId?.trim();
+  if (updateOnly && !normalizedSubscriptionId) {
+    throw new Error(
+      "CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_ID is required in update-only mode.",
+    );
+  }
+
+  return normalizedSubscriptionId
+    ? {
+        method: "PATCH" as const,
+        url: `${CIRCLE_GATEWAY_SUBSCRIPTIONS_URL}/${normalizedSubscriptionId}`,
+      }
+    : { method: "POST" as const, url: CIRCLE_GATEWAY_SUBSCRIPTIONS_URL };
+}
+
 export function parseGatewayDepositFinalized(
   input: unknown,
   expectedEnvironment: CircleEnvironment,
