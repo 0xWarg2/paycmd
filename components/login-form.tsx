@@ -112,8 +112,8 @@ export function LoginForm({
   }
 
   return (
-    <div className={cn("payna-shell-bg grid min-h-dvh bg-[#07090d] text-[#f4f7f8] lg:grid-cols-[minmax(0,1fr)_minmax(420px,640px)]", className)} {...props}>
-      <section className="relative hidden overflow-hidden border-r border-white/10 bg-[#0d1117] lg:block">
+    <div className={cn("payna-shell-bg grid min-h-dvh bg-background text-foreground lg:grid-cols-[minmax(0,1fr)_minmax(420px,640px)]", className)} {...props}>
+      <section className="payna-dark-panel relative hidden overflow-hidden border-r border-white/10 lg:block">
         <Image
           src="/brand/antlers_transparent.png"
           alt="Payna AI payment copilot"
@@ -141,7 +141,7 @@ export function LoginForm({
 
       <section className="flex min-h-dvh items-center justify-center px-5 py-10">
         <div className="paycmd-reveal w-full max-w-[430px]">
-          <Link href="/" className="mb-10 inline-flex items-center gap-3 text-white/80 transition hover:text-white">
+          <Link href="/" className="mb-10 inline-flex items-center gap-3 text-foreground/80 transition hover:text-foreground">
             <span className="paycmd-pulse-ring payna-logo-frame relative h-11 w-11 overflow-hidden rounded-full border border-white/15">
               <Image src="/brand/antlers_transparent.png" alt="Payna" fill className="object-contain p-1" />
             </span>
@@ -150,12 +150,12 @@ export function LoginForm({
 
           <div className="mb-8 text-center">
             <h2 className="text-4xl font-semibold tracking-normal">Welcome</h2>
-            <p className="mt-3 text-sm text-white/48">Sign in to launch your payment command center</p>
+            <p className="mt-3 text-sm text-muted-foreground">Sign in to launch your payment command center</p>
           </div>
 
           <Button
             type="button"
-            className="paycmd-button-shine h-12 w-full rounded-2xl border border-white/12 bg-white text-[#07090d] shadow-[0_18px_55px_rgba(99,244,200,.16)] hover:bg-[#dffdf5]"
+            className="paycmd-button-shine h-12 w-full rounded-2xl border border-border bg-foreground text-background shadow-[0_18px_55px_color-mix(in_oklch,var(--primary)_16%,transparent)] hover:bg-foreground/90"
             disabled={isWalletLoading}
             onClick={handleMetaMaskLogin}
           >
@@ -167,15 +167,15 @@ export function LoginForm({
             Sign in with MetaMask
           </Button>
 
-          <div className="my-7 flex items-center gap-3 text-xs uppercase text-white/36">
-            <span className="h-px flex-1 bg-white/10" />
+          <div className="my-7 flex items-center gap-3 text-xs uppercase text-muted-foreground">
+            <span className="h-px flex-1 bg-border" />
             or continue with email
-            <span className="h-px flex-1 bg-white/10" />
+            <span className="h-px flex-1 bg-border" />
           </div>
 
           <form onSubmit={handleEmailLogin} className="space-y-4">
             <div className="relative">
-              <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/34" />
+              <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 id="email"
                 type="email"
@@ -183,7 +183,7 @@ export function LoginForm({
                 placeholder="Email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="h-12 border-white/10 bg-transparent pl-10 text-white transition focus-visible:border-[#63f4c8]/55 placeholder:text-white/36"
+                className="h-12 border-input bg-background/45 pl-10 text-foreground transition focus-visible:border-primary placeholder:text-muted-foreground"
               />
             </div>
             <Input
@@ -193,28 +193,28 @@ export function LoginForm({
               placeholder="Password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="h-12 border-white/10 bg-transparent text-white transition focus-visible:border-[#63f4c8]/55 placeholder:text-white/36"
+              className="h-12 border-input bg-background/45 text-foreground transition focus-visible:border-primary placeholder:text-muted-foreground"
             />
-            <Button type="submit" className="paycmd-button-shine h-12 w-full bg-white/70 text-[#07090d] hover:bg-white" disabled={isEmailLoading}>
+            <Button type="submit" className="paycmd-button-shine h-12 w-full bg-foreground text-background hover:bg-foreground/90" disabled={isEmailLoading}>
               {isEmailLoading ? "Signing in..." : "Continue"}
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
           </form>
 
           {error ? (
-            <div className="mt-5 rounded-md border border-[#ff4d5e]/30 bg-[#ff4d5e]/10 p-3 text-sm text-[#ffd5da]">
+            <div className="mt-5 rounded-md border border-destructive/35 bg-destructive/10 p-3 text-sm text-destructive">
               {error}
             </div>
           ) : null}
 
-          <div className="mt-8 flex items-center justify-center gap-2 text-xs leading-5 text-white/48">
-            <ShieldCheck className="h-4 w-4 text-[#63f4c8]" />
+          <div className="mt-8 flex items-center justify-center gap-2 text-xs leading-5 text-muted-foreground">
+            <ShieldCheck className="h-4 w-4 text-primary" />
             By continuing, you agree to use Payna for demo stablecoin commands.
           </div>
 
-          <p className="mt-5 text-center text-sm text-white/48">
+          <p className="mt-5 text-center text-sm text-muted-foreground">
             Need email access?{" "}
-            <Link href="/auth/sign-up" className="text-white underline underline-offset-4">
+            <Link href="/auth/sign-up" className="text-foreground underline underline-offset-4">
               Create an account
             </Link>
           </p>

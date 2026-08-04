@@ -6060,10 +6060,10 @@ function AiLoadingBubble({
 
   return (
     <div className="flex justify-start">
-      <div className="w-full max-w-[96%] rounded-3xl rounded-bl-md border border-white/6 bg-transparent px-3 py-3 text-sm leading-6 md:max-w-[86%]">
+      <div className="w-full max-w-[96%] rounded-3xl rounded-bl-md border border-border bg-transparent px-3 py-3 text-sm leading-6 md:max-w-[86%]">
         <div className="flex items-start gap-4">
           <div className="relative h-14 w-14 shrink-0">
-            <div className="payna-thinking-orbit absolute inset-0 rounded-full border border-white/22 border-t-emerald-400 border-r-white/50 shadow-[0_0_28px_rgba(99,244,200,.16)]" />
+            <div className="payna-thinking-orbit absolute inset-0 rounded-full border border-border border-r-foreground/50 border-t-primary shadow-[0_0_28px_rgba(99,244,200,.16)]" />
             <div className="payna-logo-frame absolute inset-1.5 overflow-hidden rounded-full border border-white/10">
               <Image src="/brand/antlers_transparent.png" alt="" fill className="object-contain p-1" />
             </div>
