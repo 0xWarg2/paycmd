@@ -19,13 +19,20 @@ type Reservation = {
 };
 
 export class AiAccessError extends Error {
+  readonly status: 429 | 503;
+  readonly code: "AI_QUOTA_EXHAUSTED" | "AI_ACCESS_CHECK_FAILED";
+  readonly quota: AiQuota;
+
   constructor(
     message: string,
-    public readonly status: 429 | 503,
-    public readonly code: "AI_QUOTA_EXHAUSTED" | "AI_ACCESS_CHECK_FAILED",
-    public readonly quota: AiQuota,
+    status: 429 | 503,
+    code: "AI_QUOTA_EXHAUSTED" | "AI_ACCESS_CHECK_FAILED",
+    quota: AiQuota,
   ) {
     super(message);
+    this.status = status;
+    this.code = code;
+    this.quota = quota;
   }
 }
 

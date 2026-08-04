@@ -1460,6 +1460,18 @@ export async function getUsdcBalance(
   return balance as bigint;
 }
 
+export async function getTransactionBlockNumber(
+  txHash: Hash,
+  chain: SupportedChain,
+): Promise<bigint> {
+  const publicClient = createPublicClient({
+    chain: getChainConfig(chain),
+    transport: getRpcTransport(chain),
+  });
+  const receipt = await publicClient.getTransactionReceipt({ hash: txHash });
+  return receipt.blockNumber;
+}
+
 export async function fetchGatewayInfo(): Promise<{
   version: number;
   domains: Array<{

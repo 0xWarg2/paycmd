@@ -18,6 +18,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import {
+  getTransactionBlockNumber,
   initiateDepositFromCustodialWallet,
   supportedGatewayChains,
   type SupportedChain,
@@ -117,6 +118,18 @@ export async function POST(req: NextRequest) {
       eoaAddress as `0x${string}`
     );
 
+    let depositBlockNumber: string | null = null;
+    try {
+      depositBlockNumber = (
+        await getTransactionBlockNumber(txHash as `0x${string}`, chain as SupportedChain)
+      ).toString();
+    } catch (receiptError) {
+      // The transaction is already confirmed by Circle at this point. A temporary RPC failure
+      // must not turn a successful deposit into a failed command; the authoritative webhook can
+      // still settle it, and legacy reconciliation remains available for this row.
+      console.warn("Could not load deposit block number:", receiptError);
+    }
+
     // Store transaction in database. The on-chain deposit transaction is confirmed here,
     // but Circle Gateway still needs finality/indexing before the balance can be burned.
     await supabase.from("transaction_history").insert([
@@ -126,6 +139,7 @@ export async function POST(req: NextRequest) {
         tx_type: "deposit",
         amount: parseFloat(amount),
         tx_hash: txHash,
+        deposit_block_number: depositBlockNumber,
         // This should probably be dynamic if you support multiple gateways
         gateway_wallet_address: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9",
         status: "pending_gateway_finality",
@@ -138,6 +152,7 @@ export async function POST(req: NextRequest) {
       success: true,
       status: "pending_gateway_finality",
       txHash,
+      blockNumber: depositBlockNumber,
       chain,
       amount: parseFloat(amount),
       message: tr(locale, "gateway.depositPending", { amount: parseFloat(amount), chain }),

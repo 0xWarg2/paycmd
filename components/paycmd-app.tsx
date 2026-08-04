@@ -131,10 +131,14 @@ type SurfMode = "instant" | "research";
 // Two tiers, matching the two models available. `extended` and `maximum` were the pre-merge values;
 // `normalizeSurfEffort` folds them into `deep` when reading persisted rows.
 type SurfEffort = "standard" | "deep";
+type KnowledgeSource = "payna" | "circle" | "arc" | "web";
+type GroundingStatus = "verified" | "partial" | "unavailable" | "not_applicable";
 
 type ChatCitation = {
   title?: string;
   url?: string;
+  source?: KnowledgeSource;
+  publishedAt?: string;
 };
 
 type AssistantAction =
@@ -177,6 +181,8 @@ type ChatMessage = {
   reasoning?: string;
   quota?: AiQuota;
   quotaContactCta?: boolean;
+  groundingStatus?: GroundingStatus;
+  knowledgeSources?: KnowledgeSource[];
 };
 
 type AiQuota = {
@@ -232,6 +238,8 @@ type CryptoResearchResult = {
   durationMs?: number;
   reasoning?: string;
   quota?: AiQuota;
+  groundingStatus?: GroundingStatus;
+  knowledgeSources?: KnowledgeSource[];
 };
 
 type ChatMessageRow = {
@@ -344,6 +352,33 @@ function isNearViewportBottom(viewport: HTMLDivElement) {
 
 function normalizeAiProvider(value: unknown): AiProvider | undefined {
   return value === "openai" || value === "asksurf" || value === "paycmd" ? value : undefined;
+}
+
+function normalizeGroundingStatus(value: unknown): GroundingStatus | undefined {
+  return value === "verified" || value === "partial" || value === "unavailable" || value === "not_applicable"
+    ? value
+    : undefined;
+}
+
+function normalizeKnowledgeSources(value: unknown): KnowledgeSource[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const sources = value.filter((source): source is KnowledgeSource =>
+    source === "payna" || source === "circle" || source === "arc" || source === "web");
+  return sources.length ? Array.from(new Set(sources)) : undefined;
+}
+
+function groundingStatusLabel(status: GroundingStatus) {
+  if (status === "verified") return "Verified";
+  if (status === "partial") return "Partially verified";
+  if (status === "unavailable") return "Online sources unavailable";
+  return "No retrieval needed";
+}
+
+function knowledgeSourceLabel(source: KnowledgeSource) {
+  if (source === "payna") return "Payna Tutorial";
+  if (source === "circle") return "Circle MCP";
+  if (source === "arc") return "Arc MCP";
+  return "Web Search";
 }
 
 function normalizeAiQuota(value: unknown): AiQuota | undefined {
@@ -2335,6 +2370,8 @@ function mapRowToMessage(row: ChatMessageRow): ChatMessage {
         : undefined,
     quota: normalizeAiQuota(metadata.quota),
     quotaContactCta: metadata.quotaContactCta === true,
+    groundingStatus: normalizeGroundingStatus(metadata.groundingStatus),
+    knowledgeSources: normalizeKnowledgeSources(metadata.knowledgeSources),
   };
 }
 
@@ -2532,6 +2569,8 @@ export function PayCmdApp() {
       reasoning: message.reasoning ?? null,
       quota: message.quota ?? null,
       quotaContactCta: message.quotaContactCta ?? null,
+      groundingStatus: message.groundingStatus ?? null,
+      knowledgeSources: message.knowledgeSources ?? null,
     };
     const { data, error } = await supabase
       .from("chat_messages")
@@ -2601,6 +2640,8 @@ export function PayCmdApp() {
           reasoning: target.reasoning ?? null,
           quota: target.quota ?? null,
           quotaContactCta: target.quotaContactCta ?? null,
+          groundingStatus: target.groundingStatus ?? null,
+          knowledgeSources: target.knowledgeSources ?? null,
         },
       })
       .eq("id", messageId)
@@ -2691,6 +2732,8 @@ export function PayCmdApp() {
         durationMs: result.durationMs,
         reasoning: result.reasoning,
         quota: result.quota,
+        groundingStatus: result.groundingStatus,
+        knowledgeSources: result.knowledgeSources,
       });
     } catch (error) {
       if ((error as { name?: string })?.name === "AbortError") {
@@ -4672,6 +4715,8 @@ function MessageBubble({
             effort={message.effort}
             durationMs={message.durationMs}
             quota={message.quota}
+            groundingStatus={message.groundingStatus}
+            knowledgeSources={message.knowledgeSources}
           />
         ) : null}
         {/* Above the content branches rather than inside them, so one placement covers the research
@@ -4798,6 +4843,8 @@ function ProviderBadge({
   effort,
   durationMs,
   quota,
+  groundingStatus,
+  knowledgeSources,
 }: {
   provider: AiProvider;
   model?: string;
@@ -4805,6 +4852,8 @@ function ProviderBadge({
   effort?: SurfEffort;
   durationMs?: number;
   quota?: AiQuota;
+  groundingStatus?: GroundingStatus;
+  knowledgeSources?: KnowledgeSource[];
 }) {
   const { t } = useI18n();
   const Icon = provider === "asksurf" ? Waypoints : provider === "openai" ? Bot : Sparkles;
@@ -4828,6 +4877,12 @@ function ProviderBadge({
         <span className="text-muted-foreground">
           · {quota.unlimited ? t("ai.quotaUnlimited") : t("ai.quotaRemaining", { remaining: quota.remaining ?? 0, limit: quota.limit ?? 10 })}
         </span>
+      ) : null}
+      {groundingStatus && groundingStatus !== "not_applicable" ? (
+        <span className="text-muted-foreground">· {groundingStatusLabel(groundingStatus)}</span>
+      ) : null}
+      {knowledgeSources?.length ? (
+        <span className="text-muted-foreground">· {knowledgeSources.map(knowledgeSourceLabel).join(" + ")}</span>
       ) : null}
     </div>
   );
