@@ -28,6 +28,9 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Validate tutorial version
+        run: npm run tutorial:validate
+
       - name: Build
         run: npm run build
         env:

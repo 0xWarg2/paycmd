@@ -19,6 +19,7 @@ import Link from "next/link";
 
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { Button } from "@/components/ui/button";
+import tutorial from "@/content/payna-tutorial.json";
 import { CIRCLE_TESTNET_FAUCET_URL } from "@/lib/paycmd/cctp-bridge";
 import { useI18n, type Locale } from "@/lib/i18n";
 
@@ -28,6 +29,7 @@ const docs = {
   en: {
     nav: {
       overview: "Overview",
+      research: "AskPayna research",
       stack: "Tech stack",
       funding: "Funding",
       commands: "Commands",
@@ -156,6 +158,7 @@ const docs = {
   vi: {
     nav: {
       overview: "Tổng quan",
+      research: "AskPayna research",
       stack: "Công nghệ",
       funding: "Nạp tiền",
       commands: "Lệnh mẫu",
@@ -285,6 +288,7 @@ const docs = {
 
 const sectionIcons = {
   overview: MessageSquareText,
+  research: BookOpen,
   stack: Network,
   funding: CircleDollarSign,
   commands: BookOpen,
@@ -296,7 +300,18 @@ const sectionIcons = {
 
 export default function DocsPage() {
   const { locale } = useI18n();
-  const copy = docs[locale];
+  const tutorialSections = tutorial.locales[locale].sections;
+  const tutorialById = Object.fromEntries(tutorialSections.map((section) => [section.id, section]));
+  const commandItems = "items" in tutorialById.commands
+    ? tutorialById.commands.items as string[][]
+    : docs[locale].commands;
+  const copy = {
+    ...docs[locale],
+    overview: tutorialById.overview.content,
+    fundingSteps: tutorialById.funding.content,
+    commands: commandItems,
+    safety: tutorialById.safety.content,
+  };
   const navEntries = Object.entries(copy.nav) as Array<[keyof typeof copy.nav, string]>;
 
   return (
@@ -367,6 +382,7 @@ export default function DocsPage() {
               <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[#63f4c8]/35 bg-[#63f4c8]/10 px-4 py-2 text-sm text-[#caffee]">
                 <Code2 className="h-4 w-4" />
                 {copy.heroEyebrow}
+                <span className="text-white/48">v{tutorial.version}</span>
               </div>
               <h1 className="max-w-4xl text-4xl font-semibold leading-tight tracking-normal md:text-5xl">
                 {copy.title}
@@ -414,6 +430,10 @@ export default function DocsPage() {
             <div className="space-y-6">
               <DocSection id="overview" title={copy.overviewTitle} icon={MessageSquareText}>
                 <BulletList items={copy.overview} />
+              </DocSection>
+
+              <DocSection id="research" title={tutorialById.askpayna.title} icon={BookOpen}>
+                <BulletList items={tutorialById.askpayna.content} />
               </DocSection>
 
               <DocSection id="stack" title={copy.stackTitle} icon={Network}>
