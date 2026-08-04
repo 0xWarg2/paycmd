@@ -6,7 +6,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? "github" : "list",
   use: {
-    baseURL: "http://127.0.0.1:3010",
+    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3010",
     colorScheme: "dark",
     trace: "retain-on-failure",
   },
@@ -22,11 +22,13 @@ export default defineConfig({
     { name: "desktop-1024-light", use: { ...devices["Desktop Chrome"], colorScheme: "light", viewport: { width: 1024, height: 768 } } },
     { name: "desktop-1440-light", use: { ...devices["Desktop Chrome"], colorScheme: "light", viewport: { width: 1440, height: 900 } } },
   ],
-  webServer: {
-    command:
-      "PAYNA_UI_FIXTURE=1 NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=test npm run dev -- --hostname 127.0.0.1 --port 3010",
-    url: "http://127.0.0.1:3010/dev/ui-preview",
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  webServer: process.env.PLAYWRIGHT_EXTERNAL_SERVER === "1"
+    ? undefined
+    : {
+        command:
+          "NEXT_DIST_DIR=.next-playwright PAYNA_UI_FIXTURE=1 NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=test npm run dev -- --hostname 127.0.0.1 --port 3010",
+        url: "http://127.0.0.1:3010/dev/ui-preview",
+        reuseExistingServer: !process.env.CI,
+        timeout: 120_000,
+      },
 });

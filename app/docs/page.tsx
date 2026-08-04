@@ -18,6 +18,7 @@ import Image from "next/image";
 import Link from "next/link";
 
 import { LanguageSwitcher } from "@/components/language-switcher";
+import { ThemeSwitcher } from "@/components/theme-switcher";
 import { Button } from "@/components/ui/button";
 import tutorial from "@/content/payna-tutorial.json";
 import { CIRCLE_TESTNET_FAUCET_URL } from "@/lib/paycmd/cctp-bridge";
@@ -315,14 +316,14 @@ export default function DocsPage() {
   const navEntries = Object.entries(copy.nav) as Array<[keyof typeof copy.nav, string]>;
 
   return (
-    <main className="relative h-dvh overflow-y-auto overflow-x-hidden scroll-smooth bg-[#07090d] text-[#f4f7f8]">
+    <main className="relative h-dvh overflow-y-auto overflow-x-hidden scroll-smooth bg-background text-foreground">
       <div className="pointer-events-none fixed inset-0">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_16%_0%,rgba(99,244,200,.16),transparent_32rem),radial-gradient(circle_at_90%_6%,rgba(67,120,255,.12),transparent_26rem),#07090d]" />
+        <div className="payna-docs-backdrop absolute inset-0" />
         <div className="paycmd-stars absolute inset-0 opacity-35" />
         <div className="paycmd-hero-grid absolute inset-0 opacity-25" />
       </div>
 
-      <header className="sticky top-0 z-30 border-b border-white/10 bg-[#07090d]/76 backdrop-blur-xl">
+      <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur-xl">
         <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-5 md:px-8">
           <Link href="/" className="flex min-w-0 items-center gap-3">
             <div className="payna-logo-frame relative h-11 w-11 shrink-0 overflow-hidden rounded-full border border-white/15">
@@ -330,18 +331,19 @@ export default function DocsPage() {
             </div>
             <div className="min-w-0">
               <div className="truncate text-xl font-semibold tracking-normal">Payna</div>
-              <div className="truncate text-xs text-white/48">Docs</div>
+              <div className="truncate text-xs text-muted-foreground">Docs</div>
             </div>
           </Link>
 
           <div className="flex items-center gap-2">
             <LanguageSwitcher />
-            <Button asChild variant="outline" className="hidden rounded-full border-white/15 bg-white/[0.04] text-white hover:bg-white/10 hover:text-white sm:inline-flex">
+            <ThemeSwitcher />
+            <Button asChild variant="outline" className="hidden rounded-full border-border bg-background/55 text-foreground hover:bg-accent hover:text-accent-foreground sm:inline-flex">
               <Link href="/">
                 Home
               </Link>
             </Button>
-            <Button asChild className="paycmd-button-shine rounded-full bg-white px-5 text-[#07090d] hover:bg-[#dffdf5]">
+            <Button asChild className="paycmd-button-shine rounded-full bg-foreground px-5 text-background hover:bg-foreground/90">
               <Link href="/app">
                 {copy.launch}
                 <ArrowRight className="h-4 w-4" />
@@ -354,9 +356,9 @@ export default function DocsPage() {
       <section className="relative z-10 mx-auto max-w-7xl px-5 py-10 md:px-8 md:py-14">
         <div className="grid gap-8 lg:grid-cols-[240px_minmax(0,780px)] xl:grid-cols-[240px_minmax(0,780px)_220px]">
           <aside className="hidden lg:block">
-            <nav className="sticky top-28 rounded-2xl border border-white/10 bg-white/[0.035] p-3 backdrop-blur-xl">
-              <div className="mb-3 flex items-center gap-2 px-2 text-sm font-semibold text-white">
-                <BookOpen className="h-4 w-4 text-[#63f4c8]" />
+            <nav className="sticky top-28 rounded-2xl border border-border bg-card/60 p-3 backdrop-blur-xl">
+              <div className="mb-3 flex items-center gap-2 px-2 text-sm font-semibold text-card-foreground">
+                <BookOpen className="h-4 w-4 text-primary" />
                 {copy.heroEyebrow}
               </div>
               <div className="space-y-1">
@@ -366,9 +368,9 @@ export default function DocsPage() {
                     <a
                       key={id}
                       href={`#${id}`}
-                      className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-white/58 transition hover:bg-white/[0.055] hover:text-white"
+                      className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-muted-foreground transition hover:bg-accent hover:text-accent-foreground"
                     >
-                      <Icon className="h-4 w-4 text-[#63f4c8]" />
+                      <Icon className="h-4 w-4 text-primary" />
                       {label}
                     </a>
                   );
@@ -378,32 +380,32 @@ export default function DocsPage() {
           </aside>
 
           <div className="min-w-0">
-            <div className="mb-8 border-b border-white/10 pb-8">
-              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[#63f4c8]/35 bg-[#63f4c8]/10 px-4 py-2 text-sm text-[#caffee]">
+            <div className="mb-8 border-b border-border pb-8">
+              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/35 bg-primary/10 px-4 py-2 text-sm font-medium text-primary">
                 <Code2 className="h-4 w-4" />
                 {copy.heroEyebrow}
-                <span className="text-white/48">v{tutorial.version}</span>
+                <span className="text-muted-foreground">v{tutorial.version}</span>
               </div>
               <h1 className="max-w-4xl text-4xl font-semibold leading-tight tracking-normal md:text-5xl">
                 {copy.title}
               </h1>
-              <p className="mt-5 max-w-3xl text-base leading-8 text-white/62">
+              <p className="mt-5 max-w-3xl text-base leading-8 text-muted-foreground">
                 {copy.description}
               </p>
               <div className="mt-7 flex flex-wrap gap-3">
-                <Button asChild className="rounded-full bg-white text-[#07090d] hover:bg-[#dffdf5]">
+                <Button asChild className="rounded-full bg-foreground text-background hover:bg-foreground/90">
                   <Link href="/app">
                     {copy.launch}
                     <ArrowRight className="h-4 w-4" />
                   </Link>
                 </Button>
-                <Button asChild variant="outline" className="rounded-full border-white/15 bg-white/[0.04] text-white hover:bg-white/10 hover:text-white">
+                <Button asChild variant="outline" className="rounded-full border-border bg-background/55 text-foreground hover:bg-accent hover:text-accent-foreground">
                   <a href={CIRCLE_TESTNET_FAUCET_URL} target="_blank" rel="noreferrer">
                     {copy.faucet}
                     <ExternalLink className="h-4 w-4" />
                   </a>
                 </Button>
-                <Button asChild variant="outline" className="rounded-full border-white/15 bg-white/[0.04] text-white hover:bg-white/10 hover:text-white">
+                <Button asChild variant="outline" className="rounded-full border-border bg-background/55 text-foreground hover:bg-accent hover:text-accent-foreground">
                   <a href={ARC_SCAN_URL} target="_blank" rel="noreferrer">
                     {copy.arcscan}
                     <ExternalLink className="h-4 w-4" />
@@ -416,12 +418,12 @@ export default function DocsPage() {
               {copy.quickstart.map((item: string[]) => {
                 const [step, title, description] = item;
                 return (
-                  <div key={title} className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 backdrop-blur">
-                    <div className="mb-3 flex h-8 w-8 items-center justify-center rounded-xl bg-[#63f4c8]/12 text-sm font-semibold text-[#63f4c8]">
+                  <div key={title} className="rounded-2xl border border-border bg-card/60 p-4 backdrop-blur">
+                    <div className="mb-3 flex h-8 w-8 items-center justify-center rounded-xl bg-primary/12 text-sm font-semibold text-primary">
                       {step}
                     </div>
-                    <div className="font-semibold text-white">{title}</div>
-                    <p className="mt-2 text-sm leading-6 text-white/56">{description}</p>
+                    <div className="font-semibold text-card-foreground">{title}</div>
+                    <p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p>
                   </div>
                 );
               })}
@@ -441,12 +443,12 @@ export default function DocsPage() {
                   {copy.stack.map((item: string[]) => {
                     const [title, detail] = item;
                     return (
-                      <div key={title} className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
-                        <div className="flex items-center gap-2 font-semibold text-white">
-                          <CheckCircle2 className="h-4 w-4 text-[#63f4c8]" />
+                      <div key={title} className="rounded-2xl border border-border bg-card/60 p-4">
+                        <div className="flex items-center gap-2 font-semibold text-card-foreground">
+                          <CheckCircle2 className="h-4 w-4 text-primary" />
                           {title}
                         </div>
-                        <p className="mt-2 text-sm leading-6 text-white/58">{detail}</p>
+                        <p className="mt-2 text-sm leading-6 text-muted-foreground">{detail}</p>
                       </div>
                     );
                   })}
@@ -458,19 +460,19 @@ export default function DocsPage() {
               </DocSection>
 
               <DocSection id="commands" title={copy.commandsTitle} icon={BookOpen}>
-                <div className="overflow-hidden rounded-2xl border border-white/10">
-                  <div className="hidden grid-cols-[minmax(180px,0.8fr)_minmax(0,1.2fr)] border-b border-white/10 bg-white/[0.04] px-4 py-3 text-xs font-semibold uppercase text-white/48 md:grid">
+                <div className="overflow-hidden rounded-2xl border border-border">
+                  <div className="hidden grid-cols-[minmax(180px,0.8fr)_minmax(0,1.2fr)] border-b border-border bg-muted/55 px-4 py-3 text-xs font-semibold uppercase text-muted-foreground md:grid">
                     <span>Command</span>
                     <span>Description</span>
                   </div>
                   {copy.commands.map((item: string[]) => {
                     const [command, description] = item;
                     return (
-                      <div key={command} className="grid gap-3 border-b border-white/8 px-4 py-3 last:border-b-0 md:grid-cols-[minmax(180px,0.8fr)_minmax(0,1.2fr)]">
-                        <code className="min-w-0 break-words rounded-xl bg-black/28 px-3 py-2 text-sm text-[#dffdf5]">
+                      <div key={command} className="grid gap-3 border-b border-border px-4 py-3 last:border-b-0 md:grid-cols-[minmax(180px,0.8fr)_minmax(0,1.2fr)]">
+                        <code className="min-w-0 break-words rounded-xl bg-[#0b1017] px-3 py-2 text-sm text-[#dffdf5]">
                           {command}
                         </code>
-                        <p className="text-sm leading-6 text-white/62">{description}</p>
+                        <p className="text-sm leading-6 text-muted-foreground">{description}</p>
                       </div>
                     );
                   })}
@@ -479,10 +481,10 @@ export default function DocsPage() {
 
               <DocSection id="swap" title={copy.swapTitle} icon={ArrowRightLeft}>
                 <div className="space-y-5">
-                  <p className="text-sm leading-7 text-white/64">{copy.swapIntro}</p>
+                  <p className="text-sm leading-7 text-muted-foreground">{copy.swapIntro}</p>
 
-                  <div className="overflow-hidden rounded-2xl border border-white/10">
-                    <div className="grid border-b border-white/10 bg-white/[0.04] px-4 py-3 text-xs font-semibold uppercase text-white/48 md:grid-cols-[110px_130px_minmax(0,1fr)_100px]">
+                  <div className="overflow-hidden rounded-2xl border border-border">
+                    <div className="grid border-b border-border bg-muted/55 px-4 py-3 text-xs font-semibold uppercase text-muted-foreground md:grid-cols-[110px_130px_minmax(0,1fr)_100px]">
                       <span>Token</span>
                       <span>Name</span>
                       <span>Address</span>
@@ -491,13 +493,13 @@ export default function DocsPage() {
                     {copy.swapTokens.map((item: string[]) => {
                       const [symbol, name, address, decimals] = item;
                       return (
-                        <div key={symbol} className="grid gap-2 border-b border-white/8 px-4 py-3 last:border-b-0 md:grid-cols-[110px_130px_minmax(0,1fr)_100px]">
-                          <span className="font-semibold text-white">{symbol}</span>
-                          <span className="text-sm text-white/62">{name}</span>
-                          <code className="min-w-0 break-all rounded-xl bg-black/28 px-3 py-2 text-xs text-[#dffdf5]">
+                        <div key={symbol} className="grid gap-2 border-b border-border px-4 py-3 last:border-b-0 md:grid-cols-[110px_130px_minmax(0,1fr)_100px]">
+                          <span className="font-semibold text-foreground">{symbol}</span>
+                          <span className="text-sm text-muted-foreground">{name}</span>
+                          <code className="min-w-0 break-all rounded-xl bg-[#0b1017] px-3 py-2 text-xs text-[#dffdf5]">
                             {address}
                           </code>
-                          <span className="text-sm text-white/62">{decimals}</span>
+                          <span className="text-sm text-muted-foreground">{decimals}</span>
                         </div>
                       );
                     })}
@@ -523,14 +525,14 @@ export default function DocsPage() {
           </div>
 
           <aside className="hidden xl:block">
-            <nav className="sticky top-28 border-l border-white/10 pl-4">
-              <div className="mb-3 text-xs font-semibold uppercase text-white/38">{copy.onThisPage}</div>
+            <nav className="sticky top-28 border-l border-border pl-4">
+              <div className="mb-3 text-xs font-semibold uppercase text-muted-foreground">{copy.onThisPage}</div>
               <div className="space-y-1">
                 {navEntries.map(([id, label]) => (
                   <a
                     key={id}
                     href={`#${id}`}
-                    className="block rounded-lg px-2 py-1.5 text-sm text-white/46 transition hover:bg-white/[0.045] hover:text-white"
+                    className="block rounded-lg px-2 py-1.5 text-sm text-muted-foreground transition hover:bg-accent hover:text-accent-foreground"
                   >
                     {label}
                   </a>
@@ -556,9 +558,9 @@ function DocSection({
   children: React.ReactNode;
 }) {
   return (
-    <section id={id} className="scroll-mt-28 rounded-2xl border border-white/10 bg-[#0b1017]/76 p-5 shadow-[0_16px_60px_rgba(0,0,0,.18)] backdrop-blur-xl md:p-7">
-      <div className="mb-5 flex items-center gap-3 border-b border-white/10 pb-4">
-        <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#63f4c8]/25 bg-[#63f4c8]/10 text-[#63f4c8]">
+    <section id={id} className="scroll-mt-28 rounded-2xl border border-border bg-card/75 p-5 shadow-[0_16px_60px_var(--cosmic-shadow)] backdrop-blur-xl md:p-7">
+      <div className="mb-5 flex items-center gap-3 border-b border-border pb-4">
+        <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-primary/25 bg-primary/10 text-primary">
           <Icon className="h-5 w-5" />
         </div>
         <h2 className="text-2xl font-semibold tracking-normal md:text-3xl">{title}</h2>
@@ -572,9 +574,9 @@ function BulletList({ items }: { items: string[] }) {
   return (
     <div className="space-y-3">
       {items.map((item) => (
-        <div key={item} className="flex gap-3 rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#63f4c8]" />
-          <p className="text-sm leading-7 text-white/64">{item}</p>
+        <div key={item} className="flex gap-3 rounded-2xl border border-border bg-muted/35 p-4">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+          <p className="text-sm leading-7 text-muted-foreground">{item}</p>
         </div>
       ))}
     </div>
@@ -585,11 +587,11 @@ function NumberedList({ items }: { items: string[] }) {
   return (
     <div className="grid gap-3">
       {items.map((item, index) => (
-        <div key={item} className="flex gap-3 rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-[#63f4c8]/12 text-sm font-semibold text-[#63f4c8]">
+        <div key={item} className="flex gap-3 rounded-2xl border border-border bg-muted/35 p-4">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-primary/12 text-sm font-semibold text-primary">
             {index + 1}
           </span>
-          <p className="text-sm leading-7 text-white/64">{item}</p>
+          <p className="text-sm leading-7 text-muted-foreground">{item}</p>
         </div>
       ))}
     </div>
@@ -598,14 +600,14 @@ function NumberedList({ items }: { items: string[] }) {
 
 function FaqList({ items }: { items: string[][] }) {
   return (
-    <div className="divide-y divide-white/10 overflow-hidden rounded-2xl border border-white/10">
+    <div className="divide-y divide-border overflow-hidden rounded-2xl border border-border">
       {items.map(([question, answer], index) => (
-        <details key={question} className="group bg-white/[0.025] open:bg-white/[0.04]" open={index === 0}>
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-4 text-sm font-semibold text-white transition hover:bg-white/[0.035]">
+        <details key={question} className="group bg-card/55 open:bg-muted/45" open={index === 0}>
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-4 text-sm font-semibold text-card-foreground transition hover:bg-muted/45">
             <span>{question}</span>
-            <HelpCircle className="h-4 w-4 shrink-0 text-[#63f4c8] transition group-open:rotate-45" />
+            <HelpCircle className="h-4 w-4 shrink-0 text-primary transition group-open:rotate-45" />
           </summary>
-          <div className="px-4 pb-5 text-sm leading-7 text-white/62">
+          <div className="px-4 pb-5 text-sm leading-7 text-muted-foreground">
             {answer}
           </div>
         </details>

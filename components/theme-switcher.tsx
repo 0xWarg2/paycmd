@@ -42,7 +42,7 @@ const ThemeSwitcher = () => {
   }, []);
 
   if (!mounted) {
-    return null;
+    return <span className="block h-11 w-11 shrink-0" aria-hidden="true" />;
   }
 
   const ICON_SIZE = 16;
@@ -50,7 +50,13 @@ const ThemeSwitcher = () => {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size={"icon"} aria-label={t("common.appearance")} title={t("common.appearance")}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-11 min-h-11 w-11 min-w-11 shrink-0 rounded-full"
+          aria-label={t("common.appearance")}
+          title={t("common.appearance")}
+        >
           {theme === "light" ? (
             <Sun
               key="light"
@@ -72,7 +78,7 @@ const ThemeSwitcher = () => {
           )}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="w-content" align="start">
+      <DropdownMenuContent className="w-content" align="end">
         <DropdownMenuRadioGroup
           value={theme}
           onValueChange={(e) => setTheme(e)}
