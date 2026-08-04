@@ -22,6 +22,10 @@ import {
 } from "@/lib/paycmd/balance-scope";
 import type { PayCmdChain } from "@/lib/paycmd/chains";
 import { faucetHint, isKnownTestnetChain } from "@/lib/paycmd/cctp-bridge";
+import {
+  gatewayDepositPollingIntervalMs,
+  gatewayDepositSettlementsFromSync,
+} from "@/lib/paycmd/gateway-finality";
 import { createClient } from "@/lib/supabase/client";
 import { ParsedCommand } from "@/lib/paycmd/commands";
 
@@ -757,6 +761,7 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
   const statusWriterRef = useRef<((text: string, execution: ExecutionItem) => Promise<void>) | null>(
     null,
   );
+  const pendingPollingStartedAtRef = useRef<number | null>(null);
 
   const refreshNotifications = useCallback(async () => {
     try {
@@ -840,9 +845,19 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({}),
       });
       const completedCount = Array.isArray(data?.completed) ? data.completed.length : 0;
+      const settlements = gatewayDepositSettlementsFromSync(data);
       // The route has always returned `pending` on every path; nothing read it until now. It
       // drives both the sidebar badge and the polling interval below.
       setPendingGatewayDepositCount(Array.isArray(data?.pending) ? data.pending.length : 0);
+
+      if (settlements.length > 0) {
+        // Realtime is the fast path, but a tab can disconnect exactly while Circle finalizes.
+        // The sync response includes persisted success snapshots so the next poll can repair a
+        // stale in-memory card without a reload or a duplicate success toast.
+        window.dispatchEvent(
+          new CustomEvent("ra:gateway-deposit-settled", { detail: settlements }),
+        );
+      }
 
       if (completedCount > 0) {
         const firstCompleted = data.completed[0];
@@ -859,9 +874,6 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
         // not re-read it — so the card that announced this deposit would keep spinning until a
         // manual reload. Hand the settled deposits to `paycmd-app` for an in-place patch; it
         // joins on `txHash`, the one field the chat message and the deposit row share.
-        window.dispatchEvent(
-          new CustomEvent("ra:gateway-deposit-settled", { detail: data.completed }),
-        );
         await refreshNotifications();
         await refreshBalance();
       }
@@ -1162,6 +1174,58 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
     };
   }, [syncGatewayDeposits]);
 
+  useEffect(() => {
+    const supabase = createClient();
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
+
+    void supabase.auth.getUser().then(({ data }) => {
+      const userId = data.user?.id;
+      if (!userId || cancelled) return;
+
+      channel = supabase
+        .channel(`gateway-deposit-finality:${userId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "public",
+            table: "chat_messages",
+            filter: `user_id=eq.${userId}`,
+          },
+          (payload) => {
+            const row = payload.new as Record<string, unknown>;
+            const metadata = row.metadata as Record<string, unknown> | null;
+            const execution = metadata?.execution as Record<string, unknown> | null;
+            if (
+              execution?.status !== "success" ||
+              execution.finalitySource !== "circle_webhook" ||
+              typeof execution.txHash !== "string" ||
+              typeof row.content !== "string"
+            ) {
+              return;
+            }
+
+            window.dispatchEvent(
+              new CustomEvent("ra:gateway-deposit-settled", {
+                detail: [{ txHash: execution.txHash, message: row.content }],
+              }),
+            );
+            toast.success(t("runtime.gatewayBalanceUpdated"), { description: row.content });
+            void refreshNotifications();
+            void refreshBalance();
+            void syncGatewayDeposits();
+          },
+        )
+        .subscribe();
+    });
+
+    return () => {
+      cancelled = true;
+      if (channel) void supabase.removeChannel(channel);
+    };
+  }, [refreshBalance, refreshNotifications, syncGatewayDeposits, t]);
+
   // Deliberately a separate effect from the one above. Gating that one on `hasPending` would
   // tear down and re-register its focus + `ra:balance-changed` listeners every time the count
   // crossed zero, firing a duplicate immediate sync each time.
@@ -1172,11 +1236,27 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
   const hasPendingGatewayDeposits = pendingGatewayDepositCount > 0;
 
   useEffect(() => {
-    // Derived boolean, not the count itself, so 3 → 2 → 1 does not rebuild the interval.
-    if (!hasPendingGatewayDeposits) return;
+    if (!hasPendingGatewayDeposits) {
+      pendingPollingStartedAtRef.current = null;
+      return;
+    }
 
-    const interval = window.setInterval(() => void syncGatewayDeposits(), 60_000);
-    return () => window.clearInterval(interval);
+    pendingPollingStartedAtRef.current ??= Date.now();
+    let timer = 0;
+    let cancelled = false;
+    const schedule = () => {
+      const startedAt = pendingPollingStartedAtRef.current ?? Date.now();
+      timer = window.setTimeout(async () => {
+        await syncGatewayDeposits();
+        if (!cancelled) schedule();
+      }, gatewayDepositPollingIntervalMs(Date.now() - startedAt));
+    };
+    schedule();
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [hasPendingGatewayDeposits, syncGatewayDeposits]);
 
   const value = useMemo(

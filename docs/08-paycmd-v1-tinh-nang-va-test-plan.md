@@ -70,7 +70,9 @@ Tính năng:
 - Command router là router cấp 1: nếu câu là hành động Ra thì tạo command/clarify; nếu là research crypto thì trả intent `crypto_research`.
 - Khi đang ở mode `Research`, câu hỏi không bắt đầu bằng `/` bỏ qua command router và gọi thẳng `/api/ai/crypto`.
 - Slash command luôn chạy Ra dù composer đang ở mode nào.
-- `/api/ai/crypto` gọi DeepSeek server-side để trả lời crypto, market, stablecoin, chain, protocol, news hoặc conceptual questions.
+- `/api/ai/crypto` gọi Web3 knowledge router trước, sau đó DeepSeek server-side tổng hợp câu trả lời crypto, market, stablecoin, chain, protocol, news hoặc conceptual questions.
+- Hướng dẫn Hey Payna đọc từ tutorial version `1.0.0`; Circle dùng Circle MCP; Arc dùng Arc MCP; Web3 rộng hoặc dữ liệu mới dùng Tavily.
+- Citation phải là URL thật do tutorial/MCP/Tavily trả về. DeepSeek không được tự tạo link.
 - Khi command router chạy, UI hiện loading `DeepSeek đang phân tích lệnh...`; khi research chạy, UI đổi sang `Research đang tìm thông tin crypto...`.
 - Research không được ký, submit hoặc execute transaction. Nó chỉ trả lời research hoặc gợi ý slash command nếu user muốn hành động.
 - Effort map tới model DeepSeek: `Instant` và `Standard` dùng `deepseek-v4-flash`, `Deep` dùng `deepseek-v4-pro`. Cả hai tier research bật reasoning; `Instant` và command router tắt.
@@ -80,7 +82,7 @@ Tính năng:
 - Message có reasoning hiện disclosure `Xem reasoning` (đóng mặc định) ngay dưới provider badge. Reasoning được persist trong `chat_messages.metadata` nên còn nguyên sau reload và sau khi confirm/cancel draft.
 
 Cách test:
-1. Đảm bảo `DEEPSEEK_API_KEY` đã set trong `.env.local`.
+1. Đảm bảo `DEEPSEEK_API_KEY` và một `TAVILY_API_KEY` mới, chưa từng lộ, đã set trong `.env.local`.
 2. Vào `/app`, chọn mode `Ra`.
 3. Nhập `pay 2 USDC to Minh on arc from base`.
 4. Kỳ vọng AI trả preview command `/pay 2 to Minh on arc from base` hoặc hỏi thêm nếu thiếu contact. `modelProfile` phải khác `paycmd-rules-fallback`; nếu bằng thì đường model đã fail im lặng, soi console server.
@@ -99,6 +101,14 @@ Cách test:
 17. Gõ `/balance` khi composer vẫn ở mode `Research`; kỳ vọng slash command vẫn chạy Ra.
 18. Tắt hoặc bỏ `DEEPSEEK_API_KEY`, hỏi lại câu research.
 19. Kỳ vọng lỗi rõ `DEEPSEEK_API_KEY is not configured`; các slash command khác vẫn hoạt động.
+20. Hỏi `Circle Gateway trên Arc hoạt động thế nào?`; kỳ vọng badge có `Circle MCP + Arc MCP`, grounding `Verified` hoặc `Partially verified`, và citation chỉ trỏ tới docs Circle/Arc.
+21. Hỏi `RPC của Arc testnet là gì?`; kỳ vọng chỉ dùng `Arc MCP`, không gọi Circle/Tavily.
+22. Hỏi `CCTP chuyển USDC thế nào?`; kỳ vọng chỉ dùng `Circle MCP`.
+23. Hỏi `Tin Ethereum mới nhất hôm nay`; kỳ vọng dùng `Web Search`, Tavily gửi topic `news`, answer nói rõ khi dữ liệu không đủ mới.
+24. Hỏi `Dùng Hey Payna chuyển USDC từ Base sang Arc thế nào?`; kỳ vọng dùng `Payna Tutorial` và citation tới `/docs#commands`.
+25. Hỏi một câu không liên quan Web3; kỳ vọng không gọi Tavily.
+26. Bỏ `TAVILY_API_KEY` nhưng giữ DeepSeek, hỏi Web3 rộng; kỳ vọng AskPayna vẫn trả fallback có grounding `Online sources unavailable`, không tạo nguồn giả.
+27. Chạy `npm run tutorial:validate`; kỳ vọng version tutorial bằng `package.json` và schema song ngữ hợp lệ.
 
 ## 4. Wallet Management
 
