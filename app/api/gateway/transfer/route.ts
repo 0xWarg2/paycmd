@@ -44,6 +44,7 @@ import { recordRaReceipt, updateRaProofColumns } from "@/lib/ra/receipt-registry
 import {
   gatewayActualFeeAtomic,
   gatewayDestinationTxHash,
+  gatewayForwardingFailureMessage,
   gatewayTransferExecutionPlan,
   usdcAmountToAtomic,
 } from "@/lib/paycmd/gateway-transfer";
@@ -575,7 +576,14 @@ export async function POST(req: NextRequest) {
     }
 
     // Use EOA-signed burn/mint process for all transfers (same-chain and cross-chain)
-    const { attestation, attestationSignature, transferId, fees, forwardingDetails } = await transferGatewayBalanceWithEOA(
+    const {
+      attestation,
+      attestationSignature,
+      transferId,
+      fees,
+      forwardingDetails,
+      destinationTxHash: forwardedDestinationTxHash,
+    } = await transferGatewayBalanceWithEOA(
       user.id,
       amountInAtomicUnits,
       sourceChainKey,
@@ -606,11 +614,15 @@ export async function POST(req: NextRequest) {
     }
 
     const actualFees = forwardingDetails?.fees ?? fees;
-    const destinationTxHash = gatewayDestinationTxHash({ mintTxHash, forwardingDetails });
+    const destinationTxHash = gatewayDestinationTxHash({
+      mintTxHash,
+      forwardedDestinationTxHash,
+      forwardingDetails,
+    });
     if (useForwarding && !destinationTxHash) {
       throw new GatewayForwardingSettlementError(
         transferId,
-        "Circle's settled response did not include forwardingDetails.transactionHash.",
+        "Circle's settled response did not include a valid destination transaction hash.",
       );
     }
     const actualGatewayFeeAtomic = gatewayActualFeeAtomic(actualFees);
@@ -738,9 +750,7 @@ export async function POST(req: NextRequest) {
           error: "GATEWAY_FORWARDING_FAILED",
           reason: forwardingFailureReason ?? error.message,
           transferId,
-          message:
-            "Circle Forwarding was already submitted, but settlement did not complete successfully. " +
-            "Payna did not retry or fall back to Manual. Check the Circle transfer status before any manual retry to avoid sending twice.",
+          message: gatewayForwardingFailureMessage(transferId),
           sourceChain,
           destinationChain,
           recipient: recipientAddress,

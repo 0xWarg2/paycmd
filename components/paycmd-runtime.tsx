@@ -29,6 +29,7 @@ import {
 import { gatewayTransferAmounts } from "@/lib/paycmd/gateway-transfer";
 import { createClient } from "@/lib/supabase/client";
 import { ParsedCommand } from "@/lib/paycmd/commands";
+import { gatewayTransferSubmitted } from "@/lib/paycmd/ui-models";
 
 export type ExecutionItem = {
   id: string;
@@ -45,6 +46,8 @@ export type ExecutionItem = {
   txHash?: string;
   result?: unknown;
   error?: string;
+  fundsMoved?: boolean;
+  safeToRetry?: boolean;
   // Mirrors the ExecutionItem in components/paycmd-app.tsx, which renders it. Kept in sync here
   // because the two declarations are assigned to each other structurally — a field on only one
   // side compiles fine and then reads as undefined at the render site.
@@ -1095,6 +1098,7 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
       } catch (error) {
         const message = error instanceof Error ? error.message : t("runtime.commandFailed");
         const errorCode = (error as { code?: string })?.code;
+        const transferSubmitted = gatewayTransferSubmitted((error as { data?: unknown })?.data);
         const waitingGateway = errorCode === "GATEWAY_FINALITY_PENDING";
         const localizedMessage = waitingGateway
           ? gatewayFinalityPendingText((error as { data?: unknown })?.data, draft, t)
@@ -1103,6 +1107,7 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
           ...execution,
           status: waitingGateway ? ("waiting_gateway" as const) : ("failed" as const),
           error: localizedMessage,
+          ...(transferSubmitted ? { fundsMoved: true, safeToRetry: false } : {}),
         };
 
         await updateExecutionRecord(failed);

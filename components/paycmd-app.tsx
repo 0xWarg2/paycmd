@@ -70,7 +70,11 @@ import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import { localeRequestHeaders, translateClient, useI18n } from "@/lib/i18n";
 import { balanceBreakdown } from "@/lib/paycmd/balance-breakdown";
-import { buildTransactionPreviewModel, canSafelyRetryExecutionFailure } from "@/lib/paycmd/ui-models";
+import {
+  buildTransactionPreviewModel,
+  canSafelyRetryExecutionFailure,
+  gatewayTransferSubmitted,
+} from "@/lib/paycmd/ui-models";
 import {
   normalizeQuotaOnboardingState,
   shouldShowQuotaOnboarding,
@@ -3221,21 +3225,31 @@ export function PayCmdApp() {
         window.dispatchEvent(new Event("ra:balance-changed"));
       }
     } catch (error) {
-      const raw = error as { code?: string | number; mintPending?: boolean; burnTxHash?: string };
+      const raw = error as {
+        code?: string | number;
+        mintPending?: boolean;
+        burnTxHash?: string;
+        data?: unknown;
+      };
       const message = error instanceof Error ? error.message : "Command failed";
       const errorCode = raw?.code;
       const waitingGateway = errorCode === "GATEWAY_FINALITY_PENDING";
+      const transferSubmitted = gatewayTransferSubmitted(raw?.data);
 
       // A user-rejected signature conclusively means nothing was submitted. A pending wallet
       // request (-32002) is deliberately excluded because it can still be approved later.
       const canRetrySafely =
-        !waitingGateway && canSafelyRetryExecutionFailure({ errorCode, fundsMoved: raw?.mintPending });
+        !waitingGateway && canSafelyRetryExecutionFailure({
+          errorCode,
+          fundsMoved: raw?.mintPending,
+          transferSubmitted,
+        });
       const failed = {
         ...execution,
         status: waitingGateway ? "waiting_gateway" as const : "failed" as const,
         error: message,
         txHash: raw?.burnTxHash,
-        fundsMoved: Boolean(raw?.mintPending),
+        fundsMoved: Boolean(raw?.mintPending) || transferSubmitted,
         safeToRetry: canRetrySafely,
       };
       setExecutions((current) =>

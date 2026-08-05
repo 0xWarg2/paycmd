@@ -33,6 +33,7 @@ import * as chains from "viem/chains";
 import { circleDeveloperSdk } from "@/lib/circle/sdk";
 import { type PayCmdChain } from "@/lib/paycmd/chains";
 import {
+  gatewayForwardingSettlementFrom,
   requestGatewayFeeEstimate,
   type GatewayFeeEstimate,
 } from "@/lib/paycmd/gateway-transfer";
@@ -1116,6 +1117,7 @@ export async function transferGatewayBalanceWithEOA(
   attestationSignature?: `0x${string}`;
   fees?: any;
   forwardingDetails?: any;
+  destinationTxHash?: Hash;
 }> {
   // 1. Get EOA signer for source chain (used for signing only)
   const { address } = await getSignerWalletIdForUser(userId, sourceChain);
@@ -1177,13 +1179,12 @@ export async function transferGatewayBalanceWithEOA(
   if (options?.enableForwarder) {
     try {
       const transferDetails = await pollForwardedGatewayTransfer(transferId);
-      const forwardingDetails = transferDetails.forwardingDetails ?? transferDetails;
+      const settlement = gatewayForwardingSettlementFrom(transferDetails, fees);
       return {
         transferId,
         attestation,
         attestationSignature,
-        fees: transferDetails.fees ?? fees,
-        forwardingDetails,
+        ...settlement,
       };
     } catch (error) {
       throw new GatewayForwardingSettlementError(transferId, error);

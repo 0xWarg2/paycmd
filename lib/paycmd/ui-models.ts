@@ -239,9 +239,17 @@ export function executionStepsForStatus(
 export function canSafelyRetryExecutionFailure({
   errorCode,
   fundsMoved = false,
+  transferSubmitted = false,
 }: {
   errorCode?: string | number;
   fundsMoved?: boolean;
+  transferSubmitted?: boolean;
 }) {
-  return !fundsMoved && errorCode === 4001;
+  return !fundsMoved && !transferSubmitted && errorCode === 4001;
+}
+
+export function gatewayTransferSubmitted(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const transferId = (value as Record<string, unknown>).transferId;
+  return typeof transferId === "string" && transferId.trim().length > 0;
 }

@@ -6,6 +6,7 @@ import {
   buildTransactionPreviewModel,
   executionStepsForStatus,
   canSafelyRetryExecutionFailure,
+  gatewayTransferSubmitted,
   navigationFor,
 } from "./ui-models.ts";
 
@@ -122,4 +123,25 @@ test("only a conclusively rejected wallet request is safe to retry", () => {
   assert.equal(canSafelyRetryExecutionFailure({ errorCode: 4001 }), true);
   assert.equal(canSafelyRetryExecutionFailure({ errorCode: -32002 }), false);
   assert.equal(canSafelyRetryExecutionFailure({ errorCode: 4001, fundsMoved: true }), false);
+});
+
+test("a submitted Circle forwarding transfer is never safe to retry", () => {
+  assert.equal(
+    canSafelyRetryExecutionFailure({ errorCode: 4001, transferSubmitted: true }),
+    false,
+  );
+  assert.equal(
+    canSafelyRetryExecutionFailure({
+      errorCode: "GATEWAY_FORWARDING_FAILED",
+      transferSubmitted: true,
+    }),
+    false,
+  );
+});
+
+test("recognizes only a non-empty Circle transfer ID as submitted", () => {
+  assert.equal(gatewayTransferSubmitted({ transferId: "transfer-123" }), true);
+  assert.equal(gatewayTransferSubmitted({ transferId: "" }), false);
+  assert.equal(gatewayTransferSubmitted({ transferId: 123 }), false);
+  assert.equal(gatewayTransferSubmitted(undefined), false);
 });

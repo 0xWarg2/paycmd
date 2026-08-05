@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   gatewayActualFeeAtomic,
   gatewayDestinationTxHash,
+  gatewayForwardingFailureMessage,
+  gatewayForwardingSettlementFrom,
   gatewayMintGasModeFrom,
   gatewayTransferAmounts,
   gatewayTransferExecutionPlan,
@@ -134,6 +136,69 @@ test("reads the actual Circle fee and forwarded destination transaction hash", (
     }),
     "0x1111111111111111111111111111111111111111111111111111111111111111",
   );
+});
+
+test("uses the canonical forwarded destination hash returned by the Circle adapter", () => {
+  const hash = "0x3333333333333333333333333333333333333333333333333333333333333333";
+
+  assert.equal(
+    gatewayDestinationTxHash({
+      forwardedDestinationTxHash: hash,
+      forwardingDetails: { forwardingEnabled: true },
+    }),
+    hash,
+  );
+});
+
+test("normalizes Circle's top-level forwarding transaction hash", () => {
+  const hash = "0x1111111111111111111111111111111111111111111111111111111111111111";
+  const settlement = gatewayForwardingSettlementFrom(
+    {
+      transferId: "transfer-123",
+      status: "confirmed",
+      transactionHash: hash,
+      fees: { token: "USDC", total: "0.017838" },
+      forwardingDetails: { forwardingEnabled: true },
+    },
+    { token: "USDC", total: "0.02" },
+  );
+
+  assert.equal(settlement.destinationTxHash, hash);
+  assert.equal(settlement.forwardingDetails.transactionHash, hash);
+  assert.deepEqual(settlement.fees, { token: "USDC", total: "0.017838" });
+});
+
+test("keeps legacy nested forwarding hashes and fallback fees", () => {
+  const hash = "0x2222222222222222222222222222222222222222222222222222222222222222";
+  const fallbackFees = { token: "USDC", total: "0.00385" };
+  const settlement = gatewayForwardingSettlementFrom(
+    { status: "finalized", forwardingDetails: { transactionHash: hash } },
+    fallbackFees,
+  );
+
+  assert.equal(settlement.destinationTxHash, hash);
+  assert.equal(settlement.forwardingDetails.transactionHash, hash);
+  assert.deepEqual(settlement.fees, fallbackFees);
+});
+
+test("rejects malformed forwarding transaction identifiers", () => {
+  const settlement = gatewayForwardingSettlementFrom({
+    status: "confirmed",
+    transactionHash: "circle-transfer-uuid",
+    forwardingDetails: { transactionHash: "also-not-a-hash" },
+  });
+
+  assert.equal(settlement.destinationTxHash, undefined);
+  assert.equal(settlement.forwardingDetails.transactionHash, undefined);
+});
+
+test("keeps the Circle transfer ID in an ambiguous settlement warning", () => {
+  const message = gatewayForwardingFailureMessage("transfer-123");
+
+  assert.match(message, /Circle transfer ID: transfer-123\./);
+  assert.match(message, /did not retry or fall back to Manual/);
+  assert.match(message, /avoid sending twice/);
+  assert.doesNotMatch(gatewayForwardingFailureMessage(undefined), /Circle transfer ID:/);
 });
 
 test("prefers a manual mint hash and rejects non-hash forwarding identifiers", () => {

@@ -140,19 +140,60 @@ export function gatewayTransferAmounts(
   };
 }
 
-export function gatewayDestinationTxHash(value: {
-  mintTxHash?: unknown;
-  forwardingDetails?: unknown;
-}): `0x${string}` | undefined {
-  const manualHash = String(value.mintTxHash ?? "");
-  if (/^0x[a-fA-F0-9]{64}$/.test(manualHash)) {
-    return manualHash as `0x${string}`;
+export type GatewayForwardingSettlement = {
+  fees: unknown;
+  forwardingDetails: Record<string, unknown>;
+  destinationTxHash?: `0x${string}`;
+};
+
+function evmTransactionHashFrom(value: unknown): `0x${string}` | undefined {
+  const hash = String(value ?? "");
+  return /^0x[a-fA-F0-9]{64}$/.test(hash)
+    ? (hash as `0x${string}`)
+    : undefined;
+}
+
+export function gatewayForwardingSettlementFrom(
+  value: unknown,
+  fallbackFees?: unknown,
+): GatewayForwardingSettlement {
+  const transfer = recordFrom(value);
+  const nestedDetails = recordFrom(transfer.forwardingDetails);
+  const destinationTxHash =
+    evmTransactionHashFrom(transfer.transactionHash) ??
+    evmTransactionHashFrom(nestedDetails.transactionHash);
+  const forwardingDetails = { ...nestedDetails };
+  delete forwardingDetails.transactionHash;
+  if (destinationTxHash) {
+    forwardingDetails.transactionHash = destinationTxHash;
   }
 
-  const forwardingHash = String(recordFrom(value.forwardingDetails).transactionHash ?? "");
-  return /^0x[a-fA-F0-9]{64}$/.test(forwardingHash)
-    ? (forwardingHash as `0x${string}`)
-    : undefined;
+  return {
+    fees: transfer.fees ?? fallbackFees,
+    destinationTxHash,
+    forwardingDetails,
+  };
+}
+
+export function gatewayForwardingFailureMessage(transferId?: string) {
+  const transferReference = transferId ? ` Circle transfer ID: ${transferId}.` : "";
+  return (
+    "Circle Forwarding was already submitted, but settlement did not complete successfully." +
+    transferReference +
+    " Payna did not retry or fall back to Manual. Check the Circle transfer status before any manual retry to avoid sending twice."
+  );
+}
+
+export function gatewayDestinationTxHash(value: {
+  mintTxHash?: unknown;
+  forwardedDestinationTxHash?: unknown;
+  forwardingDetails?: unknown;
+}): `0x${string}` | undefined {
+  return (
+    evmTransactionHashFrom(value.mintTxHash) ??
+    evmTransactionHashFrom(value.forwardedDestinationTxHash) ??
+    evmTransactionHashFrom(recordFrom(value.forwardingDetails).transactionHash)
+  );
 }
 
 function serializeBigInts(value: unknown): unknown {
