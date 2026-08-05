@@ -46,6 +46,7 @@ import {
   gatewayDestinationTxHash,
   gatewayFeeExecutionAmounts,
   gatewayForwardingFailureMessage,
+  gatewayForwardingTransferId,
   gatewayTransferExecutionPlan,
   usdcAmountToAtomic,
 } from "@/lib/paycmd/gateway-transfer";
@@ -749,14 +750,14 @@ export async function POST(req: NextRequest) {
     }
 
     const forwardingFailureReason = parseForwardingFailure(error);
-    if (error instanceof GatewayForwardingSettlementError || forwardingFailureReason) {
-      const transferId = error instanceof GatewayForwardingSettlementError ? error.transferId : undefined;
+    const forwardingTransferId = gatewayForwardingTransferId(error);
+    if (forwardingTransferId || error instanceof GatewayForwardingSettlementError || forwardingFailureReason) {
       return NextResponse.json(
         {
           error: "GATEWAY_FORWARDING_FAILED",
           reason: forwardingFailureReason ?? error.message,
-          transferId,
-          message: gatewayForwardingFailureMessage(transferId),
+          transferId: forwardingTransferId,
+          message: gatewayForwardingFailureMessage(forwardingTransferId),
           sourceChain,
           destinationChain,
           recipient: recipientAddress,

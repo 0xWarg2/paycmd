@@ -33,6 +33,8 @@ import * as chains from "viem/chains";
 import { circleDeveloperSdk } from "@/lib/circle/sdk";
 import { type PayCmdChain } from "@/lib/paycmd/chains";
 import {
+  gatewayForwardedMintReceiptMatches,
+  gatewayForwardingPollOutcome,
   gatewayForwardingSettlementFrom,
   requestGatewayFeeEstimate,
   type GatewayFeeEstimate,
@@ -816,7 +818,40 @@ export async function submitBurnIntent(
   };
 }
 
-async function pollForwardedGatewayTransfer(transferId: string): Promise<any> {
+async function forwardedMintSucceededOnchain(
+  transferDetails: unknown,
+  destinationChain: SupportedChain,
+  recipientAddress: Address,
+  amount: bigint,
+) {
+  const { destinationTxHash } = gatewayForwardingSettlementFrom(transferDetails);
+  if (!destinationTxHash) return false;
+
+  try {
+    const publicClient = createPublicClient({
+      chain: getChainConfig(destinationChain),
+      transport: getRpcTransport(destinationChain),
+    });
+    const receipt = await publicClient.getTransactionReceipt({ hash: destinationTxHash });
+    return gatewayForwardedMintReceiptMatches({
+      receiptStatus: receipt.status,
+      tokenAddress: USDC_ADDRESSES[destinationChain],
+      recipient: recipientAddress,
+      amountAtomic: amount,
+      logs: receipt.logs,
+    });
+  } catch (error) {
+    console.warn(`Could not verify forwarded mint ${destinationTxHash} onchain.`, error);
+    return false;
+  }
+}
+
+async function pollForwardedGatewayTransfer(
+  transferId: string,
+  destinationChain: SupportedChain,
+  recipientAddress: Address,
+  amount: bigint,
+): Promise<any> {
   let attempts = 0;
   const maxAttempts = 60;
 
@@ -833,17 +868,32 @@ async function pollForwardedGatewayTransfer(transferId: string): Promise<any> {
     const details = await pollResponse.json();
     const status = String(details.status ?? details.state ?? "").toLowerCase();
     console.log(`Forwarded transfer status: ${status || "unknown"} (attempt ${attempts + 1}/${maxAttempts})`);
+    const mintReceiptMatches =
+      status === "failed" &&
+      await forwardedMintSucceededOnchain(details, destinationChain, recipientAddress, amount);
+    const outcome = gatewayForwardingPollOutcome({ status, mintReceiptMatches });
 
-    if (status === "confirmed" || status === "finalized") {
+    if (outcome === "settled") {
+      if (status === "failed") {
+        console.warn(`Circle reported transfer ${transferId} as failed, but the exact USDC mint is confirmed onchain.`);
+        return {
+          ...details,
+          forwardingDetails: {
+            ...(details.forwardingDetails ?? {}),
+            onchainMintConfirmed: true,
+            reportedStatus: status,
+          },
+        };
+      }
       return details;
     }
 
-    if (status === "failed") {
+    if (outcome === "failed" && status === "failed") {
       const reason = details.forwardingDetails?.failureReason ?? "unknown";
       throw new Error(`Forwarded transfer failed: ${reason}`);
     }
 
-    if (status === "expired") {
+    if (outcome === "failed" && status === "expired") {
       throw new Error("Forwarded transfer attestation expired before minting.");
     }
 
@@ -1178,7 +1228,12 @@ export async function transferGatewayBalanceWithEOA(
 
   if (options?.enableForwarder) {
     try {
-      const transferDetails = await pollForwardedGatewayTransfer(transferId);
+      const transferDetails = await pollForwardedGatewayTransfer(
+        transferId,
+        destinationChain,
+        recipientAddress,
+        amount,
+      );
       const settlement = gatewayForwardingSettlementFrom(transferDetails, fees);
       return {
         transferId,

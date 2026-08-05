@@ -197,6 +197,65 @@ export function gatewayForwardingFailureMessage(transferId?: string) {
   );
 }
 
+export function gatewayForwardingTransferId(value: unknown) {
+  const transferId = recordFrom(value).transferId;
+  return typeof transferId === "string" && transferId.trim()
+    ? transferId.trim()
+    : undefined;
+}
+
+export function gatewayForwardingPollOutcome(value: {
+  status: unknown;
+  mintReceiptMatches?: boolean;
+}): "pending" | "settled" | "failed" {
+  const status = String(value.status ?? "").toLowerCase();
+  if (status === "confirmed" || status === "finalized") return "settled";
+  if (status === "failed") return value.mintReceiptMatches ? "settled" : "failed";
+  if (status === "expired") return "failed";
+  return "pending";
+}
+
+const erc20TransferTopic =
+  "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+
+export function gatewayForwardedMintReceiptMatches(value: {
+  receiptStatus: unknown;
+  tokenAddress: unknown;
+  recipient: unknown;
+  amountAtomic: bigint;
+  logs: unknown;
+}) {
+  if (value.receiptStatus !== "success" || !Array.isArray(value.logs)) return false;
+
+  const tokenAddress = String(value.tokenAddress ?? "").toLowerCase();
+  const recipient = String(value.recipient ?? "").toLowerCase();
+  if (!/^0x[a-f0-9]{40}$/.test(tokenAddress) || !/^0x[a-f0-9]{40}$/.test(recipient)) {
+    return false;
+  }
+
+  const zeroAddressTopic = `0x${"0".repeat(64)}`;
+  const recipientTopic = `0x${recipient.slice(2).padStart(64, "0")}`;
+
+  return value.logs.some((item) => {
+    const log = recordFrom(item);
+    const topics = Array.isArray(log.topics) ? log.topics.map((topic) => String(topic).toLowerCase()) : [];
+    if (
+      String(log.address ?? "").toLowerCase() !== tokenAddress ||
+      topics[0] !== erc20TransferTopic ||
+      topics[1] !== zeroAddressTopic ||
+      topics[2] !== recipientTopic
+    ) {
+      return false;
+    }
+
+    try {
+      return BigInt(String(log.data ?? "")) === value.amountAtomic;
+    } catch {
+      return false;
+    }
+  });
+}
+
 export function gatewayDestinationTxHash(value: {
   mintTxHash?: unknown;
   forwardedDestinationTxHash?: unknown;

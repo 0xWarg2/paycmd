@@ -6,7 +6,10 @@ import {
   gatewayDestinationTxHash,
   gatewayFeeExecutionAmounts,
   gatewayForwardingFailureMessage,
+  gatewayForwardingPollOutcome,
   gatewayForwardingSettlementFrom,
+  gatewayForwardingTransferId,
+  gatewayForwardedMintReceiptMatches,
   gatewayMintGasModeFrom,
   gatewayTransferAmounts,
   gatewayTransferExecutionPlan,
@@ -225,6 +228,72 @@ test("keeps the Circle transfer ID in an ambiguous settlement warning", () => {
   assert.match(message, /did not retry or fall back to Manual/);
   assert.match(message, /avoid sending twice/);
   assert.doesNotMatch(gatewayForwardingFailureMessage(undefined), /Circle transfer ID:/);
+});
+
+test("recovers a Circle failed status only after the expected mint is confirmed onchain", () => {
+  assert.equal(
+    gatewayForwardingPollOutcome({ status: "failed", mintReceiptMatches: true }),
+    "settled",
+  );
+  assert.equal(
+    gatewayForwardingPollOutcome({ status: "failed", mintReceiptMatches: false }),
+    "failed",
+  );
+  assert.equal(
+    gatewayForwardingPollOutcome({ status: "pending", mintReceiptMatches: true }),
+    "pending",
+  );
+});
+
+test("matches only a successful exact USDC mint receipt", () => {
+  const tokenAddress = "0x3600000000000000000000000000000000000000";
+  const recipient = "0xe8c0bc40c7a94901c75521713736a0de2abf37d9";
+  const mintLog = {
+    address: tokenAddress,
+    topics: [
+      "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+      "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "0x000000000000000000000000e8c0bc40c7a94901c75521713736a0de2abf37d9",
+    ],
+    data: "0x00000000000000000000000000000000000000000000000000000000000f4240",
+  };
+
+  assert.equal(
+    gatewayForwardedMintReceiptMatches({
+      receiptStatus: "success",
+      tokenAddress,
+      recipient,
+      amountAtomic: 1_000_000n,
+      logs: [mintLog],
+    }),
+    true,
+  );
+  assert.equal(
+    gatewayForwardedMintReceiptMatches({
+      receiptStatus: "reverted",
+      tokenAddress,
+      recipient,
+      amountAtomic: 1_000_000n,
+      logs: [mintLog],
+    }),
+    false,
+  );
+  assert.equal(
+    gatewayForwardedMintReceiptMatches({
+      receiptStatus: "success",
+      tokenAddress,
+      recipient,
+      amountAtomic: 2_000_000n,
+      logs: [mintLog],
+    }),
+    false,
+  );
+});
+
+test("retains a structurally present forwarding transfer ID", () => {
+  assert.equal(gatewayForwardingTransferId({ transferId: "transfer-123" }), "transfer-123");
+  assert.equal(gatewayForwardingTransferId({ transferId: "" }), undefined);
+  assert.equal(gatewayForwardingTransferId(new Error("failed")), undefined);
 });
 
 test("prefers a manual mint hash and rejects non-hash forwarding identifiers", () => {
