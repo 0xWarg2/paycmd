@@ -70,6 +70,21 @@ test("links command headings from the on-page table of contents", async ({ page 
   })).toBe(true);
 });
 
+test("keeps the left navigation position when opening a guide near the bottom", async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith("desktop-1440"), "desktop sidebar navigation check");
+  await page.goto("/docs/arc/overview-and-swap");
+
+  const sidebar = page.getByRole("complementary", { name: "Mục lục tài liệu" });
+  await sidebar.evaluate((element) => element.scrollTo({ top: 650 }));
+  await expect.poll(() => sidebar.evaluate((element) => element.scrollTop)).toBeGreaterThan(500);
+
+  await sidebar.getByRole("link", { name: "Mô hình an toàn", exact: true }).click();
+  await expect(page).toHaveURL(/\/docs\/safety-and-support\/security$/);
+
+  const navigatedSidebar = page.getByRole("complementary", { name: "Mục lục tài liệu" });
+  await expect.poll(() => navigatedSidebar.evaluate((element) => element.scrollTop)).toBeGreaterThan(500);
+});
+
 test("preserves legacy docs anchors by routing to their canonical pages", async ({ page }) => {
   await page.goto("/docs#commands");
   await expect(page).toHaveURL(/\/docs\/commands\/wallet-and-balance$/);

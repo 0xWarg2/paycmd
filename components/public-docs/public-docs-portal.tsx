@@ -25,6 +25,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -71,6 +72,7 @@ type PublicDocsPortalProps = {
 };
 
 const copyLabels = { vi: "Sao chép lệnh", en: "Copy command" } as const;
+let docsNavigationScrollTop = 0;
 
 const ui = {
   vi: {
@@ -290,6 +292,28 @@ function DocsNavigation({ sections, activeSlug, locale, onNavigate }: { sections
         </section>
       ))}
     </nav>
+  );
+}
+
+function DocsDesktopNavigation({ sections, activeSlug, locale }: { sections: PublicDocsNavigationSection[]; activeSlug: string; locale: Locale }) {
+  const sidebarRef = useRef<HTMLElement>(null);
+
+  useLayoutEffect(() => {
+    const sidebar = sidebarRef.current;
+    if (sidebar) sidebar.scrollTop = docsNavigationScrollTop;
+  }, []);
+
+  return (
+    <aside
+      ref={sidebarRef}
+      aria-label={ui[locale].menuTitle}
+      className={cn(styles.scrollbar, "hidden min-h-0 overflow-y-auto border-r border-border/70 px-5 py-8 lg:block")}
+      onScroll={(event) => {
+        docsNavigationScrollTop = event.currentTarget.scrollTop;
+      }}
+    >
+      <DocsNavigation sections={sections} activeSlug={activeSlug} locale={locale} />
+    </aside>
   );
 }
 
@@ -586,9 +610,7 @@ export function PublicDocsPortal({ page, navigation, searchIndex, adjacent, gate
       </header>
 
       <div className="mx-auto grid min-h-0 w-full max-w-[1600px] flex-1 overflow-hidden lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)_220px]">
-        <aside aria-label={labels.menuTitle} className={cn(styles.scrollbar, "hidden min-h-0 overflow-y-auto border-r border-border/70 px-5 py-8 lg:block")}>
-          <DocsNavigation sections={navigation[locale]} activeSlug={page.slug} locale={locale} />
-        </aside>
+        <DocsDesktopNavigation sections={navigation[locale]} activeSlug={page.slug} locale={locale} />
 
         <DocsMainScroller locale={locale}>
           <div className="mx-auto max-w-3xl">
