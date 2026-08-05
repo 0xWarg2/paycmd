@@ -99,6 +99,7 @@ import {
   requiresConfirmation,
 } from "@/lib/paycmd/commands";
 import { chainCommandAlias, isSupportedChain, type PayCmdChain } from "@/lib/paycmd/chains";
+import { gatewayTransferAmounts } from "@/lib/paycmd/gateway-transfer";
 import { web3Chains } from "@/lib/paycmd/web3-chains";
 import {
   getSwapAdapterAddress,
@@ -768,6 +769,8 @@ function executionTxLinks(execution: ExecutionItem, t: TranslateFn) {
       .find((record) => Object.keys(record).length > 0) ?? {};
   const primaryHash =
     stringFrom(execution.txHash) ??
+    stringFrom(result.destinationTxHash) ??
+    stringFrom(transfer.destinationTxHash) ??
     stringFrom(result.txHash) ??
     stringFrom(result.mintTxHash) ??
     stringFrom(transfer.txHash) ??
@@ -986,10 +989,8 @@ function buildExecutionReceipt(execution: ExecutionItem, t: TranslateFn): Execut
 
   if (execution.command === "transfer") {
     const amount = formatDecimalAmount(result.amount);
-    const txHash = stringFrom(result.mintTxHash) ?? stringFrom(result.txHash) ?? execution.txHash ?? null;
-    const fees = recordFrom(result.fees);
-    const fee = Number(result.estimatedGatewayFee ?? fees.total ?? 0);
-    const required = Number(result.requiredGatewayBalance ?? 0);
+    const txHash = stringFrom(result.destinationTxHash) ?? stringFrom(result.mintTxHash) ?? stringFrom(result.txHash) ?? execution.txHash ?? null;
+    const amounts = gatewayTransferAmounts(result, "receipt");
 
     return {
       title: t("receipt.transferComplete"),
@@ -999,14 +1000,22 @@ function buildExecutionReceipt(execution: ExecutionItem, t: TranslateFn): Execut
       metrics: [
         result.autoDeposit ? metric(t("receipt.autoDeposit"), `${formatDecimalAmount(result.autoDepositedAmount)} USDC`) : null,
         result.forwarding ? metric(t("receipt.forwarding"), t("receipt.enabled")) : metric(t("receipt.destinationGas"), t("receipt.manual")),
-        fee > 0 ? metric(t("receipt.fees"), `${formatDecimalAmount(fee)} USDC`) : null,
+        amounts.gatewayFee > 0 ? metric(t("receipt.fees"), `${formatDecimalAmount(amounts.gatewayFee)} USDC`) : null,
       ].filter(Boolean) as ExecutionReceiptMetric[],
       links: receiptLinks(
-        txHash ? { label: t("receipt.transferTx"), txHash, chain: destinationChain ?? sourceChain } : null,
+        txHash
+          ? {
+              label: result.forwarding ? t("receipt.forwarderTx") : t("receipt.mintTx"),
+              txHash,
+              chain: destinationChain ?? sourceChain,
+            }
+          : null,
         proofTxHash ? { label: t("receipt.paynaProof"), txHash: proofTxHash, chain: "arcTestnet" } : null,
       ),
       details: [
-        required > 0 ? metric(t("receipt.sourceDebit"), `~${formatDecimalAmount(required)} USDC`) : null,
+        amounts.sourceDebit > 0
+          ? metric(t("receipt.sourceDebit"), `${amounts.actual ? "" : "~"}${formatDecimalAmount(amounts.sourceDebit)} USDC`)
+          : null,
         metric(t("receipt.mode"), result.forwarding ? t("transfer.autoForwarding") : t("transfer.manualGas")),
         metric(t("receipt.transferId"), stringFrom(result.transferId)),
       ].filter(Boolean) as ExecutionReceiptMetric[],
@@ -1017,14 +1026,13 @@ function buildExecutionReceipt(execution: ExecutionItem, t: TranslateFn): Execut
     const amount = formatDecimalAmount(payment.amount ?? result.amount);
     const recipient = stringFrom(recordFrom(payment.recipient).label) ?? stringFrom(result.recipient) ?? t("receipt.recipient");
     const txHash =
+      stringFrom(transfer.destinationTxHash) ??
       stringFrom(transfer.mintTxHash) ??
       stringFrom(transfer.txHash) ??
       stringFrom(payment.txHash) ??
       execution.txHash ??
       null;
-    const fees = recordFrom(transfer.fees);
-    const fee = Number(transfer.estimatedGatewayFee ?? fees.total ?? 0);
-    const required = Number(transfer.requiredGatewayBalance ?? 0);
+    const amounts = gatewayTransferAmounts({ ...transfer, amount: payment.amount ?? transfer.amount }, "receipt");
 
     return {
       title: t("receipt.paymentSent"),
@@ -1035,15 +1043,23 @@ function buildExecutionReceipt(execution: ExecutionItem, t: TranslateFn): Execut
       metrics: [
         metric(t("receipt.recipient"), recipient),
         transfer.forwarding ? metric(t("receipt.forwarding"), t("receipt.enabled")) : metric(t("receipt.destinationGas"), t("receipt.manual")),
-        fee > 0 ? metric(t("receipt.fees"), `${formatDecimalAmount(fee)} USDC`) : null,
+        amounts.gatewayFee > 0 ? metric(t("receipt.fees"), `${formatDecimalAmount(amounts.gatewayFee)} USDC`) : null,
       ].filter(Boolean) as ExecutionReceiptMetric[],
       links: receiptLinks(
-        txHash ? { label: t("receipt.paymentTx"), txHash, chain: destinationChain ?? sourceChain } : null,
+        txHash
+          ? {
+              label: transfer.forwarding ? t("receipt.forwarderTx") : t("receipt.mintTx"),
+              txHash,
+              chain: destinationChain ?? sourceChain,
+            }
+          : null,
         proofTxHash ? { label: t("receipt.paynaProof"), txHash: proofTxHash, chain: "arcTestnet" } : null,
       ),
       details: [
         metric(t("receipt.recipientAddress"), stringFrom(payment.recipient_address) ?? stringFrom(payment.recipientAddress)),
-        required > 0 ? metric(t("receipt.sourceDebit"), `~${formatDecimalAmount(required)} USDC`) : null,
+        amounts.sourceDebit > 0
+          ? metric(t("receipt.sourceDebit"), `${amounts.actual ? "" : "~"}${formatDecimalAmount(amounts.sourceDebit)} USDC`)
+          : null,
         metric(t("receipt.mode"), transfer.forwarding ? t("transfer.autoForwarding") : t("transfer.manualGas")),
       ].filter(Boolean) as ExecutionReceiptMetric[],
     };
@@ -1867,6 +1883,15 @@ type BridgeEstimateSummary = {
   estimatedFeeTotal: string;
   feeItems: Array<{ token: string; amount: string; type: string }>;
   gasItems: Array<{ blockchain: string; token: string; fee: string; name: string }>;
+};
+
+type GatewayTransferEstimateSummary = {
+  amount: string;
+  estimatedGatewayFee: string;
+  requiredGatewayBalance: string;
+  feeEstimateKind: "quoted_total" | "max_fee_reserve";
+  forwarding: boolean;
+  mintGasMode: "auto_forwarding" | "manual";
 };
 
 type BridgeExecutionResult = {
@@ -2994,27 +3019,25 @@ export function PayCmdApp() {
     }
 
     function gatewayFeeText(transfer: any) {
-      const amount = Number(transfer?.amount ?? 0);
-      const estimatedFee = Number(transfer?.estimatedGatewayFee ?? transfer?.fees?.total ?? 0);
-      const required = Number(transfer?.requiredGatewayBalance ?? amount + estimatedFee);
-      const txRef = transfer?.mintTxHash ?? transfer?.txHash ?? transfer?.transferId;
+      const { amount, gatewayFee, sourceDebit, actual } = gatewayTransferAmounts(transfer, "receipt");
+      const txRef = transfer?.destinationTxHash ?? transfer?.mintTxHash ?? transfer?.txHash ?? transfer?.transferId;
       const manualHint =
         transfer?.forwarding
           ? t("runtime.gatewayFeeAutoHint")
           : t("runtime.gatewayFeeManualHint");
 
-      if (!amount && !estimatedFee) {
+      if (!amount && !gatewayFee) {
         return txRef ? `ID: ${txRef}\nMode: ${manualHint}` : `Mode: ${manualHint}`;
       }
 
       const feeLine =
-        estimatedFee > 0
-          ? `${formatDecimalAmount(estimatedFee)} USDC`
+        gatewayFee > 0
+          ? `${formatDecimalAmount(gatewayFee)} USDC`
           : t("runtime.gatewayNoBreakdown");
 
       return [
         `Recipient: ${formatDecimalAmount(amount)} USDC`,
-        `Source debit: ~${formatDecimalAmount(required)} USDC`,
+        `Source debit: ${actual ? "" : "~"}${formatDecimalAmount(sourceDebit)} USDC`,
         `Fees: ${feeLine}`,
         `Includes: source burn gas + cross-chain fee${transfer?.forwarding ? " + forwarding fee" : ""}`,
         transfer?.forwarding
@@ -3174,7 +3197,11 @@ export function PayCmdApp() {
 
     try {
       const result = await executeCommand(draft);
-      const txHash = result?.txHash ?? result?.mintTxHash;
+      const txHash =
+        result?.destinationTxHash ??
+        result?.transfer?.destinationTxHash ??
+        result?.txHash ??
+        result?.mintTxHash;
       const awaitingFinality = result?.status === "pending_gateway_finality";
       const success = {
         ...execution,
@@ -3549,9 +3576,15 @@ export function PayCmdApp() {
     const parsed = parsePayCmd(value, locale);
 
     if (parsed.missingFields.length) {
+      const missingBothPaymentChains =
+        parsed.command === "pay" &&
+        parsed.missingFields.includes("sourceChain") &&
+        parsed.missingFields.includes("destinationChain");
       await saveMessage({
         role: "assistant",
-        text: missingFieldQuestion(parsed.missingFields[0], t),
+        text: missingBothPaymentChains
+          ? t("ai.payChainsRequired", { recipient: parsed.fields.recipient })
+          : missingFieldQuestion(parsed.missingFields[0], t),
         provider: "paycmd",
       });
       return;
@@ -6379,6 +6412,9 @@ function CommandPreviewCard({
   const [swapEstimate, setSwapEstimate] = useState<SwapEstimate | null>(null);
   const [swapEstimateError, setSwapEstimateError] = useState("");
   const [swapEstimateLoading, setSwapEstimateLoading] = useState(false);
+  const [gatewayEstimate, setGatewayEstimate] = useState<GatewayTransferEstimateSummary | null>(null);
+  const [gatewayEstimateError, setGatewayEstimateError] = useState("");
+  const [gatewayEstimateLoading, setGatewayEstimateLoading] = useState(false);
   const [payrollRecipientCount, setPayrollRecipientCount] = useState<number | null>(null);
   const [payrollRecipientError, setPayrollRecipientError] = useState("");
 
@@ -6529,6 +6565,63 @@ function CommandPreviewCard({
       window.clearTimeout(timer);
     };
   }, [draft, isSwap, t]);
+
+  useEffect(() => {
+    if (
+      !hasMintGasChoice ||
+      !isActive ||
+      !draft.fields.amount ||
+      !previewSourceChain ||
+      !previewDestinationChain
+    ) {
+      setGatewayEstimate(null);
+      return;
+    }
+
+    let cancelled = false;
+    setGatewayEstimate(null);
+    setGatewayEstimateLoading(true);
+    setGatewayEstimateError("");
+
+    const timer = window.setTimeout(() => {
+      void requestJson("/api/gateway/transfer/estimate", {
+        method: "POST",
+        body: JSON.stringify({
+          amount: draft.fields.amount,
+          sourceChain: previewSourceChain,
+          destinationChain: previewDestinationChain,
+          mintGasMode: selectedMintGasMode,
+        }),
+      })
+        .then((result) => {
+          if (!cancelled) setGatewayEstimate(result as GatewayTransferEstimateSummary);
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            setGatewayEstimate(null);
+            setGatewayEstimateError(
+              error instanceof Error ? error.message : t("preview.gatewayEstimateFailed"),
+            );
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setGatewayEstimateLoading(false);
+        });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    draft.fields.amount,
+    hasMintGasChoice,
+    isActive,
+    previewDestinationChain,
+    previewSourceChain,
+    selectedMintGasMode,
+    t,
+  ]);
   const mintGasModeText =
     selectedMintGasMode === "manual"
       ? ` · ${t("transfer.mintGasManual")}`
@@ -6622,6 +6715,11 @@ function CommandPreviewCard({
     !swapEstimate ||
     swapEstimateLoading ||
     Boolean(swapEstimateError);
+  const gatewayConfirmDisabled =
+    !isActive ||
+    gatewayEstimateLoading ||
+    !gatewayEstimate ||
+    Boolean(gatewayEstimateError);
   return (
     <div className="min-w-[260px] space-y-3" aria-live="polite">
       <div className="flex items-start justify-between gap-3">
@@ -6976,13 +7074,44 @@ function CommandPreviewCard({
             </button>
           </div>
         ) : null}
+        {hasMintGasChoice ? (
+          <TransactionPreviewSummary
+            title={t("preview.gatewayQuote")}
+            subtitle={t("preview.gatewayQuoteHelp")}
+            route={<ChainRoute sourceChain={previewSourceChain} destinationChain={previewDestinationChain} compact />}
+            loading={gatewayEstimateLoading}
+            error={gatewayEstimateError}
+            metrics={
+              gatewayEstimate
+                ? [
+                    {
+                      label:
+                        gatewayEstimate.feeEstimateKind === "max_fee_reserve"
+                          ? t("preview.gatewayFeeReserve")
+                          : t("preview.gatewayFeeQuote"),
+                      value: `${gatewayEstimate.feeEstimateKind === "max_fee_reserve" ? "≤" : "~"}${formatDecimalAmount(gatewayEstimate.estimatedGatewayFee)} USDC`,
+                    },
+                    {
+                      label: t("receipt.sourceDebit"),
+                      value: `${gatewayEstimate.feeEstimateKind === "max_fee_reserve" ? "≤" : "~"}${formatDecimalAmount(gatewayEstimate.requiredGatewayBalance)} USDC`,
+                    },
+                    {
+                      label: t("preview.destinationGas"),
+                      value: gatewayEstimate.forwarding ? t("preview.forwarderPays") : t("preview.signerPays"),
+                    },
+                  ]
+                : []
+            }
+            details={[t("preview.gatewayQuoteExecutionNote")]}
+          />
+        ) : null}
         {mintGasHelpText ? <div>{mintGasHelpText}</div> : null}
       </div>
       {isActive ? (
         <TransactionConfirmActions
           confirmLabel={confirmLabel}
           cancelLabel={t("common.cancel")}
-          disabled={isBridge ? bridgeConfirmDisabled : isSwap ? swapConfirmDisabled : isPayroll ? payrollRecipientCount === null || payrollRecipientCount === 0 || Boolean(payrollRecipientError) : false}
+          disabled={isBridge ? bridgeConfirmDisabled : isSwap ? swapConfirmDisabled : hasMintGasChoice ? gatewayConfirmDisabled : isPayroll ? payrollRecipientCount === null || payrollRecipientCount === 0 || Boolean(payrollRecipientError) : false}
           onCancel={onCancel}
           onConfirm={() => onConfirm(confirmedDraft)}
         />

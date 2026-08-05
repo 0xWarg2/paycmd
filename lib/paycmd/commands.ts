@@ -4,9 +4,9 @@ import {
   bridgeModeFrom,
   bridgeSpeedFrom,
   normalizeCctpBridgeChain,
-} from "@/lib/paycmd/cctp-bridge";
-import { chainAliases } from "@/lib/paycmd/chains";
-import { normalizeSwapToken } from "@/lib/paycmd/swap";
+} from "./cctp-bridge.ts";
+import { chainAliases } from "./chains.ts";
+import { normalizeSwapToken } from "./swap.ts";
 
 export const commandNames = [
   "wallet",
@@ -547,7 +547,7 @@ export const commandRegistry: PayCmdCommand[] = [
     aliases: ["/pay", "pay"],
     title: "Pay contact",
     sample: "/pay 25 to Minh on arc from base",
-    requiredFields: ["amount", "recipient", "destinationChain"],
+    requiredFields: ["amount", "recipient", "sourceChain", "destinationChain"],
     parse(input, locale) {
       const raw = compact(input);
       const amount = amountFrom(raw);
@@ -563,12 +563,12 @@ export const commandRegistry: PayCmdCommand[] = [
         { amount: safeAmount, token, recipient, destinationChain, sourceChain, mintGasMode: mintGasModeFrom(raw) },
         this.requiredFields,
         this.sample,
-        recipient && safeAmount
+        recipient && safeAmount && destinationChain && sourceChain
           ? commandText(locale, "pay.ready", {
               amount: safeAmount,
               token,
               recipient,
-              chain: destinationChain || commandText(locale, "pay.defaultChain"),
+              chain: destinationChain,
             })
           : commandText(locale, "pay.draft"),
       );

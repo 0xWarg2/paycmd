@@ -26,6 +26,7 @@ import {
   gatewayDepositPollingIntervalMs,
   gatewayDepositSettlementsFromSync,
 } from "@/lib/paycmd/gateway-finality";
+import { gatewayTransferAmounts } from "@/lib/paycmd/gateway-transfer";
 import { createClient } from "@/lib/supabase/client";
 import { ParsedCommand } from "@/lib/paycmd/commands";
 
@@ -185,27 +186,25 @@ export function formatNativeGasBalance(rawBalance: unknown, chain: string) {
 }
 
 function gatewayFeeText(transfer: any, translate: Translator) {
-  const amount = Number(transfer?.amount ?? 0);
-  const estimatedFee = Number(transfer?.estimatedGatewayFee ?? transfer?.fees?.total ?? 0);
-  const required = Number(transfer?.requiredGatewayBalance ?? amount + estimatedFee);
-  const txRef = transfer?.mintTxHash ?? transfer?.txHash ?? transfer?.transferId;
+  const { amount, gatewayFee, sourceDebit, actual } = gatewayTransferAmounts(transfer, "receipt");
+  const txRef = transfer?.destinationTxHash ?? transfer?.mintTxHash ?? transfer?.txHash ?? transfer?.transferId;
   const manualHint =
     transfer?.forwarding
       ? translate("runtime.gatewayFeeAutoHint")
       : translate("runtime.gatewayFeeManualHint");
 
-  if (!amount && !estimatedFee) {
+  if (!amount && !gatewayFee) {
     return txRef ? `ID: ${txRef}\nMode: ${manualHint}` : `Mode: ${manualHint}`;
   }
 
   const feeLine =
-    estimatedFee > 0
-      ? `${formatDecimalAmount(estimatedFee)} USDC`
+    gatewayFee > 0
+      ? `${formatDecimalAmount(gatewayFee)} USDC`
       : translate("runtime.gatewayNoBreakdown");
 
   return [
     translate("runtime.result.recipient", { value: `${formatDecimalAmount(amount)} USDC` }),
-    translate("runtime.result.sourceDebit", { value: formatDecimalAmount(required) }),
+    translate("runtime.result.sourceDebit", { value: `${actual ? "" : "~"}${formatDecimalAmount(sourceDebit)}` }),
     translate("runtime.result.fees", { value: feeLine }),
     translate("runtime.result.includes", {
       forwardingFee: transfer?.forwarding ? translate("runtime.result.forwardingFee") : "",
@@ -1044,7 +1043,11 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
         }
 
         const result = await executeServerCommand(draft);
-        const txHash = result?.txHash ?? result?.mintTxHash;
+        const txHash =
+          result?.destinationTxHash ??
+          result?.transfer?.destinationTxHash ??
+          result?.txHash ??
+          result?.mintTxHash;
         // A deposit's on-chain transaction succeeding is not the same as the balance being
         // spendable: Circle needs finality/indexing first, measured at ~10 minutes on testnet,
         // and `app/api/gateway/deposit/route.ts` says so by returning this status. Claiming

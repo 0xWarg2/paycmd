@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { requestLocale, tr } from "@/lib/i18n/server";
-import { normalizeChain } from "@/lib/paycmd/chains";
+import {
+  PaymentChainValidationError,
+  requirePaymentChains,
+} from "@/lib/paycmd/payment-chains";
 import { resolveInternalWalletOwner, resolveRecipient } from "@/lib/paycmd/recipients";
 import { recordRaReceipt, updateRaProofColumns } from "@/lib/ra/receipt-registry";
 import { createClient } from "@/lib/supabase/server";
@@ -100,7 +103,6 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const amount = String(body.amount ?? "").trim();
     const recipientInput = String(body.recipient ?? "").trim();
-    const sourceChain = normalizeChain(body.sourceChain) || "arcTestnet";
 
     if (!amount || Number(amount) <= 0 || !recipientInput) {
       return NextResponse.json(
@@ -109,11 +111,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const { sourceChain, destinationChain } = requirePaymentChains({
+      sourceChain: body.sourceChain,
+      destinationChain: body.destinationChain,
+    });
+
     const recipient = await resolveRecipient(
       supabase,
       user.id,
       recipientInput,
-      body.destinationChain ?? body.chain,
+      destinationChain,
       locale,
     );
     const directRecipientUserId =
@@ -148,7 +155,12 @@ export async function POST(req: NextRequest) {
           sourceChain,
           destinationChain: recipient.destinationChain,
           sourceTxHash: typeof transfer.autoDepositTxHash === "string" ? transfer.autoDepositTxHash : undefined,
-          destinationTxHash: typeof transfer.mintTxHash === "string" ? transfer.mintTxHash : undefined,
+          destinationTxHash:
+            typeof transfer.destinationTxHash === "string"
+              ? transfer.destinationTxHash
+              : typeof transfer.mintTxHash === "string"
+                ? transfer.mintTxHash
+                : undefined,
           metadata: {
             transactionHistoryId: transferTransactionId,
             recipientLabel: recipient.label,
@@ -215,6 +227,10 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Payment failed";
+
+    if (error instanceof PaymentChainValidationError) {
+      return NextResponse.json({ error: message, field: error.field }, { status: 400 });
+    }
 
     if (error instanceof GatewayTransferError) {
       return NextResponse.json(

@@ -24,25 +24,29 @@ import {
   getUsdcBalance,
   initiateDepositFromCustodialWallet,
   checkWalletGasBalance,
-  estimateGatewayTransferFeeAtomic,
+  buildGatewayBurnIntentPreview,
+  estimateGatewayTransferFee,
+  GatewayForwardingSettlementError,
   isGatewaySignerAuthorized,
   type SupportedChain,
   CIRCLE_CHAIN_NAMES,
   CHAIN_BY_DOMAIN,
-  DOMAIN_IDS,
   GATEWAY_CHAIN_CONFIGS,
-  GATEWAY_MINTER_ADDRESS,
-  GATEWAY_WALLET_ADDRESS,
-  USDC_ADDRESSES,
   supportedGatewayChains,
 } from "@/lib/circle/gateway-sdk";
 import { createClient } from "@/lib/supabase/server";
-import { maxUint256, type Address } from "viem";
+import { type Address } from "viem";
 import { Transaction } from "@circle-fin/developer-controlled-wallets";
 import { circleDeveloperSdk } from "@/lib/circle/sdk";
 import { chainCommandAlias } from "@/lib/paycmd/chains";
 import { requestLocale, tr, type PayCmdLocale } from "@/lib/i18n/server";
 import { recordRaReceipt, updateRaProofColumns } from "@/lib/ra/receipt-registry";
+import {
+  gatewayActualFeeAtomic,
+  gatewayDestinationTxHash,
+  gatewayTransferExecutionPlan,
+  usdcAmountToAtomic,
+} from "@/lib/paycmd/gateway-transfer";
 
 function decimalUsdcToAtomic(value: string | number) {
   const [wholeRaw, fractionRaw = ""] = String(value).split(".");
@@ -71,40 +75,6 @@ async function getSourceGatewayBalance(address: Address, sourceChain: SupportedC
   );
 
   return decimalUsdcToAtomic(sourceBalance?.balance ?? "0");
-}
-
-function buildBurnIntentPreview(params: {
-  amount: bigint;
-  sourceChain: SupportedChain;
-  destinationChain: SupportedChain;
-  recipient: Address;
-  sourceDepositor: Address;
-  sourceSigner: Address;
-}) {
-  const maxFee = params.amount > BigInt(10_000_000)
-    ? BigInt(2_010_000)
-    : params.amount / BigInt(10);
-
-  return {
-    maxBlockHeight: maxUint256,
-    maxFee,
-    spec: {
-      version: 1,
-      sourceDomain: DOMAIN_IDS[params.sourceChain],
-      destinationDomain: DOMAIN_IDS[params.destinationChain],
-      sourceContract: GATEWAY_WALLET_ADDRESS as Address,
-      destinationContract: GATEWAY_MINTER_ADDRESS as Address,
-      sourceToken: USDC_ADDRESSES[params.sourceChain] as Address,
-      destinationToken: USDC_ADDRESSES[params.destinationChain] as Address,
-      sourceDepositor: params.sourceDepositor,
-      destinationRecipient: params.recipient,
-      sourceSigner: params.sourceSigner,
-      destinationCaller: "0x0000000000000000000000000000000000000000" as Address,
-      value: params.amount,
-      salt: "0x0000000000000000000000000000000000000000000000000000000000000001" as `0x${string}`,
-      hookData: "0x" as `0x${string}`,
-    },
-  };
 }
 
 function finalityHint(chain: SupportedChain, locale: PayCmdLocale) {
@@ -306,13 +276,16 @@ export async function POST(req: NextRequest) {
     // Same-chain transfers are allowed (withdrawal from Gateway to wallet)
     // Cross-chain transfers will go through Gateway's burn/mint process
 
-    const amountInAtomicUnits = BigInt(Math.floor(parseFloat(amount) * 1_000_000));
+    const amountInAtomicUnits = usdcAmountToAtomic(amount);
     const sourceChainKey = sourceChain as SupportedChain;
     const destinationChainKey = destinationChain as SupportedChain;
-    const isCrossChain = sourceChainKey !== destinationChainKey;
-    const effectiveMintGasMode =
-      mintGasMode === "manual" || !isCrossChain ? "manual" : "auto_forwarding";
-    const useForwarding = effectiveMintGasMode === "auto_forwarding";
+    const executionPlan = gatewayTransferExecutionPlan({
+      sourceChain: sourceChainKey,
+      destinationChain: destinationChainKey,
+      mintGasMode,
+    });
+    const effectiveMintGasMode = executionPlan.mintGasMode;
+    const useForwarding = executionPlan.forwarding;
 
     // Get the user's multichain SCA wallet
     const { data: wallets, error: walletError } = await supabase
@@ -345,11 +318,44 @@ export async function POST(req: NextRequest) {
     let autoDepositTxHash: string | undefined;
     let autoDepositedAmount = 0;
     let sourceSignerAddress: Address | undefined;
-    const fallbackGatewayFee = amountInAtomicUnits / BigInt(1000);
-    let estimatedGatewayFee = fallbackGatewayFee;
+    let estimatedGatewayFee: bigint;
+    let feeEstimateKind: "quoted_total" | "max_fee_reserve";
 
     // Determine if we're using external recipient
     const isExternalRecipient = recipientAddress && recipientAddress.toLowerCase() !== walletAddress.toLowerCase();
+
+    try {
+      const burnIntentPreview = buildGatewayBurnIntentPreview({
+        amount: amountInAtomicUnits,
+        sourceChain: sourceChainKey,
+        destinationChain: destinationChainKey,
+        recipient: recipient as Address,
+        sourceDepositor: walletAddress,
+        // Fee calculation does not depend on the signer address. Use the existing SCA as a
+        // read-only placeholder so an unavailable estimate can never create a signer wallet.
+        sourceSigner: walletAddress,
+      });
+      const gatewayFeeEstimate = await estimateGatewayTransferFee(
+        burnIntentPreview,
+        { enableForwarder: useForwarding },
+      );
+      estimatedGatewayFee = gatewayFeeEstimate.atomicFee;
+      feeEstimateKind = gatewayFeeEstimate.feeEstimateKind;
+    } catch (feeEstimateError) {
+      const message = feeEstimateError instanceof Error ? feeEstimateError.message : "Gateway fee estimate failed";
+      return NextResponse.json(
+        {
+          error: "GATEWAY_FEE_ESTIMATE_UNAVAILABLE",
+          message,
+          sourceChain,
+          destinationChain,
+          mintGasMode: effectiveMintGasMode,
+        },
+        { status: 503 },
+      );
+    }
+
+    const requiredGatewayBalance = amountInAtomicUnits + estimatedGatewayFee;
 
     if (!sourceSignerAddress) {
       const { getOrCreateGatewayEOAWallet } = await import("@/lib/circle/create-gateway-eoa-wallets");
@@ -357,32 +363,7 @@ export async function POST(req: NextRequest) {
       sourceSignerAddress = eoaAddress as Address;
     }
 
-    try {
-      const burnIntentPreview = buildBurnIntentPreview({
-        amount: amountInAtomicUnits,
-        sourceChain: sourceChainKey,
-        destinationChain: destinationChainKey,
-        recipient: recipient as Address,
-        sourceDepositor: walletAddress,
-        sourceSigner: sourceSignerAddress,
-      });
-      if (useForwarding && burnIntentPreview.maxFee < BigInt(1_000_000)) {
-        burnIntentPreview.maxFee = BigInt(1_000_000);
-      }
-
-      const gatewayFeeEstimate = await estimateGatewayTransferFeeAtomic(
-        burnIntentPreview,
-        { enableForwarder: useForwarding },
-      );
-      estimatedGatewayFee =
-        gatewayFeeEstimate > fallbackGatewayFee ? gatewayFeeEstimate : fallbackGatewayFee;
-    } catch (feeEstimateError) {
-      console.warn("Gateway fee estimate failed; falling back to 0.1% buffer.", feeEstimateError);
-    }
-
-    const requiredGatewayBalance = amountInAtomicUnits + estimatedGatewayFee;
-
-    if (!useForwarding) {
+    if (executionPlan.destinationGasPreflight) {
       // PRE-FLIGHT CHECK: Verify gas balance on destination chain BEFORE burning
       const { getGatewayEOAWalletId } = await import("@/lib/circle/create-gateway-eoa-wallets");
 
@@ -429,7 +410,15 @@ export async function POST(req: NextRequest) {
         console.log(`Gas check passed for ${gasCheck.address} on ${destinationChain} (balance: ${gasCheck.balance})`);
       } catch (gasCheckError: any) {
         console.error("Gas pre-flight check failed:", gasCheckError);
-        // Continue anyway - the actual mint will catch this if it's a real issue
+        return NextResponse.json(
+          {
+            error: "DESTINATION_GAS_CHECK_UNAVAILABLE",
+            message: gasCheckError?.message || `Could not verify destination gas on ${destinationChain}.`,
+            chain: destinationChain,
+            stage: "mint",
+          },
+          { status: 503 },
+        );
       }
     }
 
@@ -593,7 +582,7 @@ export async function POST(req: NextRequest) {
       destinationChainKey,
       recipient as Address,
       walletAddress,
-      { enableForwarder: useForwarding }
+      { enableForwarder: useForwarding, estimatedFee: estimatedGatewayFee }
     );
 
     let mintTxHash: string | undefined;
@@ -616,6 +605,22 @@ export async function POST(req: NextRequest) {
       mintTxHash = mintTx.txHash;
     }
 
+    const actualFees = forwardingDetails?.fees ?? fees;
+    const destinationTxHash = gatewayDestinationTxHash({ mintTxHash, forwardingDetails });
+    if (useForwarding && !destinationTxHash) {
+      throw new GatewayForwardingSettlementError(
+        transferId,
+        "Circle's settled response did not include forwardingDetails.transactionHash.",
+      );
+    }
+    const actualGatewayFeeAtomic = gatewayActualFeeAtomic(actualFees);
+    const actualGatewayFee = actualGatewayFeeAtomic !== undefined
+      ? Number(actualGatewayFeeAtomic) / 1_000_000
+      : undefined;
+    const actualSourceDebit = actualGatewayFeeAtomic !== undefined
+      ? Number(amountInAtomicUnits + actualGatewayFeeAtomic) / 1_000_000
+      : undefined;
+
     const attestationHash = attestation;
 
     const { data: transaction, error: transactionError } = await supabase
@@ -626,7 +631,7 @@ export async function POST(req: NextRequest) {
           chain: sourceChain,
           tx_type: "transfer",
           amount: parseFloat(amount),
-          tx_hash: mintTxHash ?? transferId,
+          tx_hash: destinationTxHash ?? null,
           gateway_wallet_address: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9",
           destination_chain: destinationChain,
           status: "success",
@@ -654,7 +659,7 @@ export async function POST(req: NextRequest) {
           sourceChain,
           destinationChain,
           sourceTxHash: autoDepositTxHash,
-          destinationTxHash: mintTxHash,
+          destinationTxHash,
           metadata: {
             transactionHistoryId: transaction.id,
             transferId,
@@ -681,13 +686,17 @@ export async function POST(req: NextRequest) {
       transactionId: transaction?.id,
       attestation: attestationHash,
       mintTxHash,
+      destinationTxHash,
       transferId,
-      fees,
+      fees: actualFees,
+      actualGatewayFee,
+      actualSourceDebit,
       forwardingDetails,
       forwarding: useForwarding,
       mintGasMode: effectiveMintGasMode,
       estimatedGatewayFee: Number(estimatedGatewayFee) / 1_000_000,
       requiredGatewayBalance: Number(requiredGatewayBalance) / 1_000_000,
+      feeEstimateKind,
       autoDeposit: Boolean(autoDepositTxHash),
       autoDepositTxHash,
       autoDepositedAmount,
@@ -714,16 +723,24 @@ export async function POST(req: NextRequest) {
   } catch (error: any) {
     console.error("Error in transfer:", error);
 
+    if (/mintGasMode|USDC amount/i.test(error?.message ?? "")) {
+      return NextResponse.json(
+        { error: "INVALID_GATEWAY_TRANSFER", message: error.message },
+        { status: 400 },
+      );
+    }
+
     const forwardingFailureReason = parseForwardingFailure(error);
-    if (forwardingFailureReason) {
+    if (error instanceof GatewayForwardingSettlementError || forwardingFailureReason) {
+      const transferId = error instanceof GatewayForwardingSettlementError ? error.transferId : undefined;
       return NextResponse.json(
         {
           error: "GATEWAY_FORWARDING_FAILED",
-          reason: forwardingFailureReason,
+          reason: forwardingFailureReason ?? error.message,
+          transferId,
           message:
-            `Circle Forwarding Service failed on-chain (${forwardingFailureReason}). ` +
-            "For pay-to-recipient flows, choose Manual gas and Payna will mint from your Gateway signer instead of relying on the forwarder. " +
-            "If this transfer already submitted, check the transfer status before retrying to avoid sending twice.",
+            "Circle Forwarding was already submitted, but settlement did not complete successfully. " +
+            "Payna did not retry or fall back to Manual. Check the Circle transfer status before any manual retry to avoid sending twice.",
           sourceChain,
           destinationChain,
           recipient: recipientAddress,

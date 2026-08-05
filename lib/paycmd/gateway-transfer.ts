@@ -1,0 +1,198 @@
+export type GatewayMintGasMode = "auto_forwarding" | "manual";
+export type GatewayFeeEstimateKind = "quoted_total" | "max_fee_reserve";
+
+export type GatewayFeeEstimate = {
+  atomicFee: bigint;
+  feeEstimateKind: GatewayFeeEstimateKind;
+};
+
+function recordFrom(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function decimalUsdcToAtomic(value: unknown): bigint | null {
+  const normalized = String(value ?? "").trim();
+  if (!/^\d+(?:\.\d{1,6})?$/.test(normalized)) return null;
+
+  const [whole, fraction = ""] = normalized.split(".");
+  return BigInt(whole) * 1_000_000n + BigInt(fraction.padEnd(6, "0"));
+}
+
+export function usdcAmountToAtomic(value: unknown): bigint {
+  const normalized = String(value ?? "").trim();
+  if (!/^\d+(?:\.\d+)?$/.test(normalized)) {
+    throw new Error("USDC amount must be a positive decimal number.");
+  }
+  const fraction = normalized.split(".")[1] ?? "";
+  if (fraction.length > 6) {
+    throw new Error("USDC amount supports at most six decimal places.");
+  }
+  const atomic = decimalUsdcToAtomic(normalized);
+  if (!atomic || atomic <= 0n) {
+    throw new Error("USDC amount must be positive.");
+  }
+  return atomic;
+}
+
+function positiveAtomic(value: unknown): bigint | null {
+  try {
+    const atomic = BigInt(String(value ?? ""));
+    return atomic > 0n ? atomic : null;
+  } catch {
+    return null;
+  }
+}
+
+export function parseGatewayFeeEstimate(value: unknown): GatewayFeeEstimate {
+  const root = recordFrom(value);
+  const body = Array.isArray(value)
+    ? value
+    : Array.isArray(root.body)
+      ? root.body
+      : [];
+  const first = recordFrom(body[0]);
+  const fees = Object.keys(recordFrom(root.fees)).length
+    ? recordFrom(root.fees)
+    : recordFrom(first.fees);
+  const quotedTotal = decimalUsdcToAtomic(fees.total);
+
+  if (quotedTotal && quotedTotal > 0n) {
+    return {
+      atomicFee: quotedTotal,
+      feeEstimateKind: "quoted_total",
+    };
+  }
+
+  const burnIntent = recordFrom(first.burnIntent);
+  const reserve = positiveAtomic(burnIntent.maxFee);
+
+  if (reserve) {
+    return {
+      atomicFee: reserve,
+      feeEstimateKind: "max_fee_reserve",
+    };
+  }
+
+  throw new Error("Circle Gateway estimate did not include a usable fee.");
+}
+
+export function gatewayMintGasModeFrom(value: unknown): GatewayMintGasMode {
+  if (value === "auto_forwarding" || value === "manual") return value;
+  throw new Error('mintGasMode must be "auto_forwarding" or "manual".');
+}
+
+export function gatewayTransferExecutionPlan(input: {
+  sourceChain: string;
+  destinationChain: string;
+  mintGasMode: unknown;
+}) {
+  const mintGasMode = gatewayMintGasModeFrom(input.mintGasMode);
+  const forwarding = mintGasMode === "auto_forwarding";
+
+  return {
+    mintGasMode,
+    forwarding,
+    destinationGasPreflight: !forwarding,
+  };
+}
+
+export function gatewayActualFeeAtomic(fees: unknown): bigint | undefined {
+  const atomic = decimalUsdcToAtomic(recordFrom(fees).total);
+  return atomic !== null ? atomic : undefined;
+}
+
+export type GatewayTransferAmounts = {
+  amount: number;
+  gatewayFee: number;
+  sourceDebit: number;
+  actual: boolean;
+};
+
+function finiteNonNegative(value: unknown): number | undefined {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+export function gatewayTransferAmounts(
+  value: unknown,
+  phase: "preview" | "receipt",
+): GatewayTransferAmounts {
+  const transfer = recordFrom(value);
+  const amount = finiteNonNegative(transfer.amount) ?? 0;
+  const fees = recordFrom(transfer.fees);
+  const actualFee =
+    phase === "receipt"
+      ? finiteNonNegative(fees.total) ?? finiteNonNegative(transfer.actualGatewayFee)
+      : undefined;
+  const estimatedFee = finiteNonNegative(transfer.estimatedGatewayFee) ?? 0;
+  const gatewayFee = actualFee ?? estimatedFee;
+  const quotedDebit = finiteNonNegative(transfer.requiredGatewayBalance);
+
+  return {
+    amount,
+    gatewayFee,
+    sourceDebit: actualFee === undefined && phase === "preview" && quotedDebit !== undefined
+      ? quotedDebit
+      : amount + gatewayFee,
+    actual: actualFee !== undefined,
+  };
+}
+
+export function gatewayDestinationTxHash(value: {
+  mintTxHash?: unknown;
+  forwardingDetails?: unknown;
+}): `0x${string}` | undefined {
+  const manualHash = String(value.mintTxHash ?? "");
+  if (/^0x[a-fA-F0-9]{64}$/.test(manualHash)) {
+    return manualHash as `0x${string}`;
+  }
+
+  const forwardingHash = String(recordFrom(value.forwardingDetails).transactionHash ?? "");
+  return /^0x[a-fA-F0-9]{64}$/.test(forwardingHash)
+    ? (forwardingHash as `0x${string}`)
+    : undefined;
+}
+
+function serializeBigInts(value: unknown): unknown {
+  if (typeof value === "bigint") return value.toString();
+  if (Array.isArray(value)) return value.map(serializeBigInts);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+        key,
+        serializeBigInts(item),
+      ]),
+    );
+  }
+  return value;
+}
+
+export async function requestGatewayFeeEstimate(
+  burnIntent: Record<string, unknown>,
+  options: {
+    enableForwarder: boolean;
+    fetchImpl?: typeof fetch;
+  },
+): Promise<GatewayFeeEstimate> {
+  const partialBurnIntent = { ...burnIntent };
+  delete partialBurnIntent.maxFee;
+  const estimateUrl = new URL("https://gateway-api-testnet.circle.com/v1/estimate");
+  if (options.enableForwarder) {
+    estimateUrl.searchParams.set("enableForwarder", "true");
+  }
+
+  const response = await (options.fetchImpl ?? fetch)(estimateUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify([serializeBigInts(partialBurnIntent)]),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Gateway fee estimate failed: ${response.status} - ${detail}`);
+  }
+
+  return parseGatewayFeeEstimate(await response.json());
+}

@@ -32,6 +32,10 @@ import {
 import * as chains from "viem/chains";
 import { circleDeveloperSdk } from "@/lib/circle/sdk";
 import { type PayCmdChain } from "@/lib/paycmd/chains";
+import {
+  requestGatewayFeeEstimate,
+  type GatewayFeeEstimate,
+} from "@/lib/paycmd/gateway-transfer";
 import { web3Chains } from "@/lib/paycmd/web3-chains";
 import {
   Transaction,
@@ -487,7 +491,7 @@ function usdcDecimalToAtomic(value: string | number): bigint {
   return BigInt(whole) * 1_000_000n + BigInt(fraction || "0");
 }
 
-interface BurnIntentSpec {
+export interface BurnIntentSpec {
   version: number;
   sourceDomain: number;
   destinationDomain: number;
@@ -504,10 +508,42 @@ interface BurnIntentSpec {
   hookData: `0x${string}`;
 }
 
-interface BurnIntentData {
+export interface BurnIntentData {
   maxBlockHeight: bigint;
   maxFee: bigint;
   spec: BurnIntentSpec;
+}
+
+export function buildGatewayBurnIntentPreview(params: {
+  amount: bigint;
+  sourceChain: SupportedChain;
+  destinationChain: SupportedChain;
+  recipient: Address;
+  sourceDepositor: Address;
+  sourceSigner: Address;
+}): BurnIntentData {
+  return {
+    maxBlockHeight: maxUint256,
+    // The shared estimate request intentionally omits this placeholder. Circle returns the
+    // fee quote/reserve that execution later signs as maxFee.
+    maxFee: 1n,
+    spec: {
+      version: 1,
+      sourceDomain: DOMAIN_IDS[params.sourceChain],
+      destinationDomain: DOMAIN_IDS[params.destinationChain],
+      sourceContract: GATEWAY_WALLET_ADDRESS as Address,
+      destinationContract: GATEWAY_MINTER_ADDRESS as Address,
+      sourceToken: USDC_ADDRESSES[params.sourceChain],
+      destinationToken: USDC_ADDRESSES[params.destinationChain],
+      sourceDepositor: params.sourceDepositor,
+      destinationRecipient: params.recipient,
+      sourceSigner: params.sourceSigner,
+      destinationCaller: zeroAddress,
+      value: params.amount,
+      salt: `0x${"01".padStart(64, "0")}` as `0x${string}`,
+      hookData: "0x",
+    },
+  };
 }
 
 function burnIntentTypedData(burnIntent: BurnIntentData) {
@@ -816,6 +852,17 @@ async function pollForwardedGatewayTransfer(transferId: string): Promise<any> {
   throw new Error(`Forwarded transfer did not complete after ${maxAttempts} attempts. Transfer ID: ${transferId}`);
 }
 
+export class GatewayForwardingSettlementError extends Error {
+  readonly transferId: string;
+
+  constructor(transferId: string, cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    super(`Forwarded transfer ${transferId} was submitted, but settlement did not complete: ${detail}`);
+    this.name = "GatewayForwardingSettlementError";
+    this.transferId = transferId;
+  }
+}
+
 export async function getCircleWalletAddress(walletId: string): Promise<Address> {
   const response = await circleDeveloperSdk.getWallet({ id: walletId });
   if (!response.data?.wallet?.address) {
@@ -978,41 +1025,17 @@ export async function estimateGatewayTransferFeeAtomic(
   burnIntentData: BurnIntentData,
   options?: { enableForwarder?: boolean }
 ): Promise<bigint> {
+  return (await estimateGatewayTransferFee(burnIntentData, options)).atomicFee;
+}
+
+export async function estimateGatewayTransferFee(
+  burnIntentData: BurnIntentData,
+  options?: { enableForwarder?: boolean }
+): Promise<GatewayFeeEstimate> {
   const typedData = burnIntentTypedData(burnIntentData);
-
-  const payload = [
-    {
-      maxBlockHeight: typedData.message.maxBlockHeight.toString(),
-      maxFee: typedData.message.maxFee.toString(),
-      spec: {
-        ...typedData.message.spec,
-        value: typedData.message.spec.value.toString(),
-      },
-    },
-  ];
-
-  const estimateUrl = new URL("https://gateway-api-testnet.circle.com/v1/estimate");
-  if (options?.enableForwarder) {
-    estimateUrl.searchParams.set("enableForwarder", "true");
-  }
-
-  const response = await fetch(estimateUrl.toString(), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
+  return requestGatewayFeeEstimate(typedData.message as unknown as Record<string, unknown>, {
+    enableForwarder: Boolean(options?.enableForwarder),
   });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Gateway API error: ${response.status} - ${errorText}`);
-  }
-
-  const data = await response.json();
-  const result = Array.isArray(data) ? data[0] : data?.body?.[0] ?? data;
-  const totalFee = result?.fees?.total ?? data?.fees?.total ?? "0";
-  return usdcDecimalToAtomic(totalFee);
 }
 
 export async function isGatewaySignerAuthorized(
@@ -1086,7 +1109,7 @@ export async function transferGatewayBalanceWithEOA(
   destinationChain: SupportedChain,
   recipientAddress: Address,
   depositorAddress: Address,
-  options?: { enableForwarder?: boolean }
+  options?: { enableForwarder?: boolean; estimatedFee?: bigint }
 ): Promise<{
   transferId: string;
   attestation?: `0x${string}`;
@@ -1110,20 +1133,10 @@ export async function transferGatewayBalanceWithEOA(
     throw new Error(`Invalid chain configuration: source=${sourceChain}, destination=${destinationChain}`);
   }
 
-  // 3. Construct Burn Intent
-  // maxFee is the maximum fee Gateway can charge (deducted from transfer amount)
-  // It should be reasonable but less than the transfer amount
-  // Gateway typically charges ~0.1% to 0.2% of the transfer
-  let maxFee = amount > BigInt(10_000_000) // If > 10 USDC
-    ? BigInt(2_010_000) // Allow up to 2.01 USDC fee
-    : amount / BigInt(10); // Otherwise allow 10% of amount as max fee
-  if (options?.enableForwarder && maxFee < BigInt(1_000_000)) {
-    maxFee = BigInt(1_000_000);
-  }
-
+  // 3. Construct Burn Intent. The quote obtained before any side effect is authoritative.
   const burnIntentData: BurnIntentData = {
     maxBlockHeight: maxUint256,
-    maxFee: maxFee,
+    maxFee: options?.estimatedFee ?? 1n,
     spec: {
       version: 1,
       sourceDomain: sourceDomain,
@@ -1142,12 +1155,10 @@ export async function transferGatewayBalanceWithEOA(
     },
   };
 
-  const estimatedFee = await estimateGatewayTransferFeeAtomic(burnIntentData, {
+  const estimatedFee = options?.estimatedFee ?? await estimateGatewayTransferFeeAtomic(burnIntentData, {
     enableForwarder: options?.enableForwarder,
   });
-  if (estimatedFee > burnIntentData.maxFee) {
-    burnIntentData.maxFee = estimatedFee + (estimatedFee / 10n);
-  }
+  burnIntentData.maxFee = estimatedFee;
 
   // 4. Sign Intent with EOA
   const signature = await signBurnIntentWithEOA(burnIntentData, sourceChain, userId);
@@ -1164,14 +1175,19 @@ export async function transferGatewayBalanceWithEOA(
   console.log(`Gateway transfer submitted. ID: ${transferId}`);
 
   if (options?.enableForwarder) {
-    const forwardingDetails = await pollForwardedGatewayTransfer(transferId);
-    return {
-      transferId,
-      attestation,
-      attestationSignature,
-      fees,
-      forwardingDetails,
-    };
+    try {
+      const transferDetails = await pollForwardedGatewayTransfer(transferId);
+      const forwardingDetails = transferDetails.forwardingDetails ?? transferDetails;
+      return {
+        transferId,
+        attestation,
+        attestationSignature,
+        fees: transferDetails.fees ?? fees,
+        forwardingDetails,
+      };
+    } catch (error) {
+      throw new GatewayForwardingSettlementError(transferId, error);
+    }
   }
 
   // 6. Poll for attestation if not immediately available

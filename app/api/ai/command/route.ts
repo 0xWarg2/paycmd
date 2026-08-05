@@ -8,6 +8,10 @@ import { commandRouterModel, commandRouterModelProfile } from "@/lib/paycmd/ai/m
 import { aiCommandResponseSchema } from "@/lib/paycmd/ai/schema";
 import { requestLocale, tr, type PayCmdLocale } from "@/lib/i18n/server";
 import { commandRegistry, parsePayCmd, type CommandName } from "@/lib/paycmd/commands";
+import {
+  completePaymentChainFollowUp,
+  paymentWaitingForChains,
+} from "@/lib/paycmd/payment-command-context";
 import { createClient } from "@/lib/supabase/server";
 
 type AiCommandRequest = {
@@ -587,6 +591,35 @@ export async function POST(req: NextRequest) {
 
     const recentMessages = (body.recentMessages ?? []).slice(-8);
     fallbackRecentMessages = recentMessages;
+
+    const completedPayment = completePaymentChainFollowUp(input, recentMessages, locale);
+    if (completedPayment && !completedPayment.missingFields.length) {
+      return NextResponse.json({
+        intent: "command",
+        canonicalCommand: completedPayment.raw,
+        assistantText: completedPayment.summary,
+        missingFields: [],
+        suggestions: [completedPayment.sample],
+        parsedCommand: completedPayment,
+        modelProfile: "paycmd-rules-fallback",
+      });
+    }
+
+    const pendingPayment = paymentWaitingForChains(input, locale);
+    if (pendingPayment) {
+      return NextResponse.json({
+        intent: "clarify",
+        canonicalCommand: "",
+        assistantText: tr(locale, "ai.payChainsRequired", {
+          recipient: pendingPayment.fields.recipient,
+        }),
+        missingFields: pendingPayment.missingFields,
+        suggestions: [pendingPayment.sample],
+        parsedCommand: pendingPayment,
+        modelProfile: "paycmd-rules-fallback",
+      });
+    }
+
     const appContext = await getAppContext(user.id);
     const responseLanguageInstruction =
       locale === "en"
@@ -610,6 +643,7 @@ export async function POST(req: NextRequest) {
       "If the user asks crypto research, market, token, chain, protocol, news, or conceptual questions that are not Payna actions, intent must be crypto_research.",
       "If the user asks general product/help questions, intent must be answer.",
       "If required information is missing, intent must be clarify and assistantText must ask one concise question.",
+      "A pay command always requires both sourceChain and destinationChain. Never assume Arc or infer the source from app context. If both are missing, ask for both in one question.",
       "If the message could be a Payna action such as pay, transfer, swap, fund, deposit, withdraw, balance, wallet, contact, gas, payroll, or payment request, prefer command or clarify over crypto_research.",
       "For a balance request that names a chain or testnet, canonicalCommand must be /balance on <that chain>; never widen it to /balance.",
       "All payment/fund/deposit/withdraw/transfer/payroll commands will be previewed and confirmed by the user later.",

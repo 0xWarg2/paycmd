@@ -83,7 +83,7 @@ export async function POST(
       .update({
         status: "paid",
         payer_user_id: user.id,
-        paid_tx_hash: transfer.mintTxHash ?? transfer.txHash ?? transfer.transferId ?? null,
+        paid_tx_hash: transfer.destinationTxHash ?? transfer.mintTxHash ?? transfer.txHash ?? null,
         paid_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
