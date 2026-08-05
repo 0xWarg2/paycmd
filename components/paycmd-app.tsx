@@ -1887,6 +1887,7 @@ type BridgeEstimateSummary = {
 type GatewayTransferEstimateSummary = {
   amount: string;
   estimatedGatewayFee: string;
+  maximumGatewayFee: string;
   requiredGatewayBalance: string;
   feeEstimateKind: "quoted_total" | "max_fee_reserve";
   forwarding: boolean;
@@ -7063,7 +7064,7 @@ function CommandPreviewCard({
                     },
                     {
                       label: t("receipt.sourceDebit"),
-                      value: `${gatewayEstimate.feeEstimateKind === "max_fee_reserve" ? "≤" : "~"}${formatDecimalAmount(gatewayEstimate.requiredGatewayBalance)} USDC`,
+                      value: `≤${formatDecimalAmount(gatewayEstimate.requiredGatewayBalance)} USDC`,
                     },
                     {
                       label: t("preview.destinationGas"),

@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   gatewayActualFeeAtomic,
   gatewayDestinationTxHash,
+  gatewayFeeExecutionAmounts,
   gatewayForwardingFailureMessage,
   gatewayForwardingSettlementFrom,
   gatewayMintGasModeFrom,
@@ -22,7 +23,26 @@ test("uses Circle fees.total for a forwarding quote", () => {
     }),
     {
       atomicFee: 17_598n,
+      maxFeeAtomic: 19_358n,
       feeEstimateKind: "quoted_total",
+    },
+  );
+});
+
+test("uses Circle's returned maxFee reserve for execution and balance preflight", () => {
+  assert.deepEqual(
+    gatewayFeeExecutionAmounts(
+      1_000_000n,
+      {
+        atomicFee: 17_598n,
+        maxFeeAtomic: 19_358n,
+        feeEstimateKind: "quoted_total",
+      },
+    ),
+    {
+      estimatedFeeAtomic: 17_598n,
+      maxFeeAtomic: 19_358n,
+      requiredGatewayBalanceAtomic: 1_019_358n,
     },
   );
 });
@@ -35,7 +55,7 @@ test("uses fees.total when Circle wraps the forwarding quote in an array", () =>
         fees: { token: "USDC", total: "0.017598" },
       },
     ]),
-    { atomicFee: 17_598n, feeEstimateKind: "quoted_total" },
+    { atomicFee: 17_598n, maxFeeAtomic: 19_358n, feeEstimateKind: "quoted_total" },
   );
 });
 
@@ -50,6 +70,7 @@ test("uses Circle burnIntent.maxFee as the reserve for a legacy manual quote", (
     ]),
     {
       atomicFee: 3_850n,
+      maxFeeAtomic: 3_850n,
       feeEstimateKind: "max_fee_reserve",
     },
   );
@@ -57,6 +78,10 @@ test("uses Circle burnIntent.maxFee as the reserve for a legacy manual quote", (
 
 test("rejects a malformed or zero Gateway fee quote", () => {
   assert.throws(() => parseGatewayFeeEstimate({ body: [] }), /usable fee/i);
+  assert.throws(
+    () => parseGatewayFeeEstimate({ body: [{ burnIntent: {} }], fees: { total: "0.017598" } }),
+    /usable maxFee/i,
+  );
   assert.throws(
     () => parseGatewayFeeEstimate([{ burnIntent: { maxFee: "0" } }]),
     /usable fee/i,
@@ -110,6 +135,7 @@ test("requests a forwarding quote without sending the caller's maxFee", async ()
   ]);
   assert.deepEqual(estimate, {
     atomicFee: 17_598n,
+    maxFeeAtomic: 19_358n,
     feeEstimateKind: "quoted_total",
   });
 });

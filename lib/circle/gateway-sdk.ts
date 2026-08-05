@@ -1110,7 +1110,7 @@ export async function transferGatewayBalanceWithEOA(
   destinationChain: SupportedChain,
   recipientAddress: Address,
   depositorAddress: Address,
-  options?: { enableForwarder?: boolean; estimatedFee?: bigint }
+  options?: { enableForwarder?: boolean; maxFee?: bigint }
 ): Promise<{
   transferId: string;
   attestation?: `0x${string}`;
@@ -1138,7 +1138,7 @@ export async function transferGatewayBalanceWithEOA(
   // 3. Construct Burn Intent. The quote obtained before any side effect is authoritative.
   const burnIntentData: BurnIntentData = {
     maxBlockHeight: maxUint256,
-    maxFee: options?.estimatedFee ?? 1n,
+    maxFee: options?.maxFee ?? 1n,
     spec: {
       version: 1,
       sourceDomain: sourceDomain,
@@ -1157,10 +1157,10 @@ export async function transferGatewayBalanceWithEOA(
     },
   };
 
-  const estimatedFee = options?.estimatedFee ?? await estimateGatewayTransferFeeAtomic(burnIntentData, {
+  const maxFee = options?.maxFee ?? (await estimateGatewayTransferFee(burnIntentData, {
     enableForwarder: options?.enableForwarder,
-  });
-  burnIntentData.maxFee = estimatedFee;
+  })).maxFeeAtomic;
+  burnIntentData.maxFee = maxFee;
 
   // 4. Sign Intent with EOA
   const signature = await signBurnIntentWithEOA(burnIntentData, sourceChain, userId);

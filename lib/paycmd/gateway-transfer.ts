@@ -3,8 +3,20 @@ export type GatewayFeeEstimateKind = "quoted_total" | "max_fee_reserve";
 
 export type GatewayFeeEstimate = {
   atomicFee: bigint;
+  maxFeeAtomic: bigint;
   feeEstimateKind: GatewayFeeEstimateKind;
 };
+
+export function gatewayFeeExecutionAmounts(
+  amountAtomic: bigint,
+  estimate: GatewayFeeEstimate,
+) {
+  return {
+    estimatedFeeAtomic: estimate.atomicFee,
+    maxFeeAtomic: estimate.maxFeeAtomic,
+    requiredGatewayBalanceAtomic: amountAtomic + estimate.maxFeeAtomic,
+  };
+}
 
 function recordFrom(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -57,25 +69,26 @@ export function parseGatewayFeeEstimate(value: unknown): GatewayFeeEstimate {
     ? recordFrom(root.fees)
     : recordFrom(first.fees);
   const quotedTotal = decimalUsdcToAtomic(fees.total);
+  const burnIntent = recordFrom(first.burnIntent);
+  const reserve = positiveAtomic(burnIntent.maxFee);
+
+  if (!reserve) {
+    throw new Error("Circle Gateway estimate did not include a usable fee; usable maxFee is required.");
+  }
 
   if (quotedTotal && quotedTotal > 0n) {
     return {
       atomicFee: quotedTotal,
+      maxFeeAtomic: reserve,
       feeEstimateKind: "quoted_total",
     };
   }
 
-  const burnIntent = recordFrom(first.burnIntent);
-  const reserve = positiveAtomic(burnIntent.maxFee);
-
-  if (reserve) {
-    return {
-      atomicFee: reserve,
-      feeEstimateKind: "max_fee_reserve",
-    };
-  }
-
-  throw new Error("Circle Gateway estimate did not include a usable fee.");
+  return {
+    atomicFee: reserve,
+    maxFeeAtomic: reserve,
+    feeEstimateKind: "max_fee_reserve",
+  };
 }
 
 export function gatewayMintGasModeFrom(value: unknown): GatewayMintGasMode {

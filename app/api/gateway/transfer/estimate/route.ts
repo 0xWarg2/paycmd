@@ -7,6 +7,7 @@ import {
   isSupportedGatewayChain,
 } from "@/lib/circle/gateway-sdk";
 import {
+  gatewayFeeExecutionAmounts,
   gatewayMintGasModeFrom,
   usdcAmountToAtomic,
 } from "@/lib/paycmd/gateway-transfer";
@@ -66,14 +67,15 @@ export async function POST(req: NextRequest) {
       }),
       { enableForwarder: mintGasMode === "auto_forwarding" },
     );
-    const requiredGatewayBalance = amountInAtomicUnits + quote.atomicFee;
+    const feeAmounts = gatewayFeeExecutionAmounts(amountInAtomicUnits, quote);
 
     return NextResponse.json({
       amount: Number(amountInAtomicUnits) / 1_000_000,
       sourceChain,
       destinationChain,
-      estimatedGatewayFee: Number(quote.atomicFee) / 1_000_000,
-      requiredGatewayBalance: Number(requiredGatewayBalance) / 1_000_000,
+      estimatedGatewayFee: Number(feeAmounts.estimatedFeeAtomic) / 1_000_000,
+      maximumGatewayFee: Number(feeAmounts.maxFeeAtomic) / 1_000_000,
+      requiredGatewayBalance: Number(feeAmounts.requiredGatewayBalanceAtomic) / 1_000_000,
       feeEstimateKind: quote.feeEstimateKind,
       forwarding: mintGasMode === "auto_forwarding",
       mintGasMode,

@@ -44,6 +44,7 @@ import { recordRaReceipt, updateRaProofColumns } from "@/lib/ra/receipt-registry
 import {
   gatewayActualFeeAtomic,
   gatewayDestinationTxHash,
+  gatewayFeeExecutionAmounts,
   gatewayForwardingFailureMessage,
   gatewayTransferExecutionPlan,
   usdcAmountToAtomic,
@@ -320,6 +321,8 @@ export async function POST(req: NextRequest) {
     let autoDepositedAmount = 0;
     let sourceSignerAddress: Address | undefined;
     let estimatedGatewayFee: bigint;
+    let maximumGatewayFee: bigint;
+    let requiredGatewayBalance: bigint;
     let feeEstimateKind: "quoted_total" | "max_fee_reserve";
 
     // Determine if we're using external recipient
@@ -340,7 +343,10 @@ export async function POST(req: NextRequest) {
         burnIntentPreview,
         { enableForwarder: useForwarding },
       );
-      estimatedGatewayFee = gatewayFeeEstimate.atomicFee;
+      const feeAmounts = gatewayFeeExecutionAmounts(amountInAtomicUnits, gatewayFeeEstimate);
+      estimatedGatewayFee = feeAmounts.estimatedFeeAtomic;
+      maximumGatewayFee = feeAmounts.maxFeeAtomic;
+      requiredGatewayBalance = feeAmounts.requiredGatewayBalanceAtomic;
       feeEstimateKind = gatewayFeeEstimate.feeEstimateKind;
     } catch (feeEstimateError) {
       const message = feeEstimateError instanceof Error ? feeEstimateError.message : "Gateway fee estimate failed";
@@ -355,8 +361,6 @@ export async function POST(req: NextRequest) {
         { status: 503 },
       );
     }
-
-    const requiredGatewayBalance = amountInAtomicUnits + estimatedGatewayFee;
 
     if (!sourceSignerAddress) {
       const { getOrCreateGatewayEOAWallet } = await import("@/lib/circle/create-gateway-eoa-wallets");
@@ -463,6 +467,7 @@ export async function POST(req: NextRequest) {
               gatewayBalance: Number(gatewayBalance) / 1_000_000,
               requiredGatewayBalance: Number(requiredGatewayBalance) / 1_000_000,
               estimatedGatewayFee: Number(estimatedGatewayFee) / 1_000_000,
+              maximumGatewayFee: Number(maximumGatewayFee) / 1_000_000,
               walletBalance: Number(walletUsdcBalance) / 1_000_000,
               requiredAmount: Number(requiredGatewayBalance) / 1_000_000,
             },
@@ -590,7 +595,7 @@ export async function POST(req: NextRequest) {
       destinationChainKey,
       recipient as Address,
       walletAddress,
-      { enableForwarder: useForwarding, estimatedFee: estimatedGatewayFee }
+      { enableForwarder: useForwarding, maxFee: maximumGatewayFee }
     );
 
     let mintTxHash: string | undefined;
@@ -707,6 +712,7 @@ export async function POST(req: NextRequest) {
       forwarding: useForwarding,
       mintGasMode: effectiveMintGasMode,
       estimatedGatewayFee: Number(estimatedGatewayFee) / 1_000_000,
+      maximumGatewayFee: Number(maximumGatewayFee) / 1_000_000,
       requiredGatewayBalance: Number(requiredGatewayBalance) / 1_000_000,
       feeEstimateKind,
       autoDeposit: Boolean(autoDepositTxHash),
