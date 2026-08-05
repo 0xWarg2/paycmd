@@ -25,7 +25,7 @@ Sau khi đăng nhập, chạy `/link metamask`. Command này liên kết externa
 
 ## Tạo Circle wallet bằng `/wallet create`
 
-Chạy `/wallet create` để provision Circle SCA wallet và thông tin Gateway signer liên quan cho Payna flow. Command này idempotent: nếu wallet record cần thiết đã có, nó trả current status thay vì tạo trùng. Chờ status response trước khi thử command chuyển tiền. Tạo ví thành công không đưa USDC vào SCA và cũng không tạo Gateway balance.
+Chạy `/wallet create` để tạo hoặc trả về Circle SCA wallet. Command này idempotent: nếu SCA đã có, nó trả current status thay vì tạo trùng. Thông tin Gateway signer có thể chưa xuất hiện cho đến khi một Gateway flow khởi tạo signer. Chờ status response trước khi thử command chuyển tiền. Tạo ví thành công không đưa USDC vào SCA và cũng không tạo Gateway balance.
 
 ## Lấy faucet USDC và native gas
 

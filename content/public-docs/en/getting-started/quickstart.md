@@ -25,7 +25,7 @@ After signing in, run `/link metamask`. The command associates the connected ext
 
 ## Create a Circle wallet with `/wallet create`
 
-Run `/wallet create` to provision the Circle SCA wallet and the related Gateway signer information used by Payna flows. The command is idempotent: if the required wallet records already exist, it returns their current status rather than creating duplicates. Wait for the status response before trying a money-moving command. A successful wallet creation does not move USDC into the SCA and does not make a Gateway balance.
+Run `/wallet create` to create or return the Circle SCA wallet. The command is idempotent: if the SCA already exists, it returns its current status rather than creating a duplicate. Gateway signer details can remain absent until a Gateway flow initializes the signer. Wait for the status response before trying a money-moving command. A successful wallet creation does not move USDC into the SCA and does not make a Gateway balance.
 
 ## Get faucet USDC and native gas
 
