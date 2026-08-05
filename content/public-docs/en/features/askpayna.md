@@ -20,9 +20,9 @@ Choose Instant for a concise answer with low latency. Choose Research for more s
 
 ## How intent routing works
 
-The router identifies one or more topic families from the question. A Payna usage question selects the product tutorial. A Circle or CCTP question selects Circle documentation. An Arc network question selects Arc documentation. A broad blockchain topic such as Ethereum, L2s, DeFi, or market data selects web search. A mixed question can retrieve several families in parallel.
+The router identifies one or more topic families from the question. A Payna usage question selects the product tutorial. A Circle or CCTP question selects Circle documentation. An Arc network question selects Arc documentation. A recognized broad blockchain topic such as Ethereum, L2s, or DeFi selects web search. A mixed question can retrieve several families in parallel.
 
-Be specific about the product, protocol, chain, comparison criteria, and desired date range. That gives retrieval a better query than “tell me about crypto.” Questions unrelated to Payna or Web3 do not trigger this research pipeline.
+Be specific about the product, protocol, chain, comparison criteria, and desired date range. That gives retrieval a better query than “tell me about crypto.” An unrelated prompt still runs through AskPayna and DeepSeek, but selects no knowledge source: grounding is `not_applicable`, with no retrieval documents or citations.
 
 ## Payna tutorial source
 
@@ -36,7 +36,7 @@ These retrieval systems return factual snippets and HTTPS source URLs. They are 
 
 ## Tavily for broad or live Web3
 
-Tavily is used for broad Web3 subjects and for time-sensitive terms such as “latest,” “today,” news, price, or market. Live queries use a recent-news search window. Circle and Arc specialist questions do not automatically invoke broad search unless the question also names a broader topic or asks for current information.
+Tavily is used for recognized broad Web3 subjects. When a question already identifies a Web3, Circle, or Arc topic, time-sensitive terms such as “latest,” “today,” news, price, or market also select live retrieval with a recent-news window. A bare “market data” prompt does not select Tavily because it identifies no qualifying topic. Circle and Arc specialist questions add Tavily only when they also name a broader topic or ask for current information.
 
 Search results must clear Payna's relevance threshold and provide an HTTPS URL. Tavily availability, rate limits, or source freshness can affect coverage, so inspect publication dates and source quality before acting on a market claim.
 

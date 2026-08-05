@@ -20,9 +20,9 @@ Chọn Instant cho answer ngắn, độ trễ thấp; chọn Research cho phân 
 
 ## Intent routing hoạt động thế nào
 
-Router chọn một hoặc nhiều nhóm. Cách dùng Payna chọn product tutorial; Circle hoặc CCTP chọn tài liệu Circle; Arc chọn tài liệu Arc; Ethereum, L2, DeFi hoặc market data chọn web search. Câu hỏi hỗn hợp có thể retrieval song song.
+Router chọn một hoặc nhiều nhóm. Cách dùng Payna chọn product tutorial; Circle hoặc CCTP chọn tài liệu Circle; Arc chọn tài liệu Arc; topic blockchain được nhận diện như Ethereum, L2 hoặc DeFi chọn web search. Câu hỏi hỗn hợp có thể retrieval song song.
 
-Nêu rõ product, protocol, chain, tiêu chí và khoảng ngày. Câu hỏi không liên quan Payna hoặc Web3 không kích hoạt pipeline này.
+Nêu rõ product, protocol, chain, tiêu chí và khoảng ngày. Prompt không liên quan vẫn chạy qua AskPayna và DeepSeek, nhưng không chọn knowledge source: grounding là `not_applicable`, không có retrieval document hoặc citation.
 
 ## Nguồn Payna tutorial
 
@@ -36,7 +36,7 @@ Retrieval trả factual snippet và HTTPS URL. Đây là evidence, không phải
 
 ## Tavily cho Web3 rộng hoặc live
 
-Tavily dùng cho Web3 rộng và từ khóa live như “mới nhất,” “hôm nay,” news, price hoặc market. Live query tìm tin gần đây. Circle và Arc không tự gọi broad search trừ khi câu hỏi có topic rộng hoặc cần thông tin hiện tại.
+Tavily dùng cho topic Web3 rộng đã được nhận diện. Khi câu hỏi đã xác định Web3, Circle hoặc Arc, từ khóa như “mới nhất,” “hôm nay,” news, price hoặc market mới thêm live retrieval với cửa sổ tin gần đây. Prompt chỉ ghi “market data” không chọn Tavily vì chưa có topic đủ điều kiện. Câu hỏi Circle hoặc Arc chỉ thêm Tavily khi còn nêu topic rộng hoặc yêu cầu thông tin hiện tại.
 
 Result phải vượt relevance threshold và có HTTPS URL. Availability, rate limit và freshness ảnh hưởng coverage; kiểm tra ngày cùng chất lượng nguồn trước market action.
 
