@@ -14,16 +14,55 @@ aiSummary:
 
 ## `/deposit`
 
-Syntax: `/deposit <amount> from <chain>`. Chuyển SCA USDC vào Gateway và trả pending cho đến finality. Không chạy lặp khi deposit trước còn pending.
+- **Mục đích:** Chuyển USDC từ Circle SCA vào Gateway depositor balance trên một source domain.
+- **Syntax và variants:** `/deposit <amount> [USDC] from <source-chain>`; amount phải dương với tối đa sáu decimals.
+- **Ví dụ:** `/deposit 50 from base`; natural language: “Deposit 50 Base USDC vào Gateway.”
+- **Điều kiện:** Có SCA, đủ SCA USDC theo chain, native gas cho delegate/approval/deposit và chain được Gateway/Wallet SDK hỗ trợ.
+- **Preview:** Kiểm tra amount, token, source, SCA/depositor, rail và gas. Preview không khẳng định funds ready.
+- **Ranh giới confirm:** Payna confirmation authorize Circle-wallet contract execution; MetaMask không phải signer. Delegate và approval có thể xảy ra trước deposit call cuối.
+- **Kết quả và dữ liệu lưu:** Confirmed hash được lưu ở `pending_gateway_finality`, kèm block data nếu có. Chỉ thành `success` sau webhook hoặc recovery sync evidence đã verify.
+- **Lỗi và cách sửa:** **“Insufficient USDC balance”**: `/fund` SCA trước. **“Insufficient gas or gas estimation failed”**: nạp native gas cho SCA được nêu. **`GATEWAY_FINALITY_PENDING`**: chờ/sync hash cũ; không deposit lặp. Xem [deposit và finality](/docs/circle/gateway/deposit-and-finality).
 
 ## `/withdraw`
 
-Syntax: `/withdraw <amount> from <chain>`. Chuyển ready Gateway balance về SCA trên cùng domain. Preview hiển thị fee và destination SCA.
+- **Mục đích:** Burn ready Gateway USDC trên source domain và mint requested amount về SCA trên chính domain đó.
+- **Syntax và variants:** `/withdraw <amount> [USDC] from <source-chain>`.
+- **Ví dụ:** `/withdraw 5 from base`; natural language: “Trả 5 Base Gateway USDC về SCA.”
+- **Điều kiện:** Có SCA, authorized signer, source balance đủ amount cộng quoted fee và destination mint gas trong wallet Payna nêu.
+- **Preview:** Review amount, source, same-domain SCA recipient và rail. Preview chưa fetch fee; execution quote sau confirm và trả required balance.
+- **Ranh giới confirm:** Payna confirmation bắt đầu signer initialization, estimate, checks, burn intent, attestation và manual mint; MetaMask không ký.
+- **Kết quả và dữ liệu lưu:** Kết quả gồm transfer ID, fee/source debit, mint hash, wallet và row history `withdraw`.
+- **Lỗi và cách sửa:** **`INSUFFICIENT_GATEWAY_BALANCE`**: giảm amount hoặc deposit rồi chờ finality. **`INSUFFICIENT_GAS`**: nạp đúng SCA/signer. **“Gateway attestation missing”**: giữ transfer ID và reconcile trước retry. Xem [withdraw](/docs/circle/gateway/withdraw).
 
 ## `/transfer`
 
-Syntax: `/transfer <amount> from <source> to <destination> [manual]`. Source cần `amount + fee`. Mặc định auto forwarding; manual cần destination native gas.
+- **Mục đích:** Chuyển source-scoped Gateway USDC giữa các domain khác nhau.
+- **Syntax và variants:** `/transfer <amount> [USDC] from <source> to <destination> [manual]`; nếu bỏ mode sẽ chọn auto forwarding.
+- **Ví dụ:** `/transfer 10 from base to arc`; natural language: “Transfer 10 Gateway USDC từ Base sang Arc.”
+- **Điều kiện:** Có SCA/depositor và signer, hai chain hỗ trợ khác nhau, source ready balance đủ `amount + fee`, hoặc SCA đủ cho auto-deposit.
+- **Preview:** Verify amount, route, fee estimate hoặc max-fee reserve, required source balance, forwarding và bên trả destination gas. Quote lỗi khóa confirm.
+- **Ranh giới confirm:** Payna confirmation authorize auto-deposit/delegation, burn intent, attestation và forwarder/manual mint. Manual dùng gas SCA hoặc signer, không phải MetaMask.
+- **Kết quả và dữ liệu lưu:** History lưu `transfer`, route, amount, result hash, status, fee, transfer ID và optional Arc proof.
+- **Lỗi và cách sửa:** **`GATEWAY_FEE_ESTIMATE_UNAVAILABLE`**: retry read trước mutation. **`INSUFFICIENT_GATEWAY_BALANCE`/`INSUFFICIENT_USDC`**: fund đúng source đã chọn. **`GATEWAY_FORWARDING_FAILED`**: giữ transfer ID/hash và reconcile thay vì gửi lại. Xem [Gateway transfer](/docs/circle/gateway/transfer).
 
-## `/gas` và `/gateway`
+## `/gas`
 
-`/gas <chain>` kiểm tra native gas của wallet liên quan. `/gateway info` hiển thị depositor, signer và configuration; `/gateway balance [chain]` chỉ đọc Gateway balance, không cộng SCA.
+- **Mục đích:** Đọc native gas của Circle wallet liên quan đến Gateway trên một chain.
+- **Syntax và variants:** `/gas check <chain>`; parser yêu cầu cả `check` và chain.
+- **Ví dụ:** `/gas check arc`; natural language: “Kiểm tra Arc wallet gas.”
+- **Điều kiện:** User đăng nhập, có Circle SCA, chain được hỗ trợ và Wallet SDK coverage.
+- **Preview:** Read ngay; kiểm tra wallet ID/address, blockchain, native symbol, raw/formatted balance và `hasGas`.
+- **Ranh giới confirm:** Không có; không transaction hay signature.
+- **Kết quả và dữ liệu lưu:** Trả gas snapshot và không ghi history.
+- **Lỗi và cách sửa:** **“No Circle wallet found”**: chạy `/wallet create`. **“Invalid chain”**: dùng support matrix. **“current Circle wallet SDK cannot check signer gas”**: chọn chain có coverage hoặc xem address trên explorer.
+
+## `/gateway`
+
+- **Mục đích:** Xem public Gateway configuration hoặc chỉ Gateway ledger balance, không cộng SCA funds.
+- **Syntax và variants:** `/gateway info`, `/gateway balance` hoặc `/gateway balance <chain>`.
+- **Ví dụ:** `/gateway balance base`; natural language: “Hiển thị Base Gateway balance.”
+- **Điều kiện:** Đăng nhập; balance cần SCA/depositor address. Read không cần gas.
+- **Preview:** Read ngay. `info` hiển thị public domains/contracts; `balance` hiển thị Gateway rows, partial/unavailable flags và scope đã chọn.
+- **Ranh giới confirm:** Không có; các variant này không chuyển tiền.
+- **Kết quả và dữ liệu lưu:** Trả live configuration hoặc Gateway balance vừa fetch; không tạo transaction-history row.
+- **Lỗi và cách sửa:** **“No wallet address found”**: tạo SCA. **“Unsupported chain”**: sửa scope. **Gateway unavailable/partial**: retry sau và không coi missing data là zero. Xem [unified balance](/docs/circle/gateway/unified-balance).
