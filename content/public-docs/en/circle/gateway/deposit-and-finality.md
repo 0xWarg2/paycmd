@@ -52,7 +52,7 @@ Webhook finality is different from a browser polling timer. Closing the page doe
 
 ## Recovery sync and idempotent refresh
 
-`/api/gateway/deposit/sync` is Payna's recovery path when webhook delivery, a browser event, or Realtime propagation is delayed. For current rows with a recorded deposit block, sync requests Circle's pending deposits and Gateway domain processing heights. It settles only when the exact hash is absent from the pending list **and** Circle's processed height has reached or passed the deposit block.
+Payna's authenticated recovery sync is the fallback when webhook delivery, a browser event, or Realtime propagation is delayed. For current rows with a recorded deposit block, sync requests Circle's pending deposits and Gateway domain processing heights. It settles only when the exact hash is absent from the pending list **and** Circle's processed height has reached or passed the deposit block.
 
 Rows created before block-number recording can use a legacy grace rule, but that timeout is not the standard finality model. Webhooks remain authoritative, and new records require positive Circle reconciliation evidence.
 

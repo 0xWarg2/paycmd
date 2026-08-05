@@ -75,7 +75,7 @@ Manual may reduce the USDC quote, but it is not automatically cheaper. Compare d
 
 Choose auto forwarding when the destination wallet lacks native gas, the route is supported by Circle forwarding, or simpler settlement is worth the quoted USDC cost. Choose manual when the designated minter already has reliable destination gas and the preview confirms a usable route.
 
-For either transfer mode, verify source, destination, recipient, source debit, and quote type. `/gas <chain>` can help inspect balances, but the transfer estimate and confirmed execution response identify which wallet role needs gas. Same-chain routes are not automatically forced to manual; Payna honors the selected mint mode.
+For either transfer mode, verify source, destination, recipient, source debit, and quote type. `/gas check <chain>` can help inspect balances, but the transfer estimate and confirmed execution response identify which wallet role needs gas. Same-chain routes are not automatically forced to manual; Payna honors the selected mint mode.
 
 ## Failure and retry checklist
 

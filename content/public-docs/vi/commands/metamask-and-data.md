@@ -46,8 +46,8 @@ aiSummary:
 - **Điều kiện:** Đăng nhập. Không cần wallet, balance, gas hay signature.
 - **Preview:** Read ngay; không có transaction preview. Review type filter, status, source/destination, amount, reason, date và explorer reference đúng chain.
 - **Ranh giới confirm:** Không có; history không thể ký, settle, retry hay thay đổi transaction.
-- **Kết quả và dữ liệu lưu:** Trả các row đã có theo thứ tự mới nhất trong route limit và không tạo history mới. Chat receipt có thể hiển thị nhiều hash hơn Activity table.
-- **Lỗi và cách sửa:** **“Unauthorized”**: đăng nhập lại. **“Failed to fetch transaction history”**: retry mà không chạy payment. Kết quả rỗng: bỏ filter. Row `pending` hoặc `pending_gateway_finality` chưa phải final success; hãy reconcile hash.
+- **Kết quả và dữ liệu lưu:** Trả toàn bộ row khớp account và type filter theo thứ tự mới nhất trước; route hiện tại không áp dụng limit và không tạo history mới. Chat receipt có thể hiển thị nhiều hash hơn Activity table.
+- **Lỗi và cách sửa:** **“Unauthorized”**: đăng nhập lại. **“Error fetching transaction history”**: retry phép đọc mà không chạy payment. Kết quả rỗng: bỏ filter. Row `pending` hoặc `pending_gateway_finality` chưa phải final success; hãy reconcile hash.
 
 ## Recovery và result link
 

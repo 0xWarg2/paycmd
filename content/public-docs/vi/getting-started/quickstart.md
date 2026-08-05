@@ -21,7 +21,7 @@ Chọn **Sign in with MetaMask** rồi xác nhận login signature trong extensi
 
 ## Liên kết ví MetaMask bằng `/link metamask`
 
-Sau khi đăng nhập, chạy `/link metamask`. Command này liên kết external address đang connect với Payna account hiện tại; nó không trao quyền custody ví cho Payna. MetaMask account phải trùng với login session. Liên kết này giúp Payna chuẩn bị fund, CCTP bridge và swap flow cần chữ ký người dùng. Bạn có thể kiểm tra linked address sau đó bằng `/wallet status`.
+Sau khi đăng nhập, chạy `/link metamask`. Command này liên kết external address đang connect với Payna account hiện tại; nó không trao quyền custody ví cho Payna. MetaMask account phải trùng với login session. Liên kết này giúp Payna chuẩn bị fund, CCTP bridge và swap flow cần chữ ký người dùng. Kiểm tra MetaMask đã liên kết bằng địa chỉ và status badge trong **Profile**; `/wallet status` chỉ báo Circle SCA, Gateway signer và các Circle wallet.
 
 ## Tạo Circle wallet bằng `/wallet create`
 
@@ -29,7 +29,7 @@ Chạy `/wallet create` để tạo hoặc trả về Circle SCA wallet. Command
 
 ## Lấy faucet USDC và native gas
 
-Lấy testnet USDC từ [Circle Faucet](https://faucet.circle.com/) trên chain bạn muốn fund. Xác nhận faucet deposit đến linked MetaMask address, không phải SCA hoặc Gateway address đã copy từ màn hình khác. MetaMask cần cả USDC và native gas cho `/fund`, CCTP bridge và Arc swap. Gas cho Circle SCA hoặc Gateway signer chỉ liên quan Circle-wallet transaction hay manual branch được UI nêu rõ; dùng `/gas <chain>` khi Gateway flow yêu cầu kiểm tra.
+Lấy testnet USDC từ [Circle Faucet](https://faucet.circle.com/) trên chain bạn muốn fund. Xác nhận faucet deposit đến linked MetaMask address, không phải SCA hoặc Gateway address đã copy từ màn hình khác. MetaMask cần cả USDC và native gas cho `/fund`, CCTP bridge và Arc swap. Gas cho Circle SCA hoặc Gateway signer chỉ liên quan Circle-wallet transaction hay manual branch được UI nêu rõ; dùng `/gas check <chain>` khi Gateway flow yêu cầu kiểm tra.
 
 ## Fund Circle wallet bằng `/fund`
 

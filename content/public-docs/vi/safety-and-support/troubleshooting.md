@@ -47,7 +47,7 @@ aiSummary:
 
 **Chẩn đoán:** Source native gas trả Gateway delegate/approval/deposit; USDC fee riêng. Manual mint cần named SCA/signer gas, auto forwarding thường tránh destination gas. Rail, chain, source/recipient mơ hồ chặn payment.
 
-**Hành động an toàn:** Chỉ fund public address/chain trong error. Làm rõ payment rồi mở preview mới; `/gas <chain>` chỉ hỗ trợ đọc balance.
+**Hành động an toàn:** Chỉ fund public address/chain trong error. Làm rõ payment rồi mở preview mới; `/gas check <chain>` chỉ hỗ trợ đọc balance.
 
 **Không lặp lại:** Không fund depositor contract, gọi Gateway gas là MetaMask gas hoặc confirm payment mơ hồ. Xem [fees và forwarding](/docs/circle/gateway/fees-gas-and-forwarding).
 

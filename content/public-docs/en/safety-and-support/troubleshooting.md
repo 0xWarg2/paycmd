@@ -47,7 +47,7 @@ aiSummary:
 
 **Diagnosis:** Source native gas pays Gateway delegate/approval/deposit; USDC fee is separate. Manual mint needs named SCA/signer gas; auto forwarding normally avoids destination gas. Ambiguous rail, chain, source, or recipient blocks payment.
 
-**Safe action:** Fund only the public address and chain named by the error. Clarify the payment details and reopen its preview; use `/gas <chain>` as a read aid.
+**Safe action:** Fund only the public address and chain named by the error. Clarify the payment details and reopen its preview; use `/gas check <chain>` as a read aid.
 
 **Do not repeat:** Do not fund a depositor contract, call Gateway gas MetaMask gas, or confirm an ambiguous payment. See [fees and forwarding](/docs/circle/gateway/fees-gas-and-forwarding).
 

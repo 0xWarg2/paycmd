@@ -2,6 +2,17 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
 const acceptanceProjects = new Set(["desktop-1440", "desktop-1440-light", "mobile-390", "mobile-390-light"]);
+const axeRoutes = [
+  { name: "overview", path: "/docs" },
+  { name: "quickstart", path: "/docs/getting-started/quickstart" },
+  { name: "Gateway unified balance", path: "/docs/circle/gateway/unified-balance" },
+  { name: "command reference", path: "/docs/commands/gateway" },
+  { name: "troubleshooting", path: "/docs/safety-and-support/troubleshooting" },
+] as const;
+const visualRoutes = [
+  { name: "command-reference", path: "/docs/commands/gateway" },
+  { name: "troubleshooting", path: "/docs/safety-and-support/troubleshooting" },
+] as const;
 
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(!acceptanceProjects.has(testInfo.project.name), "docs portal acceptance uses desktop 1440 and mobile 390");
@@ -40,13 +51,23 @@ test("links command headings from the on-page table of contents", async ({ page 
   test.skip(!testInfo.project.name.startsWith("desktop-1440"), "on-page navigation is visible on wide desktop");
   await page.goto("/docs/commands/gateway");
 
-  const heading = page.locator("#deposit");
+  const scroller = page.getByTestId("docs-scroll-container");
+  const heading = page.locator("#gateway");
   await expect(heading).toHaveCount(1);
   const tableOfContents = page.getByRole("navigation", { name: "Trong trang này" });
-  const depositLink = tableOfContents.getByRole("link", { name: "/deposit", exact: true });
-  await expect(depositLink).toHaveAttribute("href", "#deposit");
-  await depositLink.click();
-  await expect(page).toHaveURL(/#deposit$/);
+  const gatewayLink = tableOfContents.getByRole("link", { name: "/gateway", exact: true });
+  await expect(gatewayLink).toHaveAttribute("href", "#gateway");
+  const initialScrollTop = await scroller.evaluate((element) => element.scrollTop);
+  await gatewayLink.click();
+  await expect(page).toHaveURL(/#gateway$/);
+  await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(initialScrollTop + 100);
+  await expect.poll(() => heading.evaluate((element) => {
+    const container = document.querySelector<HTMLElement>("[data-testid='docs-scroll-container']");
+    if (!container) return false;
+    const headingRect = element.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    return headingRect.top >= containerRect.top && headingRect.bottom <= containerRect.bottom;
+  })).toBe(true);
 });
 
 test("preserves legacy docs anchors by routing to their canonical pages", async ({ page }) => {
@@ -75,6 +96,8 @@ test("uses compact typography and scrolls a long guide to its final navigation",
   await page.goto("/docs/circle/gateway/unified-balance");
 
   const scroller = page.getByTestId("docs-scroll-container");
+  const scrollbar = page.getByTestId("docs-scrollbar");
+  const thumb = page.getByTestId("docs-scrollbar-thumb");
   const metrics = await scroller.evaluate((element) => ({
     clientHeight: element.clientHeight,
     scrollHeight: element.scrollHeight,
@@ -89,8 +112,30 @@ test("uses compact typography and scrolls a long guide to its final navigation",
   expect(titleSize).toBeGreaterThanOrEqual(28);
   expect(titleSize).toBeLessThanOrEqual(36);
 
-  await scroller.evaluate((element) => element.scrollTo({ top: element.scrollHeight }));
+  await expect(scrollbar).toBeVisible();
+  await expect(thumb).toBeVisible();
+  await expect(scrollbar).toHaveAttribute("role", "scrollbar");
+  await expect(scrollbar).toHaveCSS("opacity", "1");
+  await scroller.evaluate((element) => element.scrollTo({ top: 0 }));
+
+  const trackBox = await scrollbar.boundingBox();
+  const thumbBox = await thumb.boundingBox();
+  expect(trackBox).not.toBeNull();
+  expect(thumbBox).not.toBeNull();
+  if (trackBox && thumbBox) {
+    await page.mouse.move(thumbBox.x + thumbBox.width / 2, thumbBox.y + thumbBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(thumbBox.x + thumbBox.width / 2, trackBox.y + trackBox.height - thumbBox.height / 2, { steps: 8 });
+    await page.mouse.up();
+  }
+  await expect.poll(() => scroller.evaluate((element) => element.scrollTop / (element.scrollHeight - element.clientHeight))).toBeGreaterThan(0.8);
   await expect(page.getByRole("navigation", { name: "Pagination" })).toBeInViewport();
+
+  await scrollbar.focus();
+  await scrollbar.press("Home");
+  await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBe(0);
+  await scrollbar.press("End");
+  await expect.poll(() => scroller.evaluate((element) => element.scrollTop / (element.scrollHeight - element.clientHeight))).toBeGreaterThan(0.95);
 });
 
 test("reflows Docs at a 200 percent equivalent viewport", async ({ page }) => {
@@ -99,3 +144,23 @@ test("reflows Docs at a 200 percent equivalent viewport", async ({ page }) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await expect(page.getByTestId("docs-scroll-container")).toBeVisible();
 });
+
+for (const route of axeRoutes) {
+  test(`${route.name} has no automated accessibility violations in both themes`, async ({ page }, testInfo) => {
+    test.skip(!testInfo.project.name.startsWith("desktop-1440"), "paired desktop light/dark projects cover the Docs Axe matrix");
+    await page.goto(route.path);
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    const accessibility = await new AxeBuilder({ page }).analyze();
+    expect(accessibility.violations).toEqual([]);
+  });
+}
+
+for (const route of visualRoutes) {
+  test(`${route.name} matches its detailed Docs visual baseline`, async ({ page }, testInfo) => {
+    await page.goto(route.path);
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await page.getByTestId("docs-scroll-container").evaluate((element) => element.scrollTo({ top: 0 }));
+    await expect(page.getByTestId("docs-scrollbar")).toBeVisible();
+    await expect(page).toHaveScreenshot(`docs-${route.name}-${testInfo.project.name}.png`, { fullPage: true });
+  });
+}

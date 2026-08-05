@@ -52,7 +52,7 @@ Webhook finality khác browser polling timer. Đóng page không hủy deposit �
 
 ## Recovery sync và idempotent refresh
 
-`/api/gateway/deposit/sync` là recovery path khi webhook delivery, browser event hoặc Realtime propagation bị trễ. Với current row có deposit block, sync request pending deposit và Gateway domain processing height từ Circle. Nó chỉ settle khi đúng hash vắng khỏi pending list **và** processed height của Circle đã đến hoặc vượt deposit block.
+Recovery sync đã xác thực của Payna là đường khôi phục khi webhook delivery, browser event hoặc Realtime propagation bị trễ. Với current row có deposit block, sync request pending deposit và Gateway domain processing height từ Circle. Nó chỉ settle khi đúng hash vắng khỏi pending list **và** processed height của Circle đã đến hoặc vượt deposit block.
 
 Record tạo trước khi lưu block number có thể dùng legacy grace rule, nhưng timeout đó không phải standard finality model. Webhook vẫn authoritative và record mới cần positive Circle reconciliation evidence.
 

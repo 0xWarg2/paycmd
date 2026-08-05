@@ -75,7 +75,7 @@ Manual có thể giảm USDC quote nhưng không tự động rẻ hơn. Hãy so
 
 Chọn auto forwarding khi destination wallet thiếu native gas, route được Circle forwarding support hoặc simpler settlement đáng giá theo USDC quote. Chọn manual khi designated minter đã có destination gas ổn định và preview xác nhận usable route.
 
-Với cả hai transfer mode, kiểm tra source, destination, recipient, source debit và quote type. `/gas <chain>` giúp inspect balance, còn transfer estimate và confirmed execution response xác định wallet role nào cần gas. Same-chain route không tự bị ép sang manual; Payna giữ selected mint mode.
+Với cả hai transfer mode, kiểm tra source, destination, recipient, source debit và quote type. `/gas check <chain>` giúp inspect balance, còn transfer estimate và confirmed execution response xác định wallet role nào cần gas. Same-chain route không tự bị ép sang manual; Payna giữ selected mint mode.
 
 ## Failure và retry checklist
 

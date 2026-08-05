@@ -29,7 +29,7 @@ Gateway signer là một multichain EOA riêng dùng trong Gateway flow cho dele
 
 ## Các địa chỉ bạn có thể thấy
 
-Dùng `/wallet status` để nhận diện Circle SCA và linked-wallet detail, còn `/gateway info` để xem Gateway configuration như depositor và signer. `/balance` tách SCA và Gateway view; `/gateway balance [chain]` chỉ đọc phía Gateway, không cộng USDC còn trong SCA. Chỉ copy một address từ field được gắn nhãn cho action dự định. Recipient address của MetaMask CCTP bridge, SCA receiving address và Gateway configuration không thể thay thế cho nhau chỉ vì cùng liên kết với một Payna account.
+Dùng `/wallet status` để nhận diện Circle SCA, Gateway signer và các Circle wallet; command này không báo trạng thái liên kết MetaMask. Xem linked MetaMask address và status badge trong **Profile**. Dùng `/gateway info` để xem Gateway configuration như depositor và signer. `/balance` tách SCA và Gateway view; `/gateway balance [chain]` chỉ đọc phía Gateway, không cộng USDC còn trong SCA. Chỉ copy một address từ field được gắn nhãn cho action dự định. Recipient address của MetaMask CCTP bridge, SCA receiving address và Gateway configuration không thể thay thế cho nhau chỉ vì cùng liên kết với một Payna account.
 
 ## Recovery và hành vi re-link
 
@@ -46,7 +46,7 @@ Không bao giờ nhập seed phrase hoặc private key vào Payna, chat hoặc y
 | Payna account | Phiên người dùng đã xác thực | Nhóm record và history liên quan | Không phải on-chain balance |
 | MetaMask | Bạn, qua extension | Login, fund, CCTP bridge, Arc swap | MetaMask USDC và native gas |
 | Circle SCA wallet | Circle-wallet flow do Payna điều phối | Giữ USDC đã fund và payment action | `/wallet balance [chain]` |
-| Gateway signer | Gateway flow signer | Authorization và burn-intent signature | Dùng `/gateway info` và `/gas <chain>` khi được yêu cầu |
+| Gateway signer | Gateway flow signer | Authorization và burn-intent signature | Dùng `/gateway info` và `/gas check <chain>` khi được yêu cầu |
 | Gateway depositor balance | Circle Gateway theo depositor và domain | Thanh khoản Gateway transfer đã sẵn sàng | `/gateway balance [chain]` |
 
 Khi quyết định bước tiếp theo, hãy theo rail thay vì chọn address trông ngắn gọn nhất. Fund MetaMask USDC vào SCA bằng `/fund`; deposit SCA USDC bằng `/deposit` trước khi dùng Gateway; chỉ dùng CCTP khi preview nêu MetaMask là source. Phân biệt này giúp các address và balance hiển thị dễ hiểu.

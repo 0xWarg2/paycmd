@@ -18,7 +18,17 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { isValidElement, type ReactNode, useEffect, useMemo, useState } from "react";
+import {
+  isValidElement,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -353,6 +363,177 @@ function OverviewCards({ sections, locale }: { sections: PublicDocsNavigationSec
   );
 }
 
+type DocsScrollMetrics = {
+  clientHeight: number;
+  maxScroll: number;
+  scrollTop: number;
+  scrollHeight: number;
+  thumbHeight: number;
+  thumbTop: number;
+  trackHeight: number;
+};
+
+const initialDocsScrollMetrics: DocsScrollMetrics = {
+  clientHeight: 0,
+  maxScroll: 0,
+  scrollTop: 0,
+  scrollHeight: 0,
+  thumbHeight: 48,
+  thumbTop: 0,
+  trackHeight: 0,
+};
+
+function DocsMainScroller({ children, locale }: { children: ReactNode; locale: Locale }) {
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ pointerId: number; startScrollTop: number; startY: number } | null>(null);
+  const [metrics, setMetrics] = useState(initialDocsScrollMetrics);
+
+  const measure = useCallback(() => {
+    const scroller = scrollerRef.current;
+    const track = trackRef.current;
+    if (!scroller || !track) return;
+
+    const clientHeight = scroller.clientHeight;
+    const scrollHeight = scroller.scrollHeight;
+    const maxScroll = Math.max(scrollHeight - clientHeight, 0);
+    const scrollTop = Math.min(Math.max(scroller.scrollTop, 0), maxScroll);
+    const trackHeight = track.clientHeight;
+    const proportionalThumb = scrollHeight > 0 ? trackHeight * (clientHeight / scrollHeight) : trackHeight;
+    const thumbHeight = Math.min(trackHeight, Math.max(48, proportionalThumb));
+    const thumbTravel = Math.max(trackHeight - thumbHeight, 0);
+    const thumbTop = maxScroll > 0 ? (scrollTop / maxScroll) * thumbTravel : 0;
+    const next = { clientHeight, maxScroll, scrollTop, scrollHeight, thumbHeight, thumbTop, trackHeight };
+
+    setMetrics((current) => Object.keys(next).every((key) => current[key as keyof DocsScrollMetrics] === next[key as keyof DocsScrollMetrics]) ? current : next);
+  }, []);
+
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    const track = trackRef.current;
+    if (!scroller || !track) return;
+
+    const resizeObserver = new ResizeObserver(measure);
+    resizeObserver.observe(scroller);
+    resizeObserver.observe(track);
+    if (scroller.firstElementChild) resizeObserver.observe(scroller.firstElementChild);
+    const mutationObserver = new MutationObserver(measure);
+    mutationObserver.observe(scroller, { childList: true, subtree: true, characterData: true });
+    scroller.addEventListener("scroll", measure, { passive: true });
+    const animationFrame = requestAnimationFrame(measure);
+
+    return () => {
+      cancelAnimationFrame(animationFrame);
+      scroller.removeEventListener("scroll", measure);
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+    };
+  }, [measure]);
+
+  const scrollFromTrackPoint = (clientY: number) => {
+    const scroller = scrollerRef.current;
+    const track = trackRef.current;
+    if (!scroller || !track || metrics.maxScroll <= 0) return;
+    const rect = track.getBoundingClientRect();
+    const thumbTravel = Math.max(metrics.trackHeight - metrics.thumbHeight, 1);
+    const thumbTop = Math.min(Math.max(clientY - rect.top - metrics.thumbHeight / 2, 0), thumbTravel);
+    scroller.scrollTop = (thumbTop / thumbTravel) * metrics.maxScroll;
+  };
+
+  const handleTrackPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) return;
+    event.preventDefault();
+    scrollFromTrackPoint(event.clientY);
+  };
+
+  const handleThumbPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = { pointerId: event.pointerId, startScrollTop: scroller.scrollTop, startY: event.clientY };
+  };
+
+  const handleThumbPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    const scroller = scrollerRef.current;
+    if (!drag || !scroller || drag.pointerId !== event.pointerId) return;
+    const thumbTravel = Math.max(metrics.trackHeight - metrics.thumbHeight, 1);
+    scroller.scrollTop = drag.startScrollTop + ((event.clientY - drag.startY) / thumbTravel) * metrics.maxScroll;
+  };
+
+  const finishThumbDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    dragRef.current = null;
+  };
+
+  const handleScrollbarKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    const pageStep = Math.max(scroller.clientHeight * 0.85, 48);
+    const commands: Partial<Record<string, () => void>> = {
+      ArrowDown: () => scroller.scrollBy({ top: 48 }),
+      ArrowUp: () => scroller.scrollBy({ top: -48 }),
+      PageDown: () => scroller.scrollBy({ top: pageStep }),
+      PageUp: () => scroller.scrollBy({ top: -pageStep }),
+      Home: () => scroller.scrollTo({ top: 0 }),
+      End: () => scroller.scrollTo({ top: scroller.scrollHeight }),
+    };
+    const command = commands[event.key];
+    if (!command) return;
+    event.preventDefault();
+    command();
+  };
+
+  const scrollLabel = locale === "vi" ? "Cuộn nội dung tài liệu" : "Scroll document content";
+  const percentage = metrics.maxScroll > 0 ? Math.round((metrics.scrollTop / metrics.maxScroll) * 100) : 0;
+
+  return (
+    <main aria-label={scrollLabel} className={styles.mainScrollFrame}>
+      <div
+        id="docs-scroll-container"
+        ref={scrollerRef}
+        data-testid="docs-scroll-container"
+        role="region"
+        tabIndex={0}
+        aria-label={scrollLabel}
+        className={cn(styles.mainScrollbar, "min-h-0 min-w-0 overflow-y-auto px-5 py-8 sm:px-8 lg:px-10 xl:px-12")}
+      >
+        {children}
+      </div>
+      <div
+        ref={trackRef}
+        data-testid="docs-scrollbar"
+        role="scrollbar"
+        tabIndex={0}
+        aria-label={scrollLabel}
+        aria-controls="docs-scroll-container"
+        aria-orientation="vertical"
+        aria-valuemin={0}
+        aria-valuemax={Math.round(metrics.maxScroll)}
+        aria-valuenow={Math.round(metrics.scrollTop)}
+        aria-valuetext={`${percentage}%`}
+        aria-disabled={metrics.maxScroll <= 0}
+        className={styles.customScrollbar}
+        onKeyDown={handleScrollbarKeyDown}
+        onPointerDown={handleTrackPointerDown}
+      >
+        <div
+          data-testid="docs-scrollbar-thumb"
+          className={styles.customScrollThumb}
+          style={{ height: `${metrics.thumbHeight}px`, transform: `translateY(${metrics.thumbTop}px)` }}
+          onPointerDown={handleThumbPointerDown}
+          onPointerMove={handleThumbPointerMove}
+          onPointerUp={finishThumbDrag}
+          onPointerCancel={finishThumbDrag}
+        />
+      </div>
+    </main>
+  );
+}
+
 export function PublicDocsPortal({ page, navigation, searchIndex, adjacent, gatewaySupport, version }: PublicDocsPortalProps) {
   const { locale } = useI18n();
   const labels = ui[locale];
@@ -409,7 +590,7 @@ export function PublicDocsPortal({ page, navigation, searchIndex, adjacent, gate
           <DocsNavigation sections={navigation[locale]} activeSlug={page.slug} locale={locale} />
         </aside>
 
-        <main data-testid="docs-scroll-container" className={cn(styles.scrollbar, styles.mainScrollbar, "min-h-0 min-w-0 overflow-y-auto px-5 py-8 sm:px-8 lg:px-10 xl:px-12")}>
+        <DocsMainScroller locale={locale}>
           <div className="mx-auto max-w-3xl">
             <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
               <Link href="/docs" className="hover:text-foreground">{labels.docs}</Link>
@@ -433,7 +614,7 @@ export function PublicDocsPortal({ page, navigation, searchIndex, adjacent, gate
               {adjacent.next ? <Link href={`/docs/${adjacent.next.slug}`} className="rounded-xl border border-border p-4 text-right hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><span className="flex items-center justify-end gap-2 text-xs text-muted-foreground">{labels.next}<ArrowRight className="h-3.5 w-3.5" /></span><span className="mt-2 block font-semibold text-foreground">{adjacent.next.locales[locale].title}</span></Link> : null}
             </nav>
           </div>
-        </main>
+        </DocsMainScroller>
 
         <aside aria-label={labels.onPage} className={cn(styles.scrollbar, "hidden min-h-0 overflow-y-auto border-l border-border/70 px-5 py-8 xl:block")}>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">{labels.onPage}</p>

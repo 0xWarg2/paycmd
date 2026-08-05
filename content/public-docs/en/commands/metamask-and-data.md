@@ -46,8 +46,8 @@ aiSummary:
 - **Prerequisites:** Sign in. No wallet, balance, gas, or signature is required.
 - **Preview:** Immediate read; there is no transaction preview. Review type filter, status, source/destination, amount, reason, date, and chain-correct explorer references.
 - **Confirmation boundary:** None; history cannot sign, settle, retry, or change a transaction.
-- **Success and persisted data:** Returns existing rows newest-first (up to the route limit) and creates no new history. Chat receipts may expose more hashes than the Activity table.
-- **Named errors and fixes:** **“Unauthorized”**: sign in again. **“Failed to fetch transaction history”**: retry without issuing a payment. Empty results: clear the filter. A `pending` or `pending_gateway_finality` row is not final success; reconcile its hashes.
+- **Success and persisted data:** Returns all rows matching the account and type filter, ordered newest-first; the current route applies no limit and creates no new history. Chat receipts may expose more hashes than the Activity table.
+- **Named errors and fixes:** **“Unauthorized”**: sign in again. **“Error fetching transaction history”**: retry the read without issuing a payment. Empty results: clear the filter. A `pending` or `pending_gateway_finality` row is not final success; reconcile its hashes.
 
 ## Recovery and result links
 
