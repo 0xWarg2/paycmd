@@ -35,7 +35,8 @@ The operation will be exposed as a narrow administrative script rather than hidd
 4. Build a plan for the four fixed target blockchains:
    - `existing` when a matching SCA is already derived;
    - `missing` when derivation is required;
-   - fail when the same target chain exists with conflicting address or account type.
+   - ignore the expected EOA record on the same target chain;
+   - fail when a target SCA exists with a conflicting address, wallet set, or custody type.
 5. In preview mode, print only chain/status/address-match information and perform no writes.
 6. In apply mode, call `deriveWallet` only for missing targets, one chain at a time.
 7. After every derivation, require the returned wallet to have the expected blockchain, SCA account type, wallet set, and the exact same address.
@@ -69,6 +70,7 @@ Unit tests will cover plan construction and result validation:
 
 - all four targets missing;
 - some or all targets already derived;
+- an EOA on the target chain is ignored while planning the SCA;
 - conflicting target address;
 - wrong account type;
 - wrong wallet set;
