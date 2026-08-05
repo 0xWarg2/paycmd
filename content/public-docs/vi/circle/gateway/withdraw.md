@@ -28,7 +28,7 @@ Command không ngầm withdraw “all” và không suy source từ visible tota
 
 ## Prerequisite
 
-Trước khi tạo withdrawal preview:
+Trước khi confirmed withdrawal execution có thể hoàn tất:
 
 - user phải có Circle SCA wallet và address;
 - selected chain phải vừa nằm trong Gateway configuration của Payna vừa operable qua current Circle Wallet SDK;
@@ -39,9 +39,11 @@ Trước khi tạo withdrawal preview:
 
 Pending deposit chưa ready. `/withdraw` không auto-deposit hoặc dùng SCA USDC bù Gateway shortfall vì như vậy fund đi ngược hướng.
 
+Đây là execution prerequisite, không phải check đã được command preview chứng minh. Current preview không gọi withdraw route để inspect signer, quote, balance, authorization hay gas.
+
 ## Fee và balance validation
 
-Payna tạo same-domain burn-intent preview, hỏi Circle estimate rồi tính `requiredGatewayBalance = amount + estimatedGatewayFee`. Sau đó nó đọc Gateway balance của SCA depositor trên đúng selected domain.
+Sau khi user confirm, Payna resolve Circle SCA rồi tìm hoặc tạo Gateway signer. Tiếp theo nó tạo same-domain burn-intent preview cho Circle estimate, tính `requiredGatewayBalance = amount + estimatedGatewayFee`, rồi đọc Gateway balance của SCA depositor trên đúng selected domain.
 
 Nếu row thiếu, Payna trả `INSUFFICIENT_GATEWAY_BALANCE` cùng current balance, amount, fee và total required. Hãy giảm amount hoặc chờ existing deposit finalize. Không chỉ so amount với balance; Gateway fee được collect từ source và cũng phải vừa.
 
@@ -49,9 +51,9 @@ Estimate không phải settled receipt. Circle giải thích burn intent `maxFee
 
 ## Preview và confirmation
 
-Preview nên hiển thị amount, source chain, receiving SCA address, estimated Gateway fee, total required Gateway balance và việc source/destination là same domain. Nó cũng phải nêu native-gas requirement cho SCA mint và delegate authorization nếu có.
+**Current Payna UI boundary:** withdrawal preview xác nhận amount, selected source và recipient là Circle SCA của user trên same domain. Nó chưa hiển thị runtime fee estimate hoặc required Gateway balance, inspect mint gas, tạo/tìm signer hay check delegate authorization. Các operation này chỉ bắt đầu sau khi user confirm và Payna gọi withdrawal route.
 
-Kiểm tra receiving address khớp Circle SCA record, không phải MetaMask hay signer EOA. Confirm sẽ authorize signer request debit và SCA mint kết quả. Nếu preview không quote được fee hoặc verify required gas, không được ngụ ý withdrawal đã ready.
+Kiểm tra kỹ amount/source và hiểu recipient role là same-domain SCA, không phải MetaMask hay signer EOA. Confirmation cho phép Payna bắt đầu execution check; nó không chứng minh fee, ready balance, native gas hoặc signer authorization sẽ pass. Execution trả resolved SCA address hoặc specific error sau các check đó.
 
 ## Signer authorization và pending state
 
@@ -77,7 +79,7 @@ Response hiện tại báo pre-execution estimate chứ chưa có settled-fee fi
 
 **Invalid amount hoặc chain:** không nên có stateful work; sửa command.
 
-**Quote unavailable:** Payna không tính được `amount + fee`; chờ rồi lấy fresh preview.
+**Quote unavailable:** sau confirmation, Payna có thể đã tạo hoặc lookup signer nhưng chưa submit burn intent. Hãy chờ rồi confirm một execution attempt mới.
 
 **Insufficient ready balance:** chờ đúng pending deposit hoặc giảm amount. Không deposit lại khi chưa check hash.
 

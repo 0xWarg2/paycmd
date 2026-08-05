@@ -9,12 +9,12 @@ keywords: ["fee", "gas", "auto forwarding", "manual mint"]
 tutorial: true
 aiSummary:
   - "Gateway fees debit source USDC, source-side wallet operations use native gas, and manual destination mint requires native gas from the minting wallet."
-  - "Payna quotes before state changes, prefers Circle's fees.total, and treats forwarded and manual destination hashes as different result shapes."
+  - "The transfer flow quotes before state changes; withdraw initializes its signer only after confirmation, then quotes and checks execution requirements."
 ---
 
 ## Four costs that must stay separate
 
-A Gateway preview can involve four different cost categories:
+A Gateway operation can involve four different cost categories:
 
 1. **Gateway protocol fee** is charged in USDC against the source balance. Circle describes it as source burn gas plus a transfer fee based on amount.
 2. **Forwarding fee** is additional source-side USDC when Circle's Forwarding Service relays the destination mint. It includes the forwarding service and destination gas component.
@@ -35,15 +35,17 @@ Do not copy static fee examples into an operational promise. Network costs and r
 
 **Current Payna implementation behavior:** it sends a partial burn intent to Circle's `/v1/estimate`, omitting the placeholder `maxFee`. With auto forwarding, it adds `enableForwarder=true`. Payna prefers the decimal `fees.total` field from either the top-level response or the first response item and converts it to six-decimal USDC atomic units.
 
-If a legacy manual quote does not contain a usable `fees.total`, Payna can fall back to the first `burnIntent.maxFee` as a positive atomic reserve. The response labels these cases `quoted_total` and `max_fee_reserve`. Zero, malformed, or absent values fail closed. Payna does not invent a zero fee.
+If `fees.total` is unusable and the first returned burn intent contains a positive atomic `maxFee`, the current shared parser uses that value as a reserve. This fallback is mode-agnostic; the parser does not require manual mode. The response labels the two successful cases `quoted_total` and `max_fee_reserve`. It fails only when neither a usable positive total nor a positive reserve is present, and never invents a zero fee.
 
 This behavior should be distinguished from Circle's general API schema, where `maxFee` is the user's maximum authorization and the estimate endpoint may return additional burn-intent constraints. See the official [estimate API reference](https://developers.circle.com/api-reference/gateway/all/estimate-transfer).
 
 ## Preview timing and quote freshness
 
-Payna estimates before signer creation, delegate authorization, auto-deposit, or burn signing. That ordering makes quote failure a read-only failure and prevents an unavailable preview from leaving behind wallets or balance mutations.
+For `/transfer`, Payna estimates before signer creation, delegate authorization, auto-deposit, or burn signing. That ordering makes a transfer quote failure read-only and prevents an unavailable transfer preview from leaving behind wallets or balance mutations.
 
-The preview should expose `estimatedGatewayFee`, `requiredGatewayBalance`, `feeEstimateKind`, mint mode, and forwarding state. It must not display a hard-coded fixed fee before the estimate returns. It must also avoid calling an estimate “actual.” A user who changes amount, source, destination, recipient, or mint mode needs a new quote.
+`/withdraw` has a different boundary. Its UI preview confirms only amount, source, and the same-domain SCA recipient model. After confirmation, the withdraw route resolves the SCA and finds or creates the signer **before** requesting the fee estimate; balance, mint gas, and authorization checks follow. A withdraw quote failure can therefore occur after signer initialization, although no burn intent has been submitted.
+
+The transfer estimate panel should expose `estimatedGatewayFee`, `requiredGatewayBalance`, `feeEstimateKind`, mint mode, and forwarding state. It must not display a hard-coded fixed fee before the estimate returns. It must also avoid calling an estimate “actual.” A user who changes amount, source, destination, recipient, or mint mode needs a new quote. Withdrawal displays its estimate and requirement only in the confirmed execution response or error, not in the current preview.
 
 At execution, Payna signs the quoted atomic fee as the burn intent's `maxFee`. When the settled response contains `fees.total`, the receipt uses that value as `actualGatewayFee` and computes `actualSourceDebit = amount + actual fee`. If settled fees are absent, the UI should keep the estimate label rather than fabricate precision.
 
@@ -51,7 +53,7 @@ At execution, Payna signs the quoted atomic fee as the burn intent's `maxFee`. W
 
 The Gateway transfer request itself is signed as typed data by a Circle-managed EOA, but surrounding Payna operations can submit source-chain transactions. A first deposit can require `addDelegate`, USDC `approve`, and Gateway `deposit`. An existing depositor whose signer is not authorized may require another delegate call. Auto-deposit also requires the SCA to approve and deposit the shortfall.
 
-Those operations require native gas on the source SCA and current Circle Wallet SDK support for that chain. An SCA can have sufficient USDC but still fail with `INSUFFICIENT_GAS`. Fund only the public address and network named by the error, then obtain a fresh preview. Do not send native gas to the depositor contract or signer unless the response identifies it as transaction sender.
+Those operations require native gas on the source SCA and current Circle Wallet SDK support for that chain. An SCA can have sufficient USDC but still fail with `INSUFFICIENT_GAS`. Fund only the public address and network named by the error, then obtain a fresh transfer estimate or retry the confirmed withdrawal execution, as applicable. Do not send native gas to the depositor contract or signer unless the response identifies it as transaction sender.
 
 ## Automatic forwarding
 
@@ -73,11 +75,11 @@ Manual may reduce the USDC quote, but it is not automatically cheaper. Compare d
 
 Choose auto forwarding when the destination wallet lacks native gas, the route is supported by Circle forwarding, or simpler settlement is worth the quoted USDC cost. Choose manual when the designated minter already has reliable destination gas and the preview confirms a usable route.
 
-For either mode, verify source, destination, recipient, source debit, and quote type. `/gas <chain>` can help inspect balances, but the execution preview remains authoritative about which wallet role needs gas. Same-chain routes are not automatically forced to manual; Payna honors the selected mint mode.
+For either transfer mode, verify source, destination, recipient, source debit, and quote type. `/gas <chain>` can help inspect balances, but the transfer estimate and confirmed execution response identify which wallet role needs gas. Same-chain routes are not automatically forced to manual; Payna honors the selected mint mode.
 
 ## Failure and retry checklist
 
-- Quote unavailable: no stateful work should have occurred; request a fresh estimate later.
+- Quote unavailable: a transfer preview has not performed stateful work; a confirmed withdrawal may already have initialized its signer, but neither path has submitted a burn intent at this point.
 - Source balance short: include the fee, then wait for or perform a same-source deposit.
 - Source gas short: fund the SCA for the named delegate/deposit operation.
 - Manual destination gas short: fund the identified SCA or signer, or switch modes and re-estimate.

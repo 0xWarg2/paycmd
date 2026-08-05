@@ -34,7 +34,7 @@ Projection chỉ expose `key`, `label`, `domain` và computed Wallet SDK boolean
 
 Wallet SDK “No” nghĩa là “không operable qua Circle managed-wallet flow hiện tại của Payna”, không phải “Circle Gateway protocol không biết domain này”. Không workaround bằng cách chọn chain name gần giống hoặc tự đổi domain. Hãy dùng row có Wallet SDK “Yes”, hoặc chờ application và SDK configuration thêm missing mapping.
 
-Support còn phụ thuộc operation. Auto forwarding, manual mint, deposit, withdrawal và public balance read có dependency khác nhau. Command preview hoặc explicit error là final check. Table row không bảo đảm recipient, gas balance, quote, webhook hay RPC đang healthy tại thời điểm này.
+Support còn phụ thuộc operation. Auto forwarding, manual mint, deposit, withdrawal và public balance read có dependency khác nhau. Runtime checkpoint phù hợp—transfer estimate panel hoặc confirmed execution response/error—mới là final check. Table row không bảo đảm recipient, gas balance, quote, webhook hay RPC đang healthy tại thời điểm này.
 
 ## Phạm vi testnet
 
@@ -54,5 +54,5 @@ Khi troubleshoot, chia sẻ public chain label, domain, wallet address, transact
 2. Xác nhận Circle domain qua official [supported-blockchains reference](https://developers.circle.com/gateway/references/supported-blockchains).
 3. Yêu cầu Wallet SDK “Yes” cho Payna SCA hoặc managed-signer transaction.
 4. Xác nhận cả source và destination đáp ứng operation need.
-5. Lấy fresh preview cho fee, gas, recipient và forwarding check.
+5. Với transfer, lấy fresh estimate panel; với withdrawal, fee, balance, gas và signer chỉ được check sau confirmation.
 6. Coi unsupported là hard stop; không patch domain hoặc RPC value trong client request.

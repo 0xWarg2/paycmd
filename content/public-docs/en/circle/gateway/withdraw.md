@@ -28,7 +28,7 @@ The command does not withdraw “all” implicitly and does not infer a source f
 
 ## Prerequisites
 
-Before creating a withdrawal preview:
+Before confirmed withdrawal execution can complete:
 
 - the user must have a Circle SCA wallet and address;
 - the selected chain must be both listed in Payna's Gateway configuration and operable through the current Circle Wallet SDK;
@@ -39,9 +39,11 @@ Before creating a withdrawal preview:
 
 A pending deposit is not ready. `/withdraw` does not auto-deposit or use SCA USDC to cover a Gateway shortfall because that would send funds in the opposite direction.
 
+These are execution prerequisites, not checks already proven by the command preview. The current preview does not contact the withdraw route to inspect the signer, quote, balance, authorization, or gas.
+
 ## Fee and balance validation
 
-Payna constructs a same-domain burn-intent preview, asks Circle for an estimate, and computes `requiredGatewayBalance = amount + estimatedGatewayFee`. It then reads the SCA depositor's Gateway balance on exactly the selected domain.
+After the user confirms, Payna resolves the Circle SCA and finds or creates the Gateway signer. It then constructs a same-domain burn-intent preview for Circle's estimate, computes `requiredGatewayBalance = amount + estimatedGatewayFee`, and reads the SCA depositor's Gateway balance on exactly the selected domain.
 
 If the row is short, Payna returns `INSUFFICIENT_GATEWAY_BALANCE` with current balance, amount, fee, and total required. Reduce the amount or wait for an existing deposit to finalize. Do not compare only the amount with the balance; Gateway fees are collected from the source and must also fit.
 
@@ -49,9 +51,9 @@ The estimate is not the settled receipt. Circle explains that a burn intent's `m
 
 ## Preview and confirmation
 
-The preview should show the amount, source chain, receiving SCA address, estimated Gateway fee, total required Gateway balance, and the fact that source and destination are the same domain. It should also identify native-gas requirements for the SCA mint and any delegate authorization step.
+**Current Payna UI boundary:** the withdrawal preview confirms the amount, selected source, and that the recipient is the user's Circle SCA on the same domain. It does not yet show a runtime fee estimate or required Gateway balance, inspect mint gas, create or look up the signer, or check delegate authorization. Those operations begin only after the user confirms and Payna calls the withdrawal route.
 
-Check that the receiving address matches the user's Circle SCA record, not MetaMask and not the signer EOA. Confirming authorizes the signer to request a debit and the SCA to mint the result. If the preview cannot quote a fee or verify required gas, do not imply that withdrawal is ready.
+Check the amount and source carefully, and understand that the recipient role is the same-domain SCA—not MetaMask or the signer EOA. Confirmation authorizes Payna to begin the execution checks; it is not proof that the fee, ready balance, native gas, or signer authorization will pass. Execution returns the resolved SCA address or a specific error after those checks.
 
 ## Signer authorization and pending state
 
@@ -77,7 +79,7 @@ The response currently reports the pre-execution estimate rather than a separate
 
 **Invalid amount or chain:** no stateful work should occur; correct the command.
 
-**Quote unavailable:** Payna cannot calculate `amount + fee`; wait and request a fresh preview.
+**Quote unavailable:** after confirmation, Payna may already have created or looked up the signer, but it has not submitted the burn intent. Wait and confirm a fresh execution attempt later.
 
 **Insufficient ready balance:** wait for the exact pending deposit or lower the amount. Do not deposit again without checking its hash.
 

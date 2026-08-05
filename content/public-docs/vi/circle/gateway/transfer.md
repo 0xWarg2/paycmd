@@ -24,7 +24,7 @@ Destination có thể bằng source ở API level, nhưng người dùng muốn 
 
 Payna tạo read-only burn-intent preview rồi gọi endpoint `/v1/estimate` của Circle trước khi tạo Gateway signer, authorize delegate, auto-deposit hoặc ký burn intent. Fee calculation không phụ thuộc signer address nên SCA address hiện có có thể làm placeholder trong estimation. Nếu Circle không trả usable quote, Payna dừng với `GATEWAY_FEE_ESTIMATE_UNAVAILABLE`; nó không mutate wallet hay balance state.
 
-Với auto forwarding, request gồm `enableForwarder=true`. Payna ưu tiên decimal `fees.total` của Circle làm quoted total. Với legacy manual response thiếu field đó, nó có thể dùng atomic `maxFee` của burn intent được trả về làm reserve. Preview expose `feeEstimateKind` là `quoted_total` hoặc `max_fee_reserve` để caller không gọi reserve là settled charge. Circle mô tả estimate request trong [Gateway API reference](https://developers.circle.com/api-reference/gateway/all/estimate-transfer).
+Với auto forwarding, request gồm `enableForwarder=true`. Trong cả hai mint mode, shared response parser của Payna ưu tiên decimal `fees.total` từ Circle làm quoted total. Nếu field đó unusable và first returned burn intent có positive atomic `maxFee`, parser nhận nó làm reserve. Bản thân parser không enforce mode cho fallback này. Preview expose `feeEstimateKind` là `quoted_total` hoặc `max_fee_reserve` để caller không gọi reserve là settled charge. Circle mô tả estimate request trong [Gateway API reference](https://developers.circle.com/api-reference/gateway/all/estimate-transfer).
 
 ## Preview và confirmation
 

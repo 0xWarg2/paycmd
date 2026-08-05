@@ -34,7 +34,7 @@ The projection intentionally exposes only `key`, `label`, `domain`, and the comp
 
 A Wallet SDK “No” means “not operable through Payna's current Circle managed-wallet flow,” not “Circle Gateway protocol does not know this domain.” Do not work around it by selecting a similar chain name or manually changing a domain. Use a row marked Wallet SDK “Yes,” or wait for the application and SDK configuration to add the missing mapping.
 
-Support is also operation-specific. Auto forwarding, manual mint, deposit, withdrawal, and public balance reads have different dependencies. The command preview or an explicit error is the final check. A table row is not a guarantee that a recipient, gas balance, quote, webhook, or RPC is healthy at this moment.
+Support is also operation-specific. Auto forwarding, manual mint, deposit, withdrawal, and public balance reads have different dependencies. The appropriate runtime checkpoint—a transfer estimate panel or a confirmed execution response/error—is the final check. A table row is not a guarantee that a recipient, gas balance, quote, webhook, or RPC is healthy at this moment.
 
 ## Testnet scope
 
@@ -54,5 +54,5 @@ For troubleshooting, share the public chain label, domain, wallet address, trans
 2. Confirm the Circle domain against the official [supported-blockchains reference](https://developers.circle.com/gateway/references/supported-blockchains).
 3. Require Wallet SDK “Yes” for Payna SCA or managed-signer transactions.
 4. Confirm that both source and destination meet the operation's needs.
-5. Obtain a fresh preview for fee, gas, recipient, and forwarding checks.
+5. For transfer, obtain a fresh estimate panel; for withdrawal, expect fee, balance, gas, and signer checks only after confirmation.
 6. Treat unsupported as a hard stop; never patch a domain or RPC value in a client request.

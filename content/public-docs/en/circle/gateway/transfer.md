@@ -24,7 +24,7 @@ The destination may equal the source at API level, but users who want USDC retur
 
 Payna constructs a read-only burn-intent preview and calls Circle's `/v1/estimate` endpoint before creating a Gateway signer, authorizing a delegate, auto-depositing, or signing a burn intent. Fee calculation does not depend on the signer address, so the existing SCA address can be used as a placeholder during estimation. If Circle cannot return a usable quote, Payna stops with `GATEWAY_FEE_ESTIMATE_UNAVAILABLE`; it does not mutate wallet or balance state.
 
-For auto forwarding, the request includes `enableForwarder=true`. Payna prefers Circle's decimal `fees.total` as the quoted total. For a legacy manual response without that field, it can use the returned burn intent's atomic `maxFee` as a reserve. The preview exposes `feeEstimateKind` as `quoted_total` or `max_fee_reserve` so callers do not mislabel a reserve as a settled charge. Circle documents the estimate request in the [Gateway API reference](https://developers.circle.com/api-reference/gateway/all/estimate-transfer).
+For auto forwarding, the request includes `enableForwarder=true`. In either mint mode, Payna's shared response parser prefers Circle's decimal `fees.total` as the quoted total. If that field is unusable and the first returned burn intent contains a positive atomic `maxFee`, the parser accepts it as a reserve. The parser itself does not enforce a mode for this fallback. The preview exposes `feeEstimateKind` as `quoted_total` or `max_fee_reserve` so callers do not mislabel a reserve as a settled charge. Circle documents the estimate request in the [Gateway API reference](https://developers.circle.com/api-reference/gateway/all/estimate-transfer).
 
 ## Preview and confirmation
 
