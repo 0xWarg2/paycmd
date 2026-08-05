@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { supportedChains } from "./chains.ts";
 
 import {
   gatewayActualFeeAtomic,
+  gatewayActualTransferAmounts,
+  gatewayManualMintSupported,
+  gatewayReceiptFeeComponents,
+  gatewaySupportedMintGasModes,
   gatewayDestinationTxHash,
   gatewayFeeExecutionAmounts,
   gatewayForwardingFailureMessage,
   gatewayForwardingPollOutcome,
+  pollGatewayForwardingTransfer,
   gatewayForwardingSettlementFrom,
   gatewayForwardingTransferId,
   gatewayForwardedMintReceiptMatches,
@@ -23,11 +29,15 @@ test("uses Circle fees.total for a forwarding quote", () => {
     parseGatewayFeeEstimate({
       body: [{ burnIntent: { maxFee: "19358" } }],
       fees: { token: "USDC", total: "0.017598", forwardingFee: "0.014098" },
-    }),
+    }, { enableForwarder: true }),
     {
       atomicFee: 17_598n,
       maxFeeAtomic: 19_358n,
       feeEstimateKind: "quoted_total",
+      feeBreakdown: {
+        forwardingFeeAtomic: 14_098n,
+        totalAtomic: 17_598n,
+      },
     },
   );
 });
@@ -40,6 +50,7 @@ test("uses Circle's returned maxFee reserve for execution and balance preflight"
         atomicFee: 17_598n,
         maxFeeAtomic: 19_358n,
         feeEstimateKind: "quoted_total",
+        feeBreakdown: { totalAtomic: 17_598n },
       },
     ),
     {
@@ -57,8 +68,13 @@ test("uses fees.total when Circle wraps the forwarding quote in an array", () =>
         burnIntent: { maxFee: "19358" },
         fees: { token: "USDC", total: "0.017598" },
       },
-    ]),
-    { atomicFee: 17_598n, maxFeeAtomic: 19_358n, feeEstimateKind: "quoted_total" },
+    ], { enableForwarder: true }),
+    {
+      atomicFee: 17_598n,
+      maxFeeAtomic: 19_358n,
+      feeEstimateKind: "quoted_total",
+      feeBreakdown: { totalAtomic: 17_598n },
+    },
   );
 });
 
@@ -70,25 +86,123 @@ test("uses Circle burnIntent.maxFee as the reserve for a legacy manual quote", (
           maxFee: "3850",
         },
       },
-    ]),
+    ], { enableForwarder: false }),
     {
       atomicFee: 3_850n,
       maxFeeAtomic: 3_850n,
       feeEstimateKind: "max_fee_reserve",
+      feeBreakdown: {},
     },
   );
 });
 
 test("rejects a malformed or zero Gateway fee quote", () => {
-  assert.throws(() => parseGatewayFeeEstimate({ body: [] }), /usable fee/i);
+  assert.throws(() => parseGatewayFeeEstimate({ body: [] }, { enableForwarder: false }), /usable fee/i);
   assert.throws(
-    () => parseGatewayFeeEstimate({ body: [{ burnIntent: {} }], fees: { total: "0.017598" } }),
+    () => parseGatewayFeeEstimate({ body: [{ burnIntent: {} }], fees: { total: "0.017598" } }, { enableForwarder: true }),
     /usable maxFee/i,
   );
   assert.throws(
-    () => parseGatewayFeeEstimate([{ burnIntent: { maxFee: "0" } }]),
+    () => parseGatewayFeeEstimate([{ burnIntent: { maxFee: "0" } }], { enableForwarder: false }),
     /usable fee/i,
   );
+});
+
+test("fails closed for inconsistent Circle fee metadata", () => {
+  const base = { body: [{ burnIntent: { maxFee: "20000" } }] };
+  for (const fees of [
+    undefined,
+    { token: "USDC", total: "0" },
+    { token: "USDC", total: "bad" },
+    { token: "EURC", total: "0.01" },
+    { token: "USDC", total: "0.020001" },
+  ]) {
+    assert.throws(
+      () => parseGatewayFeeEstimate({ ...base, ...(fees ? { fees } : {}) }, { enableForwarder: true }),
+      /Gateway fee|fees\.total|USDC|maxFee/i,
+    );
+  }
+
+  assert.throws(
+    () => parseGatewayFeeEstimate({ ...base, fees: { token: "USDC", total: "0" } }, { enableForwarder: false }),
+    /fees\.total/i,
+  );
+});
+
+test("normalizes Circle per-intent and forwarding fee breakdown", () => {
+  const estimate = parseGatewayFeeEstimate({
+    body: [{ burnIntent: { maxFee: "12000" } }],
+    fees: {
+      token: "USDC",
+      total: "0.01",
+      forwardingFee: "0.004",
+      perIntent: [
+        { baseFee: "0.001", transferFee: "0.002" },
+        { baseFee: "0.001", transferFee: "0.002" },
+      ],
+    },
+  }, { enableForwarder: true });
+
+  assert.deepEqual(estimate.feeBreakdown, {
+    baseFeeAtomic: 2_000n,
+    transferFeeAtomic: 4_000n,
+    forwardingFeeAtomic: 4_000n,
+    totalAtomic: 10_000n,
+  });
+});
+
+test("exposes Manual mint capability for every Gateway destination", () => {
+  const supported = [
+    "arcTestnet", "arbitrumSepolia", "avalancheFuji", "baseSepolia", "sepolia",
+    "optimismSepolia", "polygonAmoy", "unichainSepolia",
+  ];
+  const forwardingOnly = ["hyperEvmTestnet", "seiAtlantic", "sonicTestnet", "worldChainSepolia"];
+
+  for (const chain of supported) {
+    assert.equal(gatewayManualMintSupported(chain), true);
+    assert.deepEqual(gatewaySupportedMintGasModes(chain), ["auto_forwarding", "manual"]);
+  }
+  for (const chain of forwardingOnly) {
+    assert.equal(gatewayManualMintSupported(chain), false);
+    assert.deepEqual(gatewaySupportedMintGasModes(chain), ["auto_forwarding"]);
+  }
+});
+
+test("enforces the destination capability for same-chain and cross-chain plans", () => {
+  for (const sourceChain of supportedChains) {
+    for (const destinationChain of supportedChains) {
+      assert.equal(
+        gatewayTransferExecutionPlan({
+          sourceChain,
+          destinationChain,
+          mintGasMode: "auto_forwarding",
+        }).forwarding,
+        true,
+      );
+
+      if (gatewayManualMintSupported(destinationChain)) {
+        assert.equal(
+          gatewayTransferExecutionPlan({
+            sourceChain,
+            destinationChain,
+            mintGasMode: "manual",
+          }).destinationGasPreflight,
+          true,
+        );
+      } else {
+        assert.throws(
+          () => gatewayTransferExecutionPlan({
+            sourceChain,
+            destinationChain,
+            mintGasMode: "manual",
+          }),
+          (error: any) =>
+            error?.code === "GATEWAY_MANUAL_MINT_UNSUPPORTED" &&
+            error?.supportedMintGasModes?.[0] === "auto_forwarding",
+        );
+      }
+    }
+  }
 });
 
 test("accepts only explicit Gateway mint gas modes", () => {
@@ -140,6 +254,7 @@ test("requests a forwarding quote without sending the caller's maxFee", async ()
     atomicFee: 17_598n,
     maxFeeAtomic: 19_358n,
     feeEstimateKind: "quoted_total",
+    feeBreakdown: { totalAtomic: 17_598n },
   });
 });
 
@@ -157,6 +272,8 @@ test("fails closed when Circle Gateway estimate returns an error", async () => {
 
 test("reads the actual Circle fee and forwarded destination transaction hash", () => {
   assert.equal(gatewayActualFeeAtomic({ token: "USDC", total: "0.0035" }), 3_500n);
+  assert.equal(gatewayActualFeeAtomic({ token: "EURC", total: "0.0035" }), undefined);
+  assert.equal(gatewayActualFeeAtomic({ token: "USDC", total: "0" }), undefined);
   assert.equal(
     gatewayDestinationTxHash({
       forwardingDetails: {
@@ -189,7 +306,6 @@ test("normalizes Circle's top-level forwarding transaction hash", () => {
       fees: { token: "USDC", total: "0.017838" },
       forwardingDetails: { forwardingEnabled: true },
     },
-    { token: "USDC", total: "0.02" },
   );
 
   assert.equal(settlement.destinationTxHash, hash);
@@ -197,17 +313,34 @@ test("normalizes Circle's top-level forwarding transaction hash", () => {
   assert.deepEqual(settlement.fees, { token: "USDC", total: "0.017838" });
 });
 
-test("keeps legacy nested forwarding hashes and fallback fees", () => {
+test("keeps legacy nested forwarding hashes without inventing settlement fees", () => {
   const hash = "0x2222222222222222222222222222222222222222222222222222222222222222";
-  const fallbackFees = { token: "USDC", total: "0.00385" };
   const settlement = gatewayForwardingSettlementFrom(
     { status: "finalized", forwardingDetails: { transactionHash: hash } },
-    fallbackFees,
   );
 
   assert.equal(settlement.destinationTxHash, hash);
   assert.equal(settlement.forwardingDetails.transactionHash, hash);
-  assert.deepEqual(settlement.fees, fallbackFees);
+  assert.equal(settlement.fees, undefined);
+});
+
+test("marks a successful mint fee pending when Circle settlement fee is unavailable", () => {
+  assert.deepEqual(
+    gatewayActualTransferAmounts(1_000_000n, { token: "USDC", total: "0.0035" }),
+    {
+      actualFeeStatus: "actual",
+      actualGatewayFee: 0.0035,
+      actualSourceDebit: 1.0035,
+    },
+  );
+  assert.deepEqual(
+    gatewayActualTransferAmounts(1_000_000n, { token: "USDC", total: "bad" }),
+    {
+      actualFeeStatus: "pending",
+      actualGatewayFee: null,
+      actualSourceDebit: null,
+    },
+  );
 });
 
 test("rejects malformed forwarding transaction identifiers", () => {
@@ -242,6 +375,74 @@ test("recovers a Circle failed status only after the expected mint is confirmed 
   assert.equal(
     gatewayForwardingPollOutcome({ status: "pending", mintReceiptMatches: true }),
     "pending",
+  );
+});
+
+test("polling returns finalized Circle details", async () => {
+  const details = await pollGatewayForwardingTransfer({
+    transferId: "transfer-finalized",
+    maxAttempts: 1,
+    sleep: async () => {},
+    fetchTransfer: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: "finalized", transactionHash: "0xabc" }),
+    }),
+    confirmMint: async () => false,
+  });
+
+  assert.deepEqual(details, { status: "finalized", transactionHash: "0xabc" });
+});
+
+test("polling retries HTTP errors and fails with the transfer ID", async () => {
+  let calls = 0;
+  await assert.rejects(
+    pollGatewayForwardingTransfer({
+      transferId: "transfer-http-error",
+      maxAttempts: 2,
+      sleep: async () => {},
+      fetchTransfer: async () => {
+        calls++;
+        return { ok: false, status: 503, json: async () => ({}) };
+      },
+      confirmMint: async () => false,
+    }),
+    /did not complete.*transfer-http-error/i,
+  );
+  assert.equal(calls, 2);
+});
+
+test("polling treats Circle failed as settled only after exact mint confirmation", async () => {
+  const recovered = await pollGatewayForwardingTransfer({
+    transferId: "transfer-recovered",
+    maxAttempts: 1,
+    sleep: async () => {},
+    fetchTransfer: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: "failed", forwardingDetails: { failureReason: "timeout" } }),
+    }),
+    confirmMint: async () => true,
+  });
+  assert.deepEqual(recovered.forwardingDetails, {
+    failureReason: "timeout",
+    onchainMintConfirmed: true,
+    reportedStatus: "failed",
+  });
+
+  await assert.rejects(
+    pollGatewayForwardingTransfer({
+      transferId: "transfer-failed",
+      maxAttempts: 1,
+      sleep: async () => {},
+      fetchTransfer: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ status: "failed", forwardingDetails: { failureReason: "reverted" } }),
+      }),
+      confirmMint: async () => false,
+    }),
+    /Forwarded transfer failed: reverted/,
   );
 });
 
@@ -288,6 +489,26 @@ test("matches only a successful exact USDC mint receipt", () => {
     }),
     false,
   );
+  assert.equal(
+    gatewayForwardedMintReceiptMatches({
+      receiptStatus: "success",
+      tokenAddress: "0x1111111111111111111111111111111111111111",
+      recipient,
+      amountAtomic: 1_000_000n,
+      logs: [mintLog],
+    }),
+    false,
+  );
+  assert.equal(
+    gatewayForwardedMintReceiptMatches({
+      receiptStatus: "success",
+      tokenAddress,
+      recipient: "0x2222222222222222222222222222222222222222",
+      amountAtomic: 1_000_000n,
+      logs: [mintLog],
+    }),
+    false,
+  );
 });
 
 test("retains a structurally present forwarding transfer ID", () => {
@@ -315,7 +536,15 @@ test("uses the preflight reserve for preview source debit", () => {
       { amount: "1", estimatedGatewayFee: "0.00385", requiredGatewayBalance: "1.00385" },
       "preview",
     ),
-    { amount: 1, gatewayFee: 0.00385, sourceDebit: 1.00385, actual: false },
+    {
+      amount: 1,
+      gatewayFee: 0.00385,
+      sourceDebit: 1.00385,
+      actual: false,
+      actualFeeStatus: "pending",
+      estimatedGatewayFee: 0.00385,
+      estimatedSourceDebit: 1.00385,
+    },
   );
 });
 
@@ -330,7 +559,94 @@ test("replaces a legacy reserve with Circle's actual fee on the receipt", () => 
       },
       "receipt",
     ),
-    { amount: 1, gatewayFee: 0.0035, sourceDebit: 1.0035, actual: true },
+    {
+      amount: 1,
+      gatewayFee: 0.0035,
+      sourceDebit: 1.0035,
+      actual: true,
+      actualFeeStatus: "actual",
+      estimatedGatewayFee: 0.00385,
+      estimatedSourceDebit: 1.00385,
+    },
+  );
+});
+
+test("does not label a preflight estimate as actual on a successful receipt", () => {
+  assert.deepEqual(
+    gatewayTransferAmounts(
+      {
+        amount: "1",
+        estimatedGatewayFee: "0.00385",
+        requiredGatewayBalance: "1.00385",
+        actualFeeStatus: "pending",
+        actualGatewayFee: null,
+        actualSourceDebit: null,
+        fees: { token: "USDC", total: "0.00385" },
+      },
+      "receipt",
+    ),
+    {
+      amount: 1,
+      gatewayFee: null,
+      sourceDebit: null,
+      actual: false,
+      actualFeeStatus: "pending",
+      estimatedGatewayFee: 0.00385,
+      estimatedSourceDebit: 1.00385,
+    },
+  );
+});
+
+test("rejects a zero actual fee field in receipt mode", () => {
+  const amounts = gatewayTransferAmounts(
+    { amount: "1", actualFeeStatus: "actual", actualGatewayFee: 0 },
+    "receipt",
+  );
+  assert.equal(amounts.actualFeeStatus, "pending");
+  assert.equal(amounts.gatewayFee, null);
+  assert.equal(amounts.sourceDebit, null);
+});
+
+test("receipt ignores actual fields when settlement fees.total is unavailable", () => {
+  const amounts = gatewayTransferAmounts(
+    {
+      amount: "1",
+      actualFeeStatus: "actual",
+      actualGatewayFee: 0.5,
+      actualSourceDebit: 1.5,
+      fees: {},
+    },
+    "receipt",
+  );
+  assert.equal(amounts.actualFeeStatus, "pending");
+  assert.equal(amounts.gatewayFee, null);
+  assert.equal(amounts.sourceDebit, null);
+});
+
+test("same-chain receipt omits transfer fee and keeps forwarding fee mode-specific", () => {
+  assert.deepEqual(
+    gatewayReceiptFeeComponents({
+      sourceChain: "baseSepolia",
+      destinationChain: "baseSepolia",
+      forwarding: false,
+    }),
+    ["Gateway base fee"],
+  );
+  assert.deepEqual(
+    gatewayReceiptFeeComponents({
+      sourceChain: "baseSepolia",
+      destinationChain: "baseSepolia",
+      forwarding: true,
+    }),
+    ["Gateway base fee", "forwarding fee"],
+  );
+  assert.deepEqual(
+    gatewayReceiptFeeComponents({
+      sourceChain: "baseSepolia",
+      destinationChain: "arcTestnet",
+      forwarding: true,
+    }),
+    ["Gateway base fee", "transfer fee", "forwarding fee"],
   );
 });
 

@@ -104,7 +104,12 @@ import {
   requiresConfirmation,
 } from "@/lib/paycmd/commands";
 import { chainCommandAlias, isSupportedChain, type PayCmdChain } from "@/lib/paycmd/chains";
-import { gatewayTransferAmounts } from "@/lib/paycmd/gateway-transfer";
+import {
+  gatewayManualMintSupported,
+  gatewayReceiptFeeComponents,
+  gatewayTransferAmounts,
+} from "@/lib/paycmd/gateway-transfer";
+import { formatNativeGasBalance } from "@/lib/paycmd/native-gas";
 import { isNearViewportBottom, jumpToLatestMessage } from "@/lib/paycmd/chat-scroll";
 import { web3Chains } from "@/lib/paycmd/web3-chains";
 import {
@@ -999,7 +1004,12 @@ function buildExecutionReceipt(execution: ExecutionItem, t: TranslateFn): Execut
       metrics: [
         result.autoDeposit ? metric(t("receipt.autoDeposit"), `${formatDecimalAmount(result.autoDepositedAmount)} USDC`) : null,
         result.forwarding ? metric(t("receipt.forwarding"), t("receipt.enabled")) : metric(t("receipt.destinationGas"), t("receipt.manual")),
-        amounts.gatewayFee > 0 ? metric(t("receipt.fees"), `${formatDecimalAmount(amounts.gatewayFee)} USDC`) : null,
+        amounts.gatewayFee !== null
+          ? metric(t("receipt.fees"), `${formatDecimalAmount(amounts.gatewayFee)} USDC`)
+          : metric(t("receipt.fees"), t("receipt.actualFeePending")),
+        amounts.gatewayFee === null && amounts.estimatedGatewayFee > 0
+          ? metric(t("receipt.estimatedFee"), `~${formatDecimalAmount(amounts.estimatedGatewayFee)} USDC`)
+          : null,
       ].filter(Boolean) as ExecutionReceiptMetric[],
       links: receiptLinks(
         txHash
@@ -1012,9 +1022,9 @@ function buildExecutionReceipt(execution: ExecutionItem, t: TranslateFn): Execut
         proofTxHash ? { label: t("receipt.paynaProof"), txHash: proofTxHash, chain: "arcTestnet" } : null,
       ),
       details: [
-        amounts.sourceDebit > 0
-          ? metric(t("receipt.sourceDebit"), `${amounts.actual ? "" : "~"}${formatDecimalAmount(amounts.sourceDebit)} USDC`)
-          : null,
+        amounts.sourceDebit !== null
+          ? metric(t("receipt.sourceDebit"), `${formatDecimalAmount(amounts.sourceDebit)} USDC`)
+          : metric(t("receipt.sourceDebit"), t("receipt.actualFeePending")),
         metric(t("receipt.mode"), result.forwarding ? t("transfer.autoForwarding") : t("transfer.manualGas")),
         metric(t("receipt.transferId"), stringFrom(result.transferId)),
       ].filter(Boolean) as ExecutionReceiptMetric[],
@@ -1042,7 +1052,12 @@ function buildExecutionReceipt(execution: ExecutionItem, t: TranslateFn): Execut
       metrics: [
         metric(t("receipt.recipient"), recipient),
         transfer.forwarding ? metric(t("receipt.forwarding"), t("receipt.enabled")) : metric(t("receipt.destinationGas"), t("receipt.manual")),
-        amounts.gatewayFee > 0 ? metric(t("receipt.fees"), `${formatDecimalAmount(amounts.gatewayFee)} USDC`) : null,
+        amounts.gatewayFee !== null
+          ? metric(t("receipt.fees"), `${formatDecimalAmount(amounts.gatewayFee)} USDC`)
+          : metric(t("receipt.fees"), t("receipt.actualFeePending")),
+        amounts.gatewayFee === null && amounts.estimatedGatewayFee > 0
+          ? metric(t("receipt.estimatedFee"), `~${formatDecimalAmount(amounts.estimatedGatewayFee)} USDC`)
+          : null,
       ].filter(Boolean) as ExecutionReceiptMetric[],
       links: receiptLinks(
         txHash
@@ -1056,9 +1071,9 @@ function buildExecutionReceipt(execution: ExecutionItem, t: TranslateFn): Execut
       ),
       details: [
         metric(t("receipt.recipientAddress"), stringFrom(payment.recipient_address) ?? stringFrom(payment.recipientAddress)),
-        amounts.sourceDebit > 0
-          ? metric(t("receipt.sourceDebit"), `${amounts.actual ? "" : "~"}${formatDecimalAmount(amounts.sourceDebit)} USDC`)
-          : null,
+        amounts.sourceDebit !== null
+          ? metric(t("receipt.sourceDebit"), `${formatDecimalAmount(amounts.sourceDebit)} USDC`)
+          : metric(t("receipt.sourceDebit"), t("receipt.actualFeePending")),
         metric(t("receipt.mode"), transfer.forwarding ? t("transfer.autoForwarding") : t("transfer.manualGas")),
       ].filter(Boolean) as ExecutionReceiptMetric[],
     };
@@ -1203,20 +1218,6 @@ function formatDecimalAmount(value: unknown, maxFractionDigits = 6) {
     minimumFractionDigits: 0,
     maximumFractionDigits: maxFractionDigits,
   }).format(numberValue);
-}
-
-function formatNativeGasBalance(rawBalance: unknown, chain: string) {
-  const meta = getChainMeta(chain);
-  const decimals = meta?.nativeSymbol === "USDC" ? 6 : 18;
-  const symbol = meta?.nativeSymbol ?? "ETH";
-
-  try {
-    const value = typeof rawBalance === "bigint" ? rawBalance : BigInt(String(rawBalance ?? "0"));
-    const formatted = formatUnits(value, decimals);
-    return `${formatDecimalAmount(formatted, 6)} ${symbol}`;
-  } catch {
-    return `0 ${symbol}`;
-  }
 }
 
 function totalBalanceSource(
@@ -1892,6 +1893,14 @@ type GatewayTransferEstimateSummary = {
   feeEstimateKind: "quoted_total" | "max_fee_reserve";
   forwarding: boolean;
   mintGasMode: "auto_forwarding" | "manual";
+  supportedMintGasModes?: Array<"auto_forwarding" | "manual">;
+  manualMintSupported?: boolean;
+  feeBreakdown?: {
+    baseFee?: number;
+    transferFee?: number;
+    forwardingFee?: number;
+    total?: number;
+  };
 };
 
 type BridgeExecutionResult = {
@@ -2286,7 +2295,7 @@ async function executeCommand(draft: ParsedCommand) {
         recipient: draft.fields.recipient,
         sourceChain: draft.fields.sourceChain,
         destinationChain: draft.fields.destinationChain,
-        mintGasMode: draft.fields.mintGasMode ?? "manual",
+        mintGasMode: draft.fields.mintGasMode ?? "auto_forwarding",
       }),
     });
   }
@@ -3008,27 +3017,38 @@ export function PayCmdApp() {
     }
 
     function gatewayFeeText(transfer: any) {
-      const { amount, gatewayFee, sourceDebit, actual } = gatewayTransferAmounts(transfer, "receipt");
+      const {
+        amount,
+        gatewayFee,
+        sourceDebit,
+        estimatedGatewayFee,
+      } = gatewayTransferAmounts(transfer, "receipt");
       const txRef = transfer?.destinationTxHash ?? transfer?.mintTxHash ?? transfer?.txHash ?? transfer?.transferId;
       const manualHint =
         transfer?.forwarding
           ? t("runtime.gatewayFeeAutoHint")
           : t("runtime.gatewayFeeManualHint");
 
-      if (!amount && !gatewayFee) {
+      if (!amount && gatewayFee === null && !estimatedGatewayFee) {
         return txRef ? `ID: ${txRef}\nMode: ${manualHint}` : `Mode: ${manualHint}`;
       }
 
       const feeLine =
-        gatewayFee > 0
+        gatewayFee !== null
           ? `${formatDecimalAmount(gatewayFee)} USDC`
-          : t("runtime.gatewayNoBreakdown");
+          : "Actual Gateway fee pending/unavailable";
+      const components = gatewayReceiptFeeComponents(transfer ?? {}).join(" + ");
 
       return [
         `Recipient: ${formatDecimalAmount(amount)} USDC`,
-        `Source debit: ${actual ? "" : "~"}${formatDecimalAmount(sourceDebit)} USDC`,
+        sourceDebit !== null
+          ? `Source debit: ${formatDecimalAmount(sourceDebit)} USDC`
+          : "Actual source debit pending/unavailable",
         `Fees: ${feeLine}`,
-        `Includes: source burn gas + cross-chain fee${transfer?.forwarding ? " + forwarding fee" : ""}`,
+        gatewayFee === null && estimatedGatewayFee > 0
+          ? `Preflight estimate: ~${formatDecimalAmount(estimatedGatewayFee)} USDC`
+          : "",
+        `Includes: ${components}`,
         transfer?.forwarding
           ? "Destination gas: paid by Circle/forwarder"
           : "Destination gas: paid by your SCA/signer",
@@ -6356,7 +6376,7 @@ function CommandPreviewCard({
   const isSwap = draft.command === "swap";
   const isPayroll = draft.command === "payroll";
   const [selectedMintGasMode, setSelectedMintGasMode] = useState(
-    draft.fields.mintGasMode === "manual" || (draft.command === "pay" && !draft.fields.mintGasMode)
+    draft.fields.mintGasMode === "manual"
       ? "manual"
       : "auto_forwarding",
   );
@@ -6388,6 +6408,12 @@ function CommandPreviewCard({
   const [gatewayEstimateLoading, setGatewayEstimateLoading] = useState(false);
   const [payrollRecipientCount, setPayrollRecipientCount] = useState<number | null>(null);
   const [payrollRecipientError, setPayrollRecipientError] = useState("");
+  const manualMintSupported = gatewayManualMintSupported(previewDestinationChain);
+  const manualMintUnavailableMessage = previewDestinationChain
+    ? t("preview.manualMintUnavailable", {
+        chain: getChainMeta(previewDestinationChain)?.label ?? previewDestinationChain,
+      })
+    : t("preview.manualMintUnavailable", { chain: "this destination" });
 
   useEffect(() => {
     if (!isBridge) return;
@@ -6549,6 +6575,13 @@ function CommandPreviewCard({
       return;
     }
 
+    if (selectedMintGasMode === "manual" && !manualMintSupported) {
+      setGatewayEstimate(null);
+      setGatewayEstimateLoading(false);
+      setGatewayEstimateError(manualMintUnavailableMessage);
+      return;
+    }
+
     let cancelled = false;
     setGatewayEstimate(null);
     setGatewayEstimateLoading(true);
@@ -6590,6 +6623,8 @@ function CommandPreviewCard({
     isActive,
     previewDestinationChain,
     previewSourceChain,
+    manualMintSupported,
+    manualMintUnavailableMessage,
     selectedMintGasMode,
     t,
   ]);
@@ -6690,7 +6725,8 @@ function CommandPreviewCard({
     !isActive ||
     gatewayEstimateLoading ||
     !gatewayEstimate ||
-    Boolean(gatewayEstimateError);
+    Boolean(gatewayEstimateError) ||
+    (selectedMintGasMode === "manual" && !manualMintSupported);
   return (
     <div className="min-w-[260px] space-y-3" aria-live="polite">
       <div className="flex items-start justify-between gap-3">
@@ -7030,7 +7066,7 @@ function CommandPreviewCard({
             </button>
             <button
               type="button"
-              disabled={!isActive}
+              disabled={!isActive || !manualMintSupported}
               onClick={() => setSelectedMintGasMode("manual")}
               className={`rounded-md border px-3 py-2 text-left transition ${
                 selectedMintGasMode === "manual"
@@ -7040,7 +7076,7 @@ function CommandPreviewCard({
             >
               <span className="block font-medium text-foreground">{t("transfer.manualGas")}</span>
               <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">
-                {t("transfer.manualGasHelp")}
+                {manualMintSupported ? t("transfer.manualGasHelp") : manualMintUnavailableMessage}
               </span>
             </button>
           </div>
@@ -7070,6 +7106,15 @@ function CommandPreviewCard({
                       label: t("preview.destinationGas"),
                       value: gatewayEstimate.forwarding ? t("preview.forwarderPays") : t("preview.signerPays"),
                     },
+                    ...(gatewayEstimate.feeBreakdown?.baseFee !== undefined
+                      ? [{ label: t("preview.gatewayBaseFee"), value: `${formatDecimalAmount(gatewayEstimate.feeBreakdown.baseFee)} USDC` }]
+                      : []),
+                    ...(previewSourceChain !== previewDestinationChain && gatewayEstimate.feeBreakdown?.transferFee !== undefined
+                      ? [{ label: t("preview.gatewayTransferFee"), value: `${formatDecimalAmount(gatewayEstimate.feeBreakdown.transferFee)} USDC` }]
+                      : []),
+                    ...(gatewayEstimate.forwarding && gatewayEstimate.feeBreakdown?.forwardingFee !== undefined
+                      ? [{ label: t("preview.gatewayForwardingFee"), value: `${formatDecimalAmount(gatewayEstimate.feeBreakdown.forwardingFee)} USDC` }]
+                      : []),
                   ]
                 : []
             }

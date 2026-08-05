@@ -42,12 +42,16 @@ import { chainCommandAlias } from "@/lib/paycmd/chains";
 import { requestLocale, tr, type PayCmdLocale } from "@/lib/i18n/server";
 import { recordRaReceipt, updateRaProofColumns } from "@/lib/ra/receipt-registry";
 import {
-  gatewayActualFeeAtomic,
+  GatewayManualMintUnsupportedError,
+  gatewayActualTransferAmounts,
   gatewayDestinationTxHash,
-  gatewayFeeExecutionAmounts,
+  gatewayFeeBreakdownToDecimal,
   gatewayForwardingFailureMessage,
   gatewayForwardingTransferId,
   gatewayTransferExecutionPlan,
+  gatewayManualMintSupported,
+  gatewaySupportedMintGasModes,
+  gatewayTransferPreflight,
   usdcAmountToAtomic,
 } from "@/lib/paycmd/gateway-transfer";
 
@@ -325,6 +329,7 @@ export async function POST(req: NextRequest) {
     let maximumGatewayFee: bigint;
     let requiredGatewayBalance: bigint;
     let feeEstimateKind: "quoted_total" | "max_fee_reserve";
+    let feeBreakdown: ReturnType<typeof gatewayFeeBreakdownToDecimal>;
 
     // Determine if we're using external recipient
     const isExternalRecipient = recipientAddress && recipientAddress.toLowerCase() !== walletAddress.toLowerCase();
@@ -340,15 +345,27 @@ export async function POST(req: NextRequest) {
         // read-only placeholder so an unavailable estimate can never create a signer wallet.
         sourceSigner: walletAddress,
       });
-      const gatewayFeeEstimate = await estimateGatewayTransferFee(
-        burnIntentPreview,
-        { enableForwarder: useForwarding },
+      const preflight = await gatewayTransferPreflight(
+        {
+          amountAtomic: amountInAtomicUnits,
+          sourceChain: sourceChainKey,
+          destinationChain: destinationChainKey,
+          mintGasMode: effectiveMintGasMode,
+        },
+        {
+          estimate: ({ forwarding }) => estimateGatewayTransferFee(
+            burnIntentPreview,
+            { enableForwarder: forwarding },
+          ),
+        },
       );
-      const feeAmounts = gatewayFeeExecutionAmounts(amountInAtomicUnits, gatewayFeeEstimate);
+      const gatewayFeeEstimate = preflight.estimate;
+      const feeAmounts = preflight.amounts;
       estimatedGatewayFee = feeAmounts.estimatedFeeAtomic;
       maximumGatewayFee = feeAmounts.maxFeeAtomic;
       requiredGatewayBalance = feeAmounts.requiredGatewayBalanceAtomic;
       feeEstimateKind = gatewayFeeEstimate.feeEstimateKind;
+      feeBreakdown = gatewayFeeBreakdownToDecimal(gatewayFeeEstimate.feeBreakdown);
     } catch (feeEstimateError) {
       const message = feeEstimateError instanceof Error ? feeEstimateError.message : "Gateway fee estimate failed";
       return NextResponse.json(
@@ -631,13 +648,11 @@ export async function POST(req: NextRequest) {
         "Circle's settled response did not include a valid destination transaction hash.",
       );
     }
-    const actualGatewayFeeAtomic = gatewayActualFeeAtomic(actualFees);
-    const actualGatewayFee = actualGatewayFeeAtomic !== undefined
-      ? Number(actualGatewayFeeAtomic) / 1_000_000
-      : undefined;
-    const actualSourceDebit = actualGatewayFeeAtomic !== undefined
-      ? Number(amountInAtomicUnits + actualGatewayFeeAtomic) / 1_000_000
-      : undefined;
+    const {
+      actualFeeStatus,
+      actualGatewayFee,
+      actualSourceDebit,
+    } = gatewayActualTransferAmounts(amountInAtomicUnits, actualFees);
 
     const attestationHash = attestation;
 
@@ -707,6 +722,7 @@ export async function POST(req: NextRequest) {
       destinationTxHash,
       transferId,
       fees: actualFees,
+      actualFeeStatus,
       actualGatewayFee,
       actualSourceDebit,
       forwardingDetails,
@@ -716,6 +732,9 @@ export async function POST(req: NextRequest) {
       maximumGatewayFee: Number(maximumGatewayFee) / 1_000_000,
       requiredGatewayBalance: Number(requiredGatewayBalance) / 1_000_000,
       feeEstimateKind,
+      feeBreakdown,
+      supportedMintGasModes: gatewaySupportedMintGasModes(destinationChainKey),
+      manualMintSupported: gatewayManualMintSupported(destinationChainKey),
       autoDeposit: Boolean(autoDepositTxHash),
       autoDepositTxHash,
       autoDepositedAmount,
@@ -742,6 +761,19 @@ export async function POST(req: NextRequest) {
   } catch (error: any) {
     console.error("Error in transfer:", error);
 
+    if (error instanceof GatewayManualMintUnsupportedError) {
+      return NextResponse.json(
+        {
+          error: error.code,
+          message: error.message,
+          destinationChain: error.destinationChain,
+          supportedMintGasModes: error.supportedMintGasModes,
+          manualMintSupported: false,
+        },
+        { status: 422 },
+      );
+    }
+
     if (/mintGasMode|USDC amount/i.test(error?.message ?? "")) {
       return NextResponse.json(
         { error: "INVALID_GATEWAY_TRANSFER", message: error.message },
@@ -761,7 +793,7 @@ export async function POST(req: NextRequest) {
           sourceChain,
           destinationChain,
           recipient: recipientAddress,
-          retryMintGasMode: "manual",
+          safeToRetry: false,
         },
         { status: 502 },
       );

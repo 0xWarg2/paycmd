@@ -1,11 +1,83 @@
+import type { PayCmdChain } from "./chains";
+
 export type GatewayMintGasMode = "auto_forwarding" | "manual";
 export type GatewayFeeEstimateKind = "quoted_total" | "max_fee_reserve";
+
+export type GatewayFeeBreakdown = {
+  baseFeeAtomic?: bigint;
+  transferFeeAtomic?: bigint;
+  forwardingFeeAtomic?: bigint;
+  totalAtomic?: bigint;
+};
+
+export type GatewayFeeBreakdownDecimal = {
+  baseFee?: number;
+  transferFee?: number;
+  forwardingFee?: number;
+  total?: number;
+};
+
+export function gatewayFeeBreakdownToDecimal(
+  breakdown: GatewayFeeBreakdown,
+): GatewayFeeBreakdownDecimal {
+  const decimal = (value: bigint) => Number(value) / 1_000_000;
+  return {
+    ...(breakdown.baseFeeAtomic !== undefined
+      ? { baseFee: decimal(breakdown.baseFeeAtomic) }
+      : {}),
+    ...(breakdown.transferFeeAtomic !== undefined
+      ? { transferFee: decimal(breakdown.transferFeeAtomic) }
+      : {}),
+    ...(breakdown.forwardingFeeAtomic !== undefined
+      ? { forwardingFee: decimal(breakdown.forwardingFeeAtomic) }
+      : {}),
+    ...(breakdown.totalAtomic !== undefined
+      ? { total: decimal(breakdown.totalAtomic) }
+      : {}),
+  };
+}
 
 export type GatewayFeeEstimate = {
   atomicFee: bigint;
   maxFeeAtomic: bigint;
   feeEstimateKind: GatewayFeeEstimateKind;
+  feeBreakdown: GatewayFeeBreakdown;
 };
+
+const manualMintChains = new Set<PayCmdChain>([
+  "arcTestnet",
+  "arbitrumSepolia",
+  "avalancheFuji",
+  "baseSepolia",
+  "sepolia",
+  "optimismSepolia",
+  "polygonAmoy",
+  "unichainSepolia",
+]);
+
+export function gatewayManualMintSupported(chain: unknown): boolean {
+  return typeof chain === "string" && manualMintChains.has(chain as PayCmdChain);
+}
+
+export function gatewaySupportedMintGasModes(chain: unknown): GatewayMintGasMode[] {
+  return gatewayManualMintSupported(chain)
+    ? ["auto_forwarding", "manual"]
+    : ["auto_forwarding"];
+}
+
+export class GatewayManualMintUnsupportedError extends Error {
+  readonly code = "GATEWAY_MANUAL_MINT_UNSUPPORTED";
+  readonly supportedMintGasModes: GatewayMintGasMode[] = ["auto_forwarding"];
+  readonly destinationChain: string;
+
+  constructor(destinationChain: string) {
+    super(
+      `Manual mint is not supported on ${destinationChain} by the current Circle Wallet SDK. Use Auto forwarding.`,
+    );
+    this.name = "GatewayManualMintUnsupportedError";
+    this.destinationChain = destinationChain;
+  }
+}
 
 export function gatewayFeeExecutionAmounts(
   amountAtomic: bigint,
@@ -57,7 +129,53 @@ function positiveAtomic(value: unknown): bigint | null {
   }
 }
 
-export function parseGatewayFeeEstimate(value: unknown): GatewayFeeEstimate {
+function own(record: Record<string, unknown>, key: string) {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function optionalFeeAtomic(
+  record: Record<string, unknown>,
+  key: string,
+): bigint | undefined {
+  if (!own(record, key)) return undefined;
+  const atomic = decimalUsdcToAtomic(record[key]);
+  if (atomic === null || atomic < 0n) {
+    throw new Error(`Circle Gateway fees.${key} must be a valid USDC decimal.`);
+  }
+  return atomic;
+}
+
+function gatewayFeeBreakdownFrom(fees: Record<string, unknown>): GatewayFeeBreakdown {
+  if (own(fees, "perIntent") && !Array.isArray(fees.perIntent)) {
+    throw new Error("Circle Gateway fees.perIntent must be an array.");
+  }
+  const perIntent = Array.isArray(fees.perIntent) ? fees.perIntent : [];
+
+  let baseFeeAtomic: bigint | undefined;
+  let transferFeeAtomic: bigint | undefined;
+  for (const item of perIntent) {
+    const intent = recordFrom(item);
+    const base = optionalFeeAtomic(intent, "baseFee");
+    const transfer = optionalFeeAtomic(intent, "transferFee");
+    if (base !== undefined) baseFeeAtomic = (baseFeeAtomic ?? 0n) + base;
+    if (transfer !== undefined) transferFeeAtomic = (transferFeeAtomic ?? 0n) + transfer;
+  }
+
+  const forwardingFeeAtomic = optionalFeeAtomic(fees, "forwardingFee");
+  const totalAtomic = optionalFeeAtomic(fees, "total");
+
+  return {
+    ...(baseFeeAtomic !== undefined ? { baseFeeAtomic } : {}),
+    ...(transferFeeAtomic !== undefined ? { transferFeeAtomic } : {}),
+    ...(forwardingFeeAtomic !== undefined ? { forwardingFeeAtomic } : {}),
+    ...(totalAtomic !== undefined ? { totalAtomic } : {}),
+  };
+}
+
+export function parseGatewayFeeEstimate(
+  value: unknown,
+  options: { enableForwarder: boolean },
+): GatewayFeeEstimate {
   const root = recordFrom(value);
   const body = Array.isArray(value)
     ? value
@@ -68,7 +186,6 @@ export function parseGatewayFeeEstimate(value: unknown): GatewayFeeEstimate {
   const fees = Object.keys(recordFrom(root.fees)).length
     ? recordFrom(root.fees)
     : recordFrom(first.fees);
-  const quotedTotal = decimalUsdcToAtomic(fees.total);
   const burnIntent = recordFrom(first.burnIntent);
   const reserve = positiveAtomic(burnIntent.maxFee);
 
@@ -76,18 +193,38 @@ export function parseGatewayFeeEstimate(value: unknown): GatewayFeeEstimate {
     throw new Error("Circle Gateway estimate did not include a usable fee; usable maxFee is required.");
   }
 
-  if (quotedTotal && quotedTotal > 0n) {
+  if (own(fees, "token") && String(fees.token).toUpperCase() !== "USDC") {
+    throw new Error("Circle Gateway fee token must be USDC.");
+  }
+
+  const hasQuotedTotal = own(fees, "total");
+  const quotedTotal = hasQuotedTotal ? decimalUsdcToAtomic(fees.total) : null;
+  if (hasQuotedTotal && (!quotedTotal || quotedTotal <= 0n)) {
+    throw new Error("Circle Gateway fees.total must be a positive USDC decimal.");
+  }
+  if (quotedTotal && quotedTotal > reserve) {
+    throw new Error("Circle Gateway fees.total exceeds burnIntent.maxFee.");
+  }
+
+  const feeBreakdown = gatewayFeeBreakdownFrom(fees);
+  if (quotedTotal) {
     return {
       atomicFee: quotedTotal,
       maxFeeAtomic: reserve,
       feeEstimateKind: "quoted_total",
+      feeBreakdown,
     };
+  }
+
+  if (options.enableForwarder) {
+    throw new Error("Circle Gateway forwarding estimate did not include fees.total.");
   }
 
   return {
     atomicFee: reserve,
     maxFeeAtomic: reserve,
     feeEstimateKind: "max_fee_reserve",
+    feeBreakdown,
   };
 }
 
@@ -102,6 +239,9 @@ export function gatewayTransferExecutionPlan(input: {
   mintGasMode: unknown;
 }) {
   const mintGasMode = gatewayMintGasModeFrom(input.mintGasMode);
+  if (mintGasMode === "manual" && !gatewayManualMintSupported(input.destinationChain)) {
+    throw new GatewayManualMintUnsupportedError(input.destinationChain);
+  }
   const forwarding = mintGasMode === "auto_forwarding";
 
   return {
@@ -111,19 +251,89 @@ export function gatewayTransferExecutionPlan(input: {
   };
 }
 
+export async function gatewayTransferPreflight(
+  input: {
+    amountAtomic: bigint;
+    sourceChain: string;
+    destinationChain: string;
+    mintGasMode: unknown;
+  },
+  dependencies: {
+    estimate: (input: {
+      forwarding: boolean;
+      plan: ReturnType<typeof gatewayTransferExecutionPlan>;
+    }) => Promise<GatewayFeeEstimate>;
+  },
+) {
+  // Capability validation deliberately precedes the quote. A rejected Manual destination
+  // therefore cannot create a signer or reach any balance/deposit/burn work in the caller.
+  const plan = gatewayTransferExecutionPlan(input);
+  const estimate = await dependencies.estimate({
+    forwarding: plan.forwarding,
+    plan,
+  });
+
+  return {
+    plan,
+    estimate,
+    amounts: gatewayFeeExecutionAmounts(input.amountAtomic, estimate),
+  };
+}
+
 export function gatewayActualFeeAtomic(fees: unknown): bigint | undefined {
-  const atomic = decimalUsdcToAtomic(recordFrom(fees).total);
-  return atomic !== null ? atomic : undefined;
+  const feeRecord = recordFrom(fees);
+  if (own(feeRecord, "token") && String(feeRecord.token).toUpperCase() !== "USDC") {
+    return undefined;
+  }
+  const atomic = decimalUsdcToAtomic(feeRecord.total);
+  return atomic !== null && atomic > 0n ? atomic : undefined;
+}
+
+export function gatewayActualTransferAmounts(amountAtomic: bigint, fees: unknown): {
+  actualFeeStatus: "actual" | "pending";
+  actualGatewayFee: number | null;
+  actualSourceDebit: number | null;
+} {
+  const actualFeeAtomic = gatewayActualFeeAtomic(fees);
+  if (actualFeeAtomic === undefined) {
+    return {
+      actualFeeStatus: "pending",
+      actualGatewayFee: null,
+      actualSourceDebit: null,
+    };
+  }
+
+  return {
+    actualFeeStatus: "actual",
+    actualGatewayFee: Number(actualFeeAtomic) / 1_000_000,
+    actualSourceDebit: Number(amountAtomic + actualFeeAtomic) / 1_000_000,
+  };
+}
+
+export function gatewayReceiptFeeComponents(input: {
+  sourceChain: unknown;
+  destinationChain: unknown;
+  forwarding: unknown;
+}) {
+  return [
+    "Gateway base fee",
+    input.sourceChain !== input.destinationChain ? "transfer fee" : "",
+    input.forwarding ? "forwarding fee" : "",
+  ].filter(Boolean);
 }
 
 export type GatewayTransferAmounts = {
   amount: number;
-  gatewayFee: number;
-  sourceDebit: number;
+  gatewayFee: number | null;
+  sourceDebit: number | null;
   actual: boolean;
+  actualFeeStatus: "actual" | "pending";
+  estimatedGatewayFee: number;
+  estimatedSourceDebit: number;
 };
 
 function finiteNonNegative(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === "") return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
@@ -135,21 +345,28 @@ export function gatewayTransferAmounts(
   const transfer = recordFrom(value);
   const amount = finiteNonNegative(transfer.amount) ?? 0;
   const fees = recordFrom(transfer.fees);
-  const actualFee =
-    phase === "receipt"
-      ? finiteNonNegative(fees.total) ?? finiteNonNegative(transfer.actualGatewayFee)
-      : undefined;
   const estimatedFee = finiteNonNegative(transfer.estimatedGatewayFee) ?? 0;
-  const gatewayFee = actualFee ?? estimatedFee;
   const quotedDebit = finiteNonNegative(transfer.requiredGatewayBalance);
+  const estimatedSourceDebit = quotedDebit ?? amount + estimatedFee;
+  const explicitlyPending = transfer.actualFeeStatus === "pending";
+  const parsedActualFeeAtomic = explicitlyPending
+    ? undefined
+    : gatewayActualFeeAtomic(fees);
+  const actualFee = phase === "receipt" && parsedActualFeeAtomic !== undefined
+    ? Number(parsedActualFeeAtomic) / 1_000_000
+    : undefined;
+  const actualSourceDebit = phase === "receipt" && actualFee !== undefined
+    ? amount + actualFee
+    : undefined;
 
   return {
     amount,
-    gatewayFee,
-    sourceDebit: actualFee === undefined && phase === "preview" && quotedDebit !== undefined
-      ? quotedDebit
-      : amount + gatewayFee,
+    gatewayFee: phase === "preview" ? estimatedFee : actualFee ?? null,
+    sourceDebit: phase === "preview" ? estimatedSourceDebit : actualSourceDebit ?? null,
     actual: actualFee !== undefined,
+    actualFeeStatus: actualFee !== undefined ? "actual" : "pending",
+    estimatedGatewayFee: estimatedFee,
+    estimatedSourceDebit,
   };
 }
 
@@ -168,7 +385,6 @@ function evmTransactionHashFrom(value: unknown): `0x${string}` | undefined {
 
 export function gatewayForwardingSettlementFrom(
   value: unknown,
-  fallbackFees?: unknown,
 ): GatewayForwardingSettlement {
   const transfer = recordFrom(value);
   const nestedDetails = recordFrom(transfer.forwardingDetails);
@@ -182,7 +398,7 @@ export function gatewayForwardingSettlementFrom(
   }
 
   return {
-    fees: transfer.fees ?? fallbackFees,
+    fees: transfer.fees,
     destinationTxHash,
     forwardingDetails,
   };
@@ -213,6 +429,68 @@ export function gatewayForwardingPollOutcome(value: {
   if (status === "failed") return value.mintReceiptMatches ? "settled" : "failed";
   if (status === "expired") return "failed";
   return "pending";
+}
+
+export async function pollGatewayForwardingTransfer(input: {
+  transferId: string;
+  maxAttempts?: number;
+  sleep: () => Promise<void>;
+  fetchTransfer: () => Promise<{
+    ok: boolean;
+    status: number;
+    json: () => Promise<unknown>;
+  }>;
+  confirmMint: (details: Record<string, unknown>) => Promise<boolean>;
+}): Promise<Record<string, unknown>> {
+  const maxAttempts = input.maxAttempts ?? 60;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    await input.sleep();
+
+    let response: Awaited<ReturnType<typeof input.fetchTransfer>>;
+    try {
+      response = await input.fetchTransfer();
+    } catch {
+      continue;
+    }
+    if (!response.ok) continue;
+
+    let details: Record<string, unknown>;
+    try {
+      details = recordFrom(await response.json());
+    } catch {
+      continue;
+    }
+    const status = String(details.status ?? details.state ?? "").toLowerCase();
+    const mintReceiptMatches = status === "failed"
+      ? await input.confirmMint(details)
+      : false;
+    const outcome = gatewayForwardingPollOutcome({ status, mintReceiptMatches });
+
+    if (outcome === "settled") {
+      if (status !== "failed") return details;
+      return {
+        ...details,
+        forwardingDetails: {
+          ...recordFrom(details.forwardingDetails),
+          onchainMintConfirmed: true,
+          reportedStatus: status,
+        },
+      };
+    }
+
+    if (outcome === "failed" && status === "failed") {
+      const reason = recordFrom(details.forwardingDetails).failureReason ?? "unknown";
+      throw new Error(`Forwarded transfer failed: ${reason}`);
+    }
+    if (outcome === "failed" && status === "expired") {
+      throw new Error("Forwarded transfer attestation expired before minting.");
+    }
+  }
+
+  throw new Error(
+    `Forwarded transfer did not complete after ${maxAttempts} attempts. Transfer ID: ${input.transferId}`,
+  );
 }
 
 const erc20TransferTopic =
@@ -307,5 +585,7 @@ export async function requestGatewayFeeEstimate(
     throw new Error(`Gateway fee estimate failed: ${response.status} - ${detail}`);
   }
 
-  return parseGatewayFeeEstimate(await response.json());
+  return parseGatewayFeeEstimate(await response.json(), {
+    enableForwarder: options.enableForwarder,
+  });
 }

@@ -135,7 +135,7 @@ export async function POST(req: NextRequest) {
       amount,
       recipientAddress: recipient.address,
       autoDeposit: true,
-      mintGasMode: body.mintGasMode ?? "manual",
+      mintGasMode: body.mintGasMode ?? "auto_forwarding",
       skipReceipt: true,
     });
 

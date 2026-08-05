@@ -7,8 +7,12 @@ import {
   isSupportedGatewayChain,
 } from "@/lib/circle/gateway-sdk";
 import {
-  gatewayFeeExecutionAmounts,
-  gatewayMintGasModeFrom,
+  GatewayManualMintUnsupportedError,
+  gatewayFeeBreakdownToDecimal,
+  gatewayManualMintSupported,
+  gatewaySupportedMintGasModes,
+  gatewayTransferExecutionPlan,
+  gatewayTransferPreflight,
   usdcAmountToAtomic,
 } from "@/lib/paycmd/gateway-transfer";
 import { createClient } from "@/lib/supabase/server";
@@ -27,7 +31,6 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const sourceChain = String(body.sourceChain ?? "");
     const destinationChain = String(body.destinationChain ?? "");
-    const mintGasMode = gatewayMintGasModeFrom(body.mintGasMode);
     const amountInAtomicUnits = usdcAmountToAtomic(body.amount);
 
     if (!isSupportedGatewayChain(sourceChain) || !isSupportedGatewayChain(destinationChain)) {
@@ -36,6 +39,13 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
+
+    const executionPlan = gatewayTransferExecutionPlan({
+      sourceChain,
+      destinationChain,
+      mintGasMode: body.mintGasMode,
+    });
+    const mintGasMode = executionPlan.mintGasMode;
 
     const { data: wallets, error: walletError } = await supabase
       .from("wallets")
@@ -54,20 +64,27 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const quote = await estimateGatewayTransferFee(
-      buildGatewayBurnIntentPreview({
-        amount: amountInAtomicUnits,
-        sourceChain,
-        destinationChain,
-        recipient: sourceDepositor,
-        sourceDepositor,
-        // Estimation is read-only and fees do not depend on this address. Avoid creating a
-        // Gateway signer merely to render a preview for a new wallet.
-        sourceSigner: sourceSigner ?? sourceDepositor,
-      }),
-      { enableForwarder: mintGasMode === "auto_forwarding" },
+    const burnIntentPreview = buildGatewayBurnIntentPreview({
+      amount: amountInAtomicUnits,
+      sourceChain,
+      destinationChain,
+      recipient: sourceDepositor,
+      sourceDepositor,
+      // Estimation is read-only and fees do not depend on this address. Avoid creating a
+      // Gateway signer merely to render a preview for a new wallet.
+      sourceSigner: sourceSigner ?? sourceDepositor,
+    });
+    const preflight = await gatewayTransferPreflight(
+      { amountAtomic: amountInAtomicUnits, sourceChain, destinationChain, mintGasMode },
+      {
+        estimate: ({ forwarding }) => estimateGatewayTransferFee(
+          burnIntentPreview,
+          { enableForwarder: forwarding },
+        ),
+      },
     );
-    const feeAmounts = gatewayFeeExecutionAmounts(amountInAtomicUnits, quote);
+    const quote = preflight.estimate;
+    const feeAmounts = preflight.amounts;
 
     return NextResponse.json({
       amount: Number(amountInAtomicUnits) / 1_000_000,
@@ -77,10 +94,25 @@ export async function POST(req: NextRequest) {
       maximumGatewayFee: Number(feeAmounts.maxFeeAtomic) / 1_000_000,
       requiredGatewayBalance: Number(feeAmounts.requiredGatewayBalanceAtomic) / 1_000_000,
       feeEstimateKind: quote.feeEstimateKind,
+      feeBreakdown: gatewayFeeBreakdownToDecimal(quote.feeBreakdown),
       forwarding: mintGasMode === "auto_forwarding",
       mintGasMode,
+      supportedMintGasModes: gatewaySupportedMintGasModes(destinationChain),
+      manualMintSupported: gatewayManualMintSupported(destinationChain),
     });
   } catch (error) {
+    if (error instanceof GatewayManualMintUnsupportedError) {
+      return NextResponse.json(
+        {
+          error: error.code,
+          message: error.message,
+          destinationChain: error.destinationChain,
+          supportedMintGasModes: error.supportedMintGasModes,
+          manualMintSupported: false,
+        },
+        { status: 422 },
+      );
+    }
     const message = error instanceof Error ? error.message : "Gateway fee estimate failed";
     const invalidInput = /mintGasMode|USDC amount/i.test(message);
     return NextResponse.json(

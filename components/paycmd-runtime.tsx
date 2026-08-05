@@ -11,7 +11,6 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
-import { formatUnits } from "viem";
 
 import { getChainMeta } from "@/components/chain-identity";
 import { localeRequestHeaders, translateClient, useI18n } from "@/lib/i18n";
@@ -26,7 +25,11 @@ import {
   gatewayDepositPollingIntervalMs,
   gatewayDepositSettlementsFromSync,
 } from "@/lib/paycmd/gateway-finality";
-import { gatewayTransferAmounts } from "@/lib/paycmd/gateway-transfer";
+import {
+  gatewayReceiptFeeComponents,
+  gatewayTransferAmounts,
+} from "@/lib/paycmd/gateway-transfer";
+import { formatNativeGasBalance } from "@/lib/paycmd/native-gas";
 import { createClient } from "@/lib/supabase/client";
 import { ParsedCommand } from "@/lib/paycmd/commands";
 import { gatewayTransferSubmitted } from "@/lib/paycmd/ui-models";
@@ -174,44 +177,39 @@ export function formatDecimalAmount(value: unknown, maxFractionDigits = 6) {
   }).format(numberValue);
 }
 
-export function formatNativeGasBalance(rawBalance: unknown, chain: string) {
-  const meta = getChainMeta(chain);
-  const decimals = meta?.nativeSymbol === "USDC" ? 6 : 18;
-  const symbol = meta?.nativeSymbol ?? "ETH";
-
-  try {
-    const value = typeof rawBalance === "bigint" ? rawBalance : BigInt(String(rawBalance ?? "0"));
-    const formatted = formatUnits(value, decimals);
-    return `${formatDecimalAmount(formatted, 6)} ${symbol}`;
-  } catch {
-    return `0 ${symbol}`;
-  }
-}
-
 function gatewayFeeText(transfer: any, translate: Translator) {
-  const { amount, gatewayFee, sourceDebit, actual } = gatewayTransferAmounts(transfer, "receipt");
+  const {
+    amount,
+    gatewayFee,
+    sourceDebit,
+    estimatedGatewayFee,
+  } = gatewayTransferAmounts(transfer, "receipt");
   const txRef = transfer?.destinationTxHash ?? transfer?.mintTxHash ?? transfer?.txHash ?? transfer?.transferId;
   const manualHint =
     transfer?.forwarding
       ? translate("runtime.gatewayFeeAutoHint")
       : translate("runtime.gatewayFeeManualHint");
 
-  if (!amount && !gatewayFee) {
+  if (!amount && gatewayFee === null && !estimatedGatewayFee) {
     return txRef ? `ID: ${txRef}\nMode: ${manualHint}` : `Mode: ${manualHint}`;
   }
 
   const feeLine =
-    gatewayFee > 0
+    gatewayFee !== null
       ? `${formatDecimalAmount(gatewayFee)} USDC`
-      : translate("runtime.gatewayNoBreakdown");
+      : translate("runtime.result.actualFeePending");
+  const components = gatewayReceiptFeeComponents(transfer ?? {}).join(" + ");
 
   return [
     translate("runtime.result.recipient", { value: `${formatDecimalAmount(amount)} USDC` }),
-    translate("runtime.result.sourceDebit", { value: `${actual ? "" : "~"}${formatDecimalAmount(sourceDebit)}` }),
+    sourceDebit !== null
+      ? translate("runtime.result.sourceDebit", { value: `${formatDecimalAmount(sourceDebit)} USDC` })
+      : translate("runtime.result.actualDebitPending"),
     translate("runtime.result.fees", { value: feeLine }),
-    translate("runtime.result.includes", {
-      forwardingFee: transfer?.forwarding ? translate("runtime.result.forwardingFee") : "",
-    }),
+    gatewayFee === null && estimatedGatewayFee > 0
+      ? translate("runtime.result.estimatedFee", { value: formatDecimalAmount(estimatedGatewayFee) })
+      : "",
+    translate("runtime.result.includes", { components }),
     transfer?.forwarding
       ? translate("bridge.destinationGasForwarder")
       : translate("runtime.result.destinationGasSigner"),
@@ -649,7 +647,7 @@ async function executeServerCommand(draft: ParsedCommand) {
         recipient: draft.fields.recipient,
         sourceChain: draft.fields.sourceChain,
         destinationChain: draft.fields.destinationChain,
-        mintGasMode: draft.fields.mintGasMode ?? "manual",
+        mintGasMode: draft.fields.mintGasMode ?? "auto_forwarding",
       }),
     });
   }
