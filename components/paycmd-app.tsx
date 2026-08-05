@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Clock3,
   Info,
+  ArrowDown,
   ArrowRightLeft,
   Download,
   FileDown,
@@ -104,6 +105,7 @@ import {
 } from "@/lib/paycmd/commands";
 import { chainCommandAlias, isSupportedChain, type PayCmdChain } from "@/lib/paycmd/chains";
 import { gatewayTransferAmounts } from "@/lib/paycmd/gateway-transfer";
+import { isNearViewportBottom, jumpToLatestMessage } from "@/lib/paycmd/chat-scroll";
 import { web3Chains } from "@/lib/paycmd/web3-chains";
 import {
   getSwapAdapterAddress,
@@ -274,9 +276,6 @@ type ChatThreadSummary = {
 
 const MESSAGE_PAGE_SIZE = 10;
 const THREAD_LIST_PAGE_SIZE = 30;
-// Kept tight: at 160px a user who scrolled up a short way still counted as "at the bottom",
-// so the next message yanked them back down mid-read.
-const AUTO_SCROLL_BOTTOM_THRESHOLD = 56;
 const METAMASK_CONFIRMATION_TIMEOUT_MS = 90_000;
 const METAMASK_CHAIN_TIMEOUT_MS = 60_000;
 const METAMASK_RPC_TIMEOUT_MS = 15_000;
@@ -349,10 +348,6 @@ function formatThreadTimestamp(value: string | null | undefined, locale: string)
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
-}
-
-function isNearViewportBottom(viewport: HTMLDivElement) {
-  return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < AUTO_SCROLL_BOTTOM_THRESHOLD;
 }
 
 function normalizeAiProvider(value: unknown): AiProvider | undefined {
@@ -2441,9 +2436,7 @@ export function PayCmdApp() {
   const [isSlowAskSurfNoticeDismissed, setIsSlowAskSurfNoticeDismissed] = useState(false);
   const [quotaOnboarding, setQuotaOnboarding] = useState<QuotaOnboardingState | null>(null);
   const [, setExecutions] = useState<ExecutionItem[]>([]);
-  const [scrollMetrics, setScrollMetrics] = useState({ top: 0, height: 1, client: 1 });
-  const scrollMetricsRef = useRef(scrollMetrics);
-  const scrollMetricsFrameRef = useRef<number | null>(null);
+  const [isAwayFromBottom, setIsAwayFromBottom] = useState(false);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const previousScrollHeightRef = useRef<number | null>(null);
   // Set by the anchor-restore layout effect, consumed by the auto-scroll effect below it.
@@ -2491,15 +2484,6 @@ export function PayCmdApp() {
       console.error("Could not persist AI quota onboarding dismissal:", error);
     });
   }
-  const scrollThumbHeight = Math.max(
-    36,
-    Math.min(100, (scrollMetrics.client / scrollMetrics.height) * 100),
-  );
-  const scrollThumbTop =
-    scrollMetrics.height <= scrollMetrics.client
-      ? 0
-      : (scrollMetrics.top / (scrollMetrics.height - scrollMetrics.client)) *
-        (100 - scrollThumbHeight);
   const latestStatusMessageIdByExecution = messages.reduce<Record<string, string>>(
     (latest, message) => {
       if (message.kind === "status" && message.execution) {
@@ -3386,6 +3370,7 @@ export function PayCmdApp() {
     setIsLoadingHistory(true);
     setThreadId(nextThreadId);
     setMessages([]);
+    setIsAwayFromBottom(false);
     setActiveDraftId(null);
     previousScrollHeightRef.current = null;
     skipNextAutoScrollRef.current = false;
@@ -3444,6 +3429,7 @@ export function PayCmdApp() {
     setChatThreads((current) => [createdThread, ...current]);
     setThreadId(createdThread.id);
     setMessages([]);
+    setIsAwayFromBottom(false);
     setHasOlderMessages(false);
     setActiveDraftId(null);
     setIsLoadingHistory(false);
@@ -3511,42 +3497,12 @@ export function PayCmdApp() {
     await createNewChatThread();
   }
 
-  function updateScrollMetricsFromViewport(viewport: HTMLDivElement) {
-    const nextMetrics = {
-      top: Math.round(viewport.scrollTop),
-      height: viewport.scrollHeight,
-      client: viewport.clientHeight,
-    };
-    const previousMetrics = scrollMetricsRef.current;
-
-    if (
-      previousMetrics.top === nextMetrics.top &&
-      previousMetrics.height === nextMetrics.height &&
-      previousMetrics.client === nextMetrics.client
-    ) {
-      return;
-    }
-
-    scrollMetricsRef.current = nextMetrics;
-    setScrollMetrics(nextMetrics);
-  }
-
-  function scheduleScrollMetricsUpdate() {
-    if (scrollMetricsFrameRef.current !== null) return;
-
-    scrollMetricsFrameRef.current = window.requestAnimationFrame(() => {
-      scrollMetricsFrameRef.current = null;
-      const viewport = viewportRef.current;
-      if (!viewport) return;
-      updateScrollMetricsFromViewport(viewport);
-    });
-  }
-
   function handleViewportScroll() {
     const viewport = viewportRef.current;
     if (!viewport) return;
-    shouldAutoScrollRef.current = isNearViewportBottom(viewport);
-    scheduleScrollMetricsUpdate();
+    const isNearBottom = isNearViewportBottom(viewport);
+    shouldAutoScrollRef.current = isNearBottom;
+    setIsAwayFromBottom(!isNearBottom);
     // Single entry point for pagination. The wheel handler used to fire this too, which
     // meant one gesture could start two loads and land two anchor restores on top of
     // each other — the position jump users were seeing when scrolling up.
@@ -3559,6 +3515,17 @@ export function PayCmdApp() {
     const viewport = viewportRef.current;
     if (!viewport) return;
     viewport.scrollTop = viewport.scrollHeight;
+  }
+
+  function handleJumpToLatestMessage() {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    shouldAutoScrollRef.current = true;
+    jumpToLatestMessage(
+      viewport,
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    );
   }
 
   async function submitValue(value: string, options?: { forceAskSurf?: boolean }) {
@@ -3883,21 +3850,6 @@ export function PayCmdApp() {
   }, [messages.length, activeAiProvider]);
 
   useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-
-    updateScrollMetricsFromViewport(viewport);
-  }, [messages.length]);
-
-  useEffect(() => {
-    return () => {
-      if (scrollMetricsFrameRef.current !== null) {
-        window.cancelAnimationFrame(scrollMetricsFrameRef.current);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
     async function bootstrapChat() {
       const supabase = createClient();
       const {
@@ -4152,15 +4104,19 @@ export function PayCmdApp() {
             </div>
           </div>
 
-          <div className="pointer-events-none absolute bottom-5 right-2 top-5 w-2 rounded-full bg-border/45 dark:bg-border/45">
-            <div
-              className="absolute left-0 w-2 rounded-full bg-primary shadow-[0_0_18px_rgba(99,244,200,.34)] transition-[top,height]"
-              style={{
-                height: `${scrollThumbHeight}%`,
-                top: `${scrollThumbTop}%`,
-              }}
-            />
-          </div>
+          {messages.length && isAwayFromBottom ? (
+            <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center px-4">
+              <Button
+                type="button"
+                size="sm"
+                className="pointer-events-auto min-h-11 gap-2 rounded-full border border-primary/30 bg-card/95 px-4 shadow-lg backdrop-blur-xl"
+                onClick={handleJumpToLatestMessage}
+              >
+                <ArrowDown className="h-4 w-4" aria-hidden="true" />
+                {t("chat.latestMessage")}
+              </Button>
+            </div>
+          ) : null}
         </div>
 
         <div className="shrink-0 border-t border-border/60 bg-card/65 px-3 py-3 backdrop-blur-xl md:px-6">
