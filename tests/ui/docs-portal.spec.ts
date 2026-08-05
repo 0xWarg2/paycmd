@@ -33,7 +33,7 @@ test("keeps the current docs slug while switching language", async ({ page }) =>
   await page.getByRole("menuitemradio", { name: "EN" }).click();
 
   await expect(page).toHaveURL(/\/docs\/features\/askpayna$/);
-  await expect(page.getByRole("heading", { level: 2, name: "When to use AskPayna" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Choose the right mode" })).toBeVisible();
 });
 
 test("links command headings from the on-page table of contents", async ({ page }, testInfo) => {

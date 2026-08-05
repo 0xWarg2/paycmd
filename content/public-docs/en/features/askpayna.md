@@ -8,7 +8,7 @@ lastUpdated: "2026-08-05"
 keywords: ["AskPayna", "Circle MCP", "Arc MCP", "Tavily", "DeepSeek"]
 tutorial: true
 aiSummary:
-  - "AskPayna routes Payna, Circle, Arc, and broad or live Web3 questions to distinct sources, then asks DeepSeek to synthesize only the retrieved evidence."
+  - "AskPayna routes Payna tutorial, Circle MCP, Arc MCP, and Tavily for broad or live Web3 questions, then asks DeepSeek to synthesize only the retrieved evidence."
   - "References come from retrieval; missing sources produce partial or unavailable grounding, never invented citations."
 ---
 

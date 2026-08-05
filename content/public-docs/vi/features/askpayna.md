@@ -8,7 +8,7 @@ lastUpdated: "2026-08-05"
 keywords: ["AskPayna", "Circle MCP", "Arc MCP", "Tavily", "DeepSeek"]
 tutorial: true
 aiSummary:
-  - "AskPayna route câu hỏi về Payna, Circle, Arc và Web3 rộng hoặc live đến nguồn riêng, rồi yêu cầu DeepSeek chỉ tổng hợp evidence đã retrieval."
+  - "AskPayna route Payna tutorial, Circle MCP, Arc MCP và Tavily cho câu hỏi Web3 rộng hoặc live, rồi yêu cầu DeepSeek chỉ tổng hợp evidence đã retrieval."
   - "Reference phải đến từ retrieval; thiếu nguồn sẽ trả grounding partial hoặc unavailable, không tạo citation giả."
 ---
 

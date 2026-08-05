@@ -58,7 +58,8 @@
             "unified"
           ],
           "content": [
-            "Circle Gateway tách SCA wallet, depositor balance và Gateway signer; Payna hiển thị chúng trong một flow nhưng không trộn vai trò."
+            "Payna tách ba vai trò: Circle SCA giữ USDC on-chain, depositor sở hữu balance theo domain trong Gateway, còn EOA được delegate ký burn intent.",
+            "Gateway có thể biểu diễn unified cross-chain balance, nhưng lệnh transfer hiện tại của Payna chỉ tiêu từ source domain được chọn rõ ràng."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/overview"
         },
@@ -72,8 +73,8 @@
             "depositor"
           ],
           "content": [
-            "Circle Gateway unified balance là USDC đã được depositor nạp vào Gateway trên các domain; nó không bao gồm USDC còn nằm trong Circle SCA wallet.",
-            "Payna total balance cộng SCA on-chain balance và Gateway deposited balance để người dùng thấy toàn bộ tài sản, nhưng chỉ phần Gateway ready mới dùng được cho Gateway transfer."
+            "Gateway ready balance gồm finalized deposit được ghi nhận cho một depositor và domain; SCA USDC và pending deposit là các phần riêng.",
+            "Payna có thể cộng SCA và Gateway để hiển thị visibility, nhưng transfer hiện tại chỉ debit một Gateway source domain được chọn rõ ràng."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/unified-balance"
         },
@@ -88,7 +89,8 @@
             "sync"
           ],
           "content": [
-            "Lệnh /deposit chuyển USDC từ Circle SCA vào Gateway; deposit chỉ usable sau Gateway finality. Webhook là completion path chính và sync là recovery path."
+            "Lệnh /deposit của Payna approve USDC rồi gọi Gateway từ SCA; transaction đã confirm vẫn pending đến khi Circle finalize và process.",
+            "Signed webhook là finality signal chính, còn idempotent sync reconcile processed height với pending-deposit list của Circle."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/deposit-and-finality"
         },
@@ -103,8 +105,8 @@
             "fee"
           ],
           "content": [
-            "Gateway transfer của Payna lấy ready balance trên source chain ghi trong command, yêu cầu amount cộng fee và mint ở destination.",
-            "Ví dụ /transfer 5 from base to arc dùng Gateway ready balance trên Base và không tự gom balance từ domain khác."
+            "Payna estimate trước, rồi yêu cầu amount cộng fee trên named source domain trước khi authorize và ký một burn intent.",
+            "Ví dụ `/transfer 5 from base to arc` chỉ tiêu ready balance trên Base; auto forwarding và manual mint tạo destination result khác nhau, và sau submission phải kiểm tra status trước khi retry."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/transfer"
         },
@@ -118,7 +120,8 @@
             "same domain"
           ],
           "content": [
-            "Payna withdraw chuyển Gateway balance về Circle SCA wallet trên cùng domain; đây không phải một cross-chain transfer."
+            "Lệnh /withdraw của Payna burn ready Gateway balance và mint về SCA của người dùng trên same domain, cần amount cộng fee và gas cho SCA mint.",
+            "Application path này khác delayed trustless withdrawal mechanism ở protocol level của Gateway."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/withdraw"
         },
@@ -132,7 +135,8 @@
             "manual mint"
           ],
           "content": [
-            "Auto forwarding trả thêm fee bằng USDC và không cần destination native gas; manual thường rẻ hơn nhưng wallet thực thi mint cần gas ở destination."
+            "Gateway fee debit source USDC, source-side wallet operation dùng native gas, còn manual destination mint cần native gas từ minting wallet.",
+            "Transfer flow quote trước state change; withdraw chỉ initialize signer sau confirmation rồi mới quote và check execution requirement."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/fees-gas-and-forwarding"
         },
@@ -147,7 +151,8 @@
             "MetaMask"
           ],
           "content": [
-            "Lệnh /bridge là MetaMask CCTP v2 flow, tách khỏi Circle Gateway transfer và cần source gas cùng chữ ký người dùng."
+            "Dùng /bridge cho USDC trong MetaMask: kiểm tra route và fee, ký CCTP v2 source burn, chờ attestation rồi hoàn tất destination mint.",
+            "Không lặp lại một source burn đã được ghi nhận; dùng hash của nó để chẩn đoán hoặc khôi phục mint đang chờ."
           ],
           "url": "https://heypayna.xyz/docs/circle/cctp-bridge"
         },
@@ -162,8 +167,8 @@
             "DeepSeek"
           ],
           "content": [
-            "AskPayna dùng tutorial có version cho hướng dẫn Payna, Circle MCP cho Circle, Arc MCP và arc.io cho Arc, Tavily cho Web3 rộng hoặc dữ liệu thời sự, rồi DeepSeek tổng hợp trên evidence.",
-            "Citation chỉ được lấy từ retrieval; nguồn lỗi trả partial hoặc unavailable thay vì tạo URL giả."
+            "AskPayna route Payna tutorial, Circle MCP, Arc MCP và Tavily cho câu hỏi Web3 rộng hoặc live, rồi yêu cầu DeepSeek chỉ tổng hợp evidence đã retrieval.",
+            "Reference phải đến từ retrieval; thiếu nguồn sẽ trả grounding partial hoặc unavailable, không tạo citation giả."
           ],
           "url": "https://heypayna.xyz/docs/features/askpayna"
         },
@@ -177,7 +182,8 @@
             "preview"
           ],
           "content": [
-            "Payna cho phép lưu contact theo địa chỉ/rail rồi dùng /pay để tạo payment preview; người dùng phải xác nhận trước khi tiền di chuyển."
+            "Payment Payna cần amount, recipient, source chain và destination chain, rồi resolve người nhận và hiện confirmation preview trước khi chạy Gateway.",
+            "Contact chỉ lưu identity và routing hint, không có quyền ký; luôn kiểm tra địa chỉ đã resolve và destination."
           ],
           "url": "https://heypayna.xyz/docs/features/payments-and-contacts"
         },
@@ -191,7 +197,8 @@
             "batch"
           ],
           "content": [
-            "Payna tạo payment request có link/QR và payroll preview hiển thị từng recipient trước khi chạy batch."
+            "Payment request tạo inbound link hoặc QR ở trạng thái pending; payroll tạo và confirm outbound Gateway payments cho tối đa 25 active contacts.",
+            "Payroll hiện recipient count và aggregate amount trước execution, rồi giữ success hoặc failure theo từng item và toàn batch."
           ],
           "url": "https://heypayna.xyz/docs/features/payment-requests-and-payroll"
         },
@@ -205,7 +212,8 @@
             "limit"
           ],
           "content": [
-            "Budgets theo dõi usage trong rolling window; schedules lưu command và thời điểm chạy nhưng money movement vẫn tuân theo confirmation/runtime policy."
+            "Budgets hiện là dashboard read-only cho spending trong 30 ngày; enforcement và editing control chưa hoạt động.",
+            "Schedules hiển thị recurring-payment row đã lưu trong demo scope manual-first và không tự ký hoặc di chuyển funds."
           ],
           "url": "https://heypayna.xyz/docs/features/budgets-and-schedules"
         },
@@ -219,7 +227,8 @@
             "status"
           ],
           "content": [
-            "Activity tập hợp transaction history và notifications, gồm trạng thái Gateway finality, failure, tx hash và proof metadata."
+            "Activity tách transaction history khỏi notifications; dùng receipt và explorer link đúng chain để đối soát từng stage.",
+            "Gateway finality notification chỉ được tạo sau khi settlement evidence đã xác minh cập nhật pending deposit; unread state hiện chỉ mang tính thông tin."
           ],
           "url": "https://heypayna.xyz/docs/features/activity-and-notifications"
         },
@@ -320,7 +329,7 @@
             "testnet"
           ],
           "content": [
-            "Không nhập seed phrase/private key; natural language chỉ chuẩn bị preview và mọi money movement cần explicit confirmation. Payna hiện là testnet app."
+            "Payna hướng tới testnet: không chia sẻ secret ví, kiểm tra mọi preview và signature, rồi kiểm tra giao dịch đã submit trước khi retry."
           ],
           "url": "https://heypayna.xyz/docs/safety-and-support/security"
         },
@@ -335,7 +344,7 @@
             "Gateway"
           ],
           "content": [
-            "Khi lệnh lỗi, kiểm tra đúng account/network, USDC và native gas, SCA so với Gateway balance, pending finality và source amount cộng fee."
+            "Ghép symptom với bước cuối đã xác nhận, chỉ sửa lỗi trước submission, và đối soát mọi hash hoặc transfer ID trước khi retry."
           ],
           "url": "https://heypayna.xyz/docs/safety-and-support/troubleshooting"
         },
@@ -350,7 +359,7 @@
             "AskPayna"
           ],
           "content": [
-            "FAQ giải thích docs public, testnet scope, Gateway balance, confirmation, proof và AskPayna citations."
+            "Docs testnet public và versioned của Payna giải thích ranh giới wallet/rail; hash và citation hỗ trợ điều tra, không thay secret sharing hay duplicate retry."
           ],
           "url": "https://heypayna.xyz/docs/safety-and-support/faq"
         }
@@ -411,7 +420,8 @@
             "unified"
           ],
           "content": [
-            "Circle Gateway separates the SCA wallet, depositor balance, and Gateway signer; Payna presents them in one flow without mixing their roles."
+            "Payna keeps three roles distinct: the Circle SCA holds on-chain USDC, the depositor owns domain balances inside Gateway, and a delegated EOA signs burn intents.",
+            "Gateway can represent a unified cross-chain balance, while Payna's current transfer command spends only the explicitly selected source domain."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/overview"
         },
@@ -425,8 +435,8 @@
             "depositor"
           ],
           "content": [
-            "Circle Gateway unified balance is USDC that a depositor has placed into Gateway across domains; it excludes USDC that remains in a Circle SCA wallet.",
-            "Payna total balance adds SCA on-chain balances and Gateway deposited balances for visibility, but only Gateway ready balance can fund a Gateway transfer."
+            "Gateway ready balance includes finalized deposits recorded for a depositor and domain; SCA USDC and pending deposits are separate.",
+            "Payna may display SCA and Gateway amounts together for visibility, but current transfers debit one explicitly selected Gateway source domain."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/unified-balance"
         },
@@ -441,7 +451,8 @@
             "sync"
           ],
           "content": [
-            "The /deposit command moves USDC from a Circle SCA into Gateway; it becomes usable only after Gateway finality. The webhook is primary and sync is the recovery path."
+            "Payna's /deposit approves USDC and calls Gateway from the SCA; the confirmed transaction remains pending until Circle finalizes and processes it.",
+            "A signed webhook is the primary finality signal, while idempotent sync reconciles processed height and Circle's pending-deposit list."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/deposit-and-finality"
         },
@@ -456,8 +467,8 @@
             "fee"
           ],
           "content": [
-            "A Payna Gateway transfer uses ready balance on the source chain named by the command, requires amount plus fee, and mints on the destination.",
-            "For example, /transfer 5 from base to arc uses Gateway ready balance on Base and never aggregates another domain silently."
+            "Payna estimates first, then requires amount plus fee on the named source domain before authorizing and signing one burn intent.",
+            "For example, `/transfer 5 from base to arc` spends only ready balance on Base; auto forwarding and manual mint produce different destination results, and status must be checked before retrying."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/transfer"
         },
@@ -471,7 +482,8 @@
             "same domain"
           ],
           "content": [
-            "Payna withdraw moves Gateway balance back to the Circle SCA wallet on the same domain; it is not a cross-chain transfer."
+            "Payna's /withdraw burns ready Gateway balance and mints it to the user's own SCA on the same domain, requiring amount plus fee and SCA mint gas.",
+            "This application path is distinct from Gateway's protocol-level delayed trustless withdrawal mechanism."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/withdraw"
         },
@@ -485,7 +497,8 @@
             "manual mint"
           ],
           "content": [
-            "Auto forwarding pays an extra USDC fee and avoids destination native gas; manual mode can cost less USDC but the minting wallet needs destination gas."
+            "Gateway fees debit source USDC, source-side wallet operations use native gas, and manual destination mint requires native gas from the minting wallet.",
+            "The transfer flow quotes before state changes; withdraw initializes its signer only after confirmation, then quotes and checks execution requirements."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/fees-gas-and-forwarding"
         },
@@ -500,7 +513,8 @@
             "MetaMask"
           ],
           "content": [
-            "The /bridge command is a MetaMask CCTP v2 flow, separate from Circle Gateway transfer, and requires source gas plus a user signature."
+            "Use /bridge for MetaMask-held USDC: review the route and fees, sign the CCTP v2 source burn, wait for attestation, and complete the destination mint.",
+            "A recorded source burn is not safe to repeat; use its hash to diagnose or recover a pending mint."
           ],
           "url": "https://heypayna.xyz/docs/circle/cctp-bridge"
         },
@@ -515,8 +529,8 @@
             "DeepSeek"
           ],
           "content": [
-            "AskPayna uses the versioned tutorial for Payna guidance, Circle MCP for Circle, Arc MCP and arc.io for Arc, Tavily for broad or live Web3 data, and DeepSeek for evidence-grounded synthesis.",
-            "Citations can only come from retrieval; source failures return partial or unavailable instead of invented URLs."
+            "AskPayna routes Payna tutorial, Circle MCP, Arc MCP, and Tavily for broad or live Web3 questions, then asks DeepSeek to synthesize only the retrieved evidence.",
+            "References come from retrieval; missing sources produce partial or unavailable grounding, never invented citations."
           ],
           "url": "https://heypayna.xyz/docs/features/askpayna"
         },
@@ -530,7 +544,8 @@
             "preview"
           ],
           "content": [
-            "Payna saves contacts by address and rail, then uses /pay to create a payment preview that requires explicit confirmation."
+            "A Payna payment requires amount, recipient, source chain, and destination chain, then resolves the recipient and shows a confirmation preview before Gateway execution.",
+            "Contacts store identity and routing hints, never signing authority; verify the resolved address and destination every time."
           ],
           "url": "https://heypayna.xyz/docs/features/payments-and-contacts"
         },
@@ -544,7 +559,8 @@
             "batch"
           ],
           "content": [
-            "Payna creates payment requests with a link or QR and payroll previews that expose every recipient before batch execution."
+            "A payment request creates a pending inbound link or QR; payroll creates and confirms outbound Gateway payments for up to 25 active contacts.",
+            "Payroll exposes recipient count and aggregate amount before execution, then preserves success or failure per item and at batch level."
           ],
           "url": "https://heypayna.xyz/docs/features/payment-requests-and-payroll"
         },
@@ -558,7 +574,8 @@
             "limit"
           ],
           "content": [
-            "Budgets track usage in a rolling window; schedules store commands and run times while money movement still follows confirmation and runtime policy."
+            "Budgets currently provide a read-only 30-day spending dashboard; enforcement and editing controls are not yet active.",
+            "Schedules display stored recurring-payment rows in manual-first demo scope and do not autonomously sign or move funds."
           ],
           "url": "https://heypayna.xyz/docs/features/budgets-and-schedules"
         },
@@ -572,7 +589,8 @@
             "status"
           ],
           "content": [
-            "Activity combines transaction history and notifications, including Gateway finality, failures, transaction hashes, and proof metadata."
+            "Activity separates transaction history from notifications; use receipts and chain-correct explorer links to reconcile every stage.",
+            "Gateway finality notifications are created only after verified settlement evidence updates a pending deposit; unread state is informational in the current UI."
           ],
           "url": "https://heypayna.xyz/docs/features/activity-and-notifications"
         },
@@ -673,7 +691,7 @@
             "testnet"
           ],
           "content": [
-            "Never enter a seed phrase or private key; natural language only prepares a preview and every money-moving action needs explicit confirmation. Payna is currently testnet-oriented."
+            "Payna is testnet-oriented: never share wallet secrets, verify every preview and signature, and inspect submitted work before retrying."
           ],
           "url": "https://heypayna.xyz/docs/safety-and-support/security"
         },
@@ -688,7 +706,7 @@
             "Gateway"
           ],
           "content": [
-            "When a command fails, verify account and network, USDC and native gas, SCA versus Gateway balance, pending finality, and source amount plus fee."
+            "Match the symptom to its last confirmed stage, correct only pre-submission errors, and reconcile any existing hash or transfer ID before retrying."
           ],
           "url": "https://heypayna.xyz/docs/safety-and-support/troubleshooting"
         },
@@ -703,7 +721,7 @@
             "AskPayna"
           ],
           "content": [
-            "The FAQ covers public docs, testnet scope, Gateway balance, confirmation, proof, and AskPayna citations."
+            "Payna's public, versioned testnet docs explain its wallet and rail boundaries; hashes and citations support investigation, not secret sharing or duplicate retries."
           ],
           "url": "https://heypayna.xyz/docs/safety-and-support/faq"
         }

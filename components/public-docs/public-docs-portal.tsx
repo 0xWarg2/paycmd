@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { isValidElement, type ReactNode, useEffect, useMemo, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -178,7 +178,7 @@ function MarkdownContent({ content, locale }: { content: string; locale: Locale 
       );
     },
     code: ({ children }) => <CommandCode locale={locale}>{children}</CommandCode>,
-    table: ({ children }) => <div className="my-6 overflow-x-auto rounded-xl border border-border"><table className="w-full min-w-[560px] text-left text-sm">{children}</table></div>,
+    table: ({ children }) => <div className="my-6 overflow-x-auto rounded-xl border border-border" tabIndex={0}><table className="w-full min-w-[560px] text-left text-sm">{children}</table></div>,
     th: ({ children }) => <th className="border-b border-border bg-muted/70 px-4 py-3 font-semibold text-foreground">{children}</th>,
     td: ({ children }) => <td className="border-b border-border/60 px-4 py-3 text-muted-foreground">{children}</td>,
   };
@@ -310,7 +310,7 @@ function GatewaySupportMatrix({ rows, locale }: { rows: GatewaySupport[]; locale
     <section aria-labelledby="gateway-support-title" className="my-8">
       <h2 id="gateway-support-title" className="text-2xl font-semibold text-foreground">{labels.supportTitle}</h2>
       <p className="mt-2 text-sm text-muted-foreground">{labels.supportIntro}</p>
-      <div className="mt-5 overflow-x-auto rounded-2xl border border-border">
+      <div className="mt-5 overflow-x-auto rounded-2xl border border-border" tabIndex={0}>
         <table className="w-full min-w-[620px] text-left text-sm">
           <thead className="bg-muted/70 text-foreground">
             <tr><th className="px-4 py-3">{labels.chain}</th><th className="px-4 py-3">{labels.domain}</th><th className="px-4 py-3">{labels.listed}</th><th className="px-4 py-3">{labels.sdk}</th></tr>
@@ -358,15 +358,19 @@ export function PublicDocsPortal({ page, navigation, searchIndex, adjacent, gate
   const labels = ui[locale];
   const localized = page.locales[locale];
   const router = useRouter();
-  const pathname = usePathname();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   useEffect(() => {
-    if (pathname !== "/docs") return;
-    const hash = window.location.hash.slice(1) as keyof typeof legacyDocsDestinations;
-    const destination = legacyDocsDestinations[hash];
-    if (destination && destination !== "/docs") router.replace(destination);
-  }, [pathname, router]);
+    const redirectLegacyHash = () => {
+      if (window.location.pathname.replace(/\/$/, "") !== "/docs") return;
+      const hash = window.location.hash.slice(1) as keyof typeof legacyDocsDestinations;
+      const destination = legacyDocsDestinations[hash];
+      if (destination && destination !== "/docs") router.replace(destination);
+    };
+    redirectLegacyHash();
+    window.addEventListener("hashchange", redirectLegacyHash);
+    return () => window.removeEventListener("hashchange", redirectLegacyHash);
+  }, [router]);
 
   const breadcrumb = page.slug.split("/").filter(Boolean);
   return (

@@ -9,7 +9,7 @@ keywords: ["transfer", "burn intent", "mint", "source-scoped", "fee"]
 tutorial: true
 aiSummary:
   - "Payna estimate trước, rồi yêu cầu amount cộng fee trên named source domain trước khi authorize và ký một burn intent."
-  - "Auto forwarding và manual mint tạo destination result khác nhau; sau submission phải kiểm tra status trước khi retry."
+  - "Ví dụ `/transfer 5 from base to arc` chỉ tiêu ready balance trên Base; auto forwarding và manual mint tạo destination result khác nhau, và sau submission phải kiểm tra status trước khi retry."
 ---
 
 ## Command syntax và source selection

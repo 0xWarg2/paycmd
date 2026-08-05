@@ -9,7 +9,7 @@ keywords: ["transfer", "burn intent", "mint", "source-scoped", "fee"]
 tutorial: true
 aiSummary:
   - "Payna estimates first, then requires amount plus fee on the named source domain before authorizing and signing one burn intent."
-  - "Auto forwarding and manual mint produce different destination results; after submission, status must be checked before retrying."
+  - "For example, `/transfer 5 from base to arc` spends only ready balance on Base; auto forwarding and manual mint produce different destination results, and status must be checked before retrying."
 ---
 
 ## Command syntax and source selection
