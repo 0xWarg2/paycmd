@@ -121,6 +121,19 @@ The generated tutorial must keep:
 
 ## Scroll and Layout Architecture
 
+### Reading typography
+
+The current Docs hierarchy feels oversized for long-form technical reading. The portal will use a more compact, consistent scale without changing the application font family:
+
+- Article body: approximately 15px with a relaxed 1.7–1.8 line height on desktop and mobile.
+- Page title: approximately 28–36px across mobile and desktop, instead of scaling to an oversized display heading.
+- Level-two heading: approximately 22–26px.
+- Level-three heading: approximately 18–20px.
+- Navigation, metadata, breadcrumbs, table copy, and callouts remain subordinate to the article body.
+- Keep the readable article measure near the existing `max-w-3xl`; do not widen paragraphs simply because they use a smaller font.
+
+The intent is a comfortable documentation density: visibly smaller than landing-page marketing typography, but not compressed into dashboard-sized copy. Command code, tables, and warnings must remain legible at normal browser zoom.
+
 ### Scroll ownership
 
 The Docs portal root becomes a viewport-owned flex layout:
@@ -148,6 +161,8 @@ Add a Docs-specific scrollbar utility rather than changing every application sur
 
 The visual scrollbar is an affordance, not the only navigation mechanism. Mouse wheel, touch, keyboard, Page Up/Down, Home/End, anchor links, previous/next, and mobile drawer navigation remain usable.
 
+Short pages do not need a disabled decorative scrollbar. When the main document exceeds its available height, the scrollbar thumb must appear and the user must be able to drag or wheel all the way to the final related/previous/next content.
+
 ### Anchor behavior
 
 Headings continue to use stable shared IDs. Clicking an on-page link must scroll the main Docs container to the heading while respecting the header offset. Legacy anchors continue routing from `/docs#...` to canonical pages.
@@ -167,6 +182,7 @@ No back-to-top button or reading-progress indicator is added in this scope.
 - Headings preserve semantic order and stable IDs.
 - Links use descriptive labels and external links retain safe behavior.
 - Text and scrollbar colors must remain distinguishable in light and dark themes.
+- Body text remains readable at 200% zoom and does not rely on an unusually large base size for accessibility.
 - Mobile navigation controls retain at least a 44×44 pixel target.
 - Reduced-motion behavior remains unchanged.
 
@@ -186,12 +202,13 @@ No back-to-top button or reading-progress indicator is added in this scope.
 
 - A long Gateway page has `scrollHeight > clientHeight` in the primary Docs scroller.
 - Computed `overflow-y` is `auto` or `scroll` on that element.
-- Scrolling changes its `scrollTop` and reaches lower content.
+- Scrolling or dragging changes its `scrollTop` and reaches the final previous/next navigation.
 - On-page ToC anchors target rendered heading IDs and move the correct scroll container.
 - Sidebar, mobile drawer, search, breadcrumbs, previous/next, locale switching, legacy anchors, and theme persistence continue working.
 - Desktop 1440 and mobile 390 visual baselines cover light and dark themes.
 - Axe runs on overview, quickstart, Gateway unified balance, command reference, and troubleshooting in light/dark.
 - Mobile pages have no horizontal overflow.
+- Visual baselines confirm the compact article typography scale on overview, Gateway, command reference, and troubleshooting pages.
 
 ### Repository verification
 
@@ -217,4 +234,4 @@ At design time, the shared workspace contains unrelated uncommitted changes in G
 
 ## Acceptance Summary
 
-The work is accepted when all 25 routes are materially expanded in both locales, Circle Gateway pages provide the deepest operational explanations, long pages expose a visible and usable scrollbar across desktop/mobile light/dark themes, tutorial knowledge remains concise and synchronized, and the full repository verification suite passes without regressions.
+The work is accepted when all 25 routes are materially expanded in both locales, Circle Gateway pages provide the deepest operational explanations, article typography is compact and comfortable for long-form reading, long pages expose a visible and usable scrollbar across desktop/mobile light/dark themes, tutorial knowledge remains concise and synchronized, and the full repository verification suite passes without regressions.
