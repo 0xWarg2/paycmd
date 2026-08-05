@@ -25,5 +25,6 @@ test("returns at most four ranked tutorial sections with stable docs citations",
   const result = searchPaynaTutorial("wallet fund pay transfer bridge swap AskPayna", "en");
 
   assert.equal(result.documents.length <= 4, true);
-  assert.equal(result.documents.every((document) => document.url?.startsWith("https://heypayna.xyz/docs#")), true);
+  assert.equal(result.documents.every((document) => document.url?.startsWith("https://heypayna.xyz/docs")), true);
+  assert.equal(result.documents.every((document) => !document.url?.includes("#")), true);
 });

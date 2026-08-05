@@ -3,7 +3,7 @@ import tutorial from "../../../content/payna-tutorial.json" with { type: "json" 
 import type { GroundedDocument, SourceRetrieval } from "./knowledge-types.ts";
 
 type Locale = "vi" | "en";
-type TutorialSection = { id: string; title: string; keywords: string[]; content: string[] };
+type TutorialSection = { id: string; title: string; keywords: string[]; content: string[]; url?: string };
 
 function tokens(value: string) {
   return new Set(
@@ -40,7 +40,7 @@ export function searchPaynaTutorial(query: string, locale: Locale): SourceRetrie
   const documents: GroundedDocument[] = selected.map(({ section, score }) => ({
     source: "payna",
     title: section.title,
-    url: `https://heypayna.xyz/docs#${section.id}`,
+    url: section.url ?? `https://heypayna.xyz/docs#${section.id}`,
     content: section.content.join("\n"),
     score,
   }));

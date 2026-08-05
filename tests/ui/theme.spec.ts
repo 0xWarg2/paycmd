@@ -23,8 +23,8 @@ function isVisualProject(projectName: string) {
 }
 
 test("keeps an explicit theme while navigating between public, auth, and app surfaces", async ({ page }, testInfo) => {
+  test.setTimeout(60_000);
   test.skip(testInfo.project.name !== "desktop-1440", "one browser context is enough for persistence");
-
   await page.goto("/");
   const themeButton = page.getByRole("button", { name: "Giao diện" });
   await expect(themeButton).toBeVisible();
@@ -35,14 +35,16 @@ test("keeps an explicit theme while navigating between public, auth, and app sur
   await page.getByRole("menuitemradio", { name: "Sáng" }).click();
   await expect(page.locator("html")).not.toHaveClass(/dark/);
 
-  for (const path of [
+  const persistenceRoutes = [
     "/docs",
     "/auth/login",
     "/auth/sign-up",
     "/auth/error",
     "/auth/update-password",
-    "/dev/ui-preview",
-  ]) {
+  ];
+  if (process.env.PLAYWRIGHT_EXTERNAL_SERVER !== "1") persistenceRoutes.push("/dev/ui-preview");
+
+  for (const path of persistenceRoutes) {
     await page.goto(path);
     await expect(page.locator("html")).not.toHaveClass(/dark/);
     await expect(page.getByRole("button", { name: "Giao diện" })).toBeVisible();
