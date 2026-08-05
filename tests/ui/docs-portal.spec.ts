@@ -21,7 +21,7 @@ test("renders nested Circle Gateway docs with navigation, search, and accessible
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(accessibility.violations).toEqual([]);
   await search.fill("");
-  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.getByTestId("docs-scroll-container").evaluate((element) => element.scrollTo(0, 0));
   await expect(page).toHaveScreenshot(`docs-gateway-${testInfo.project.name}.png`, { fullPage: true });
 });
 
@@ -69,4 +69,33 @@ test("uses a mobile drawer without horizontal overflow", async ({ page }, testIn
   await menu.click();
   await expect(page.getByRole("dialog", { name: "Mục lục tài liệu" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+});
+
+test("uses compact typography and scrolls a long guide to its final navigation", async ({ page }) => {
+  await page.goto("/docs/circle/gateway/unified-balance");
+
+  const scroller = page.getByTestId("docs-scroll-container");
+  const metrics = await scroller.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+    overflowY: getComputedStyle(element).overflowY,
+  }));
+  expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+  expect(["auto", "scroll"]).toContain(metrics.overflowY);
+
+  const bodySize = await page.locator("article p").first().evaluate((element) => getComputedStyle(element).fontSize);
+  const titleSize = await page.getByRole("heading", { level: 1 }).evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize));
+  expect(bodySize).toBe("15px");
+  expect(titleSize).toBeGreaterThanOrEqual(28);
+  expect(titleSize).toBeLessThanOrEqual(36);
+
+  await scroller.evaluate((element) => element.scrollTo({ top: element.scrollHeight }));
+  await expect(page.getByRole("navigation", { name: "Pagination" })).toBeInViewport();
+});
+
+test("reflows Docs at a 200 percent equivalent viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 720, height: 900 });
+  await page.goto("/docs/circle/gateway/unified-balance");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  await expect(page.getByTestId("docs-scroll-container")).toBeVisible();
 });

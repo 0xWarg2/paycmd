@@ -22,6 +22,8 @@ import { isValidElement, type ReactNode, useEffect, useMemo, useState } from "re
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import styles from "./public-docs-portal.module.css";
+
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { Button } from "@/components/ui/button";
@@ -150,15 +152,15 @@ function MarkdownContent({ content, locale }: { content: string; locale: Locale 
   const components: Components = {
     h2: ({ children }) => {
       const title = reactNodeText(children);
-      return <h2 id={publicDocsHeadingId(title)} className="scroll-mt-28 pt-8 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">{children}</h2>;
+      return <h2 id={publicDocsHeadingId(title)} className="scroll-mt-6 pt-8 text-[22px] font-semibold tracking-tight text-foreground sm:text-[26px]">{children}</h2>;
     },
     h3: ({ children }) => {
       const title = reactNodeText(children);
-      return <h3 id={publicDocsHeadingId(title)} className="scroll-mt-28 pt-5 text-xl font-semibold text-foreground">{children}</h3>;
+      return <h3 id={publicDocsHeadingId(title)} className="scroll-mt-6 pt-5 text-lg font-semibold text-foreground sm:text-xl">{children}</h3>;
     },
-    p: ({ children }) => <p className="text-[15px] leading-7 text-muted-foreground sm:text-base">{children}</p>,
-    ul: ({ children }) => <ul className="my-4 list-disc space-y-2 pl-6 text-[15px] leading-7 text-muted-foreground sm:text-base">{children}</ul>,
-    ol: ({ children }) => <ol className="my-4 list-decimal space-y-2 pl-6 text-[15px] leading-7 text-muted-foreground sm:text-base">{children}</ol>,
+    p: ({ children }) => <p className="text-[15px] leading-[1.75] text-muted-foreground">{children}</p>,
+    ul: ({ children }) => <ul className="my-4 list-disc space-y-2 pl-6 text-[15px] leading-[1.75] text-muted-foreground">{children}</ul>,
+    ol: ({ children }) => <ol className="my-4 list-decimal space-y-2 pl-6 text-[15px] leading-[1.75] text-muted-foreground">{children}</ol>,
     strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
     blockquote: ({ children }) => <blockquote className="my-5 rounded-r-xl border-l-4 border-primary bg-primary/8 px-5 py-3 text-foreground">{children}</blockquote>,
     a: ({ href = "", children }) => {
@@ -368,8 +370,8 @@ export function PublicDocsPortal({ page, navigation, searchIndex, adjacent, gate
 
   const breadcrumb = page.slug.split("/").filter(Boolean);
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <header className="sticky top-0 z-40 border-b border-border/80 bg-background/90 backdrop-blur-xl">
+    <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
+      <header className="relative z-40 shrink-0 border-b border-border/80 bg-background/90 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-[1600px] items-center gap-3 px-4 sm:px-6">
           <Dialog open={drawerOpen} onOpenChange={setDrawerOpen}>
             <DialogTrigger asChild>
@@ -398,12 +400,12 @@ export function PublicDocsPortal({ page, navigation, searchIndex, adjacent, gate
         <div className="border-t border-border/60 px-4 py-2 md:hidden"><DocsSearch entries={searchIndex} locale={locale} /></div>
       </header>
 
-      <div className="mx-auto grid max-w-[1600px] lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)_220px]">
-        <aside aria-label={labels.menuTitle} className="sticky top-16 hidden h-[calc(100vh-4rem)] overflow-y-auto border-r border-border/70 px-5 py-8 lg:block">
+      <div className="mx-auto grid min-h-0 w-full max-w-[1600px] flex-1 overflow-hidden lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)_220px]">
+        <aside aria-label={labels.menuTitle} className={cn(styles.scrollbar, "hidden min-h-0 overflow-y-auto border-r border-border/70 px-5 py-8 lg:block")}>
           <DocsNavigation sections={navigation[locale]} activeSlug={page.slug} locale={locale} />
         </aside>
 
-        <main className="min-w-0 px-5 py-8 sm:px-8 lg:px-10 xl:px-12">
+        <main data-testid="docs-scroll-container" className={cn(styles.scrollbar, styles.mainScrollbar, "min-h-0 min-w-0 overflow-y-auto px-5 py-8 sm:px-8 lg:px-10 xl:px-12")}>
           <div className="mx-auto max-w-3xl">
             <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
               <Link href="/docs" className="hover:text-foreground">{labels.docs}</Link>
@@ -413,8 +415,8 @@ export function PublicDocsPortal({ page, navigation, searchIndex, adjacent, gate
             </nav>
             <div className="mt-6 border-b border-border pb-8">
               <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground"><span className="rounded-full border border-border bg-muted/60 px-2.5 py-1">v{version}</span><span>{labels.updated} {localized.lastUpdated}</span></div>
-              <h1 className="mt-4 text-3xl font-bold tracking-tight text-foreground sm:text-4xl lg:text-5xl">{localized.title}</h1>
-              <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">{localized.description}</p>
+              <h1 className="mt-4 text-[28px] font-bold tracking-tight text-foreground sm:text-[32px] lg:text-4xl">{localized.title}</h1>
+              <p className="mt-4 max-w-2xl text-[15px] leading-7 text-muted-foreground">{localized.description}</p>
             </div>
 
             {page.slug === "circle/gateway/overview" ? <GatewayFlow locale={locale} /> : null}
@@ -429,7 +431,7 @@ export function PublicDocsPortal({ page, navigation, searchIndex, adjacent, gate
           </div>
         </main>
 
-        <aside aria-label={labels.onPage} className="sticky top-16 hidden h-[calc(100vh-4rem)] overflow-y-auto border-l border-border/70 px-5 py-8 xl:block">
+        <aside aria-label={labels.onPage} className={cn(styles.scrollbar, "hidden min-h-0 overflow-y-auto border-l border-border/70 px-5 py-8 xl:block")}>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">{labels.onPage}</p>
           <nav className="mt-4 space-y-2" aria-label={labels.onPage}>
             {localized.headings.map((heading) => <a key={heading.id} href={`#${heading.id}`} className={cn("block text-sm leading-5 text-muted-foreground hover:text-foreground", heading.level === 3 && "pl-3")}>{heading.title}</a>)}
