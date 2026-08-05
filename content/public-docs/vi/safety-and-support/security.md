@@ -17,13 +17,13 @@ Các luồng wallet, Gateway, CCTP, Arc swap và proof của Payna hướng tớ
 
 ## Giữ mọi secret ngoài chat
 
-Không nhập seed phrase, mnemonic, recovery phrase, private key, password, API key, session token, RPC credential hay signing secret vào Payna, AskPayna, support hoặc form mở từ chat. Payna ký qua MetaMask và không cần wallet secret. AskPayna chặn secret-bearing query, redacts public identifier khi search, nhưng điều đó không cho phép dán dữ liệu nhạy cảm.
+Không nhập seed phrase, mnemonic, recovery phrase, private key, password, API key, session token, RPC credential hay signing secret vào Payna, AskPayna, support hoặc form mở từ chat. MetaMask xử lý prompt authentication, `/fund`, CCTP và swap của riêng nó; Circle SCA/Gateway operation dùng Circle wallet và Gateway signing role đã nêu, không dùng MetaMask. Payna không cần wallet secret. AskPayna chặn secret-bearing query, redacts public identifier khi search, nhưng điều đó không cho phép dán dữ liệu nhạy cảm.
 
 Public address, transaction hash, transfer ID, chain, thời điểm và lỗi đã loại thông tin nhạy cảm thường đủ để điều tra. Nếu một prompt đòi secret để khôi phục balance, hãy đóng nó và dùng quy trình recovery chính thức của ví.
 
 ## Kiểm tra chính wallet prompt
 
-Trước khi chấp nhận MetaMask, kiểm tra account, chain, contract/spender, amount và gas. Payna confirmation khác wallet signature; MetaMask vẫn có thể yêu cầu approval, burn, mint, bridge hay swap. Từ chối signature/network addition bất ngờ và so sánh name, chain ID, RPC đề nghị với guide.
+Trước khi chấp nhận MetaMask authentication, `/fund`, CCTP hoặc swap prompt, kiểm tra account, chain, contract/spender, amount và gas. Payna confirmation khác wallet signature. Circle SCA/Gateway operation thay vào đó dùng Circle wallet và Gateway signer role đã nêu. Từ chối signature/network addition bất ngờ và so sánh name, chain ID, RPC đề nghị với guide.
 
 Circle SCA, Gateway depositor, Gateway signer được ủy quyền và MetaMask account có vai trò khác nhau. Đặc biệt, USDC trong SCA không phải Gateway balance sẵn sàng và Gateway signer không tự động là chủ balance. Xem [vai trò ví](/docs/getting-started/account-and-wallets) và [Gateway overview](/docs/circle/gateway/overview) trước khi chuyển tiền.
 
@@ -35,7 +35,7 @@ Hủy khi bất kỳ trường nào khác yêu cầu của bạn. Mở preview m
 
 ## Kiểm tra address, chain và allowance
 
-Dùng full address đã sao chép và đối chiếu ký tự đầu/cuối với nguồn tin cậy; không chỉ dựa vào label. Xác nhận source và destination là đúng testnet, đồng thời chỉ mở hash trên explorer của chain đó. Hash không thấy trên explorer sai không nói lên điều gì.
+Xác minh toàn bộ copied address từng ký tự với nguồn tin cậy hoặc address-book entry đã xác minh; không dùng kiểm tra chỉ prefix/suffix vì không ngăn address poisoning. Xác nhận source và destination là đúng testnet, đồng thời chỉ mở hash trên explorer của chain đó. Hash không thấy trên explorer sai không nói lên điều gì.
 
 ERC-20 approval cấp quyền spender và là action riêng tốn gas. Đọc scope/network trong MetaMask. Không plain-transfer USDC đến Gateway contract: đó không phải deposit và có thể mất; dùng `/deposit`. Cẩn thận external link; không import wallet, approve contract hay cài extension chỉ vì chat yêu cầu.
 

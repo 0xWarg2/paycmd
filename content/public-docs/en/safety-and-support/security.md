@@ -17,13 +17,13 @@ Payna's wallet, Gateway, CCTP, Arc swap, and proof flows target testnet. Testnet
 
 ## Keep every secret out of chat
 
-Never enter a seed phrase, mnemonic, recovery phrase, private key, password, API key, session token, RPC credential, or signing secret into Payna, AskPayna, support, or a chat-linked form. Payna signs through MetaMask and never needs wallet secrets. AskPayna blocks secret-bearing queries and redacts public identifiers for search, but redaction is not permission to paste sensitive data.
+Never enter a seed phrase, mnemonic, recovery phrase, private key, password, API key, session token, RPC credential, or signing secret into Payna, AskPayna, support, or a chat-linked form. MetaMask handles its own authentication, `/fund`, CCTP, and swap prompts; Circle SCA/Gateway operations use their named Circle wallet and Gateway signing roles, not MetaMask. Payna never needs wallet secrets. AskPayna blocks secret-bearing queries and redacts public identifiers for search, but redaction is not permission to paste sensitive data.
 
 A public address, transaction hash, transfer ID, chain, time, and sanitized error are normally enough to investigate an incident. If a prompt asks for a secret to restore a balance, close it and use the official wallet recovery process instead.
 
 ## Verify the wallet prompt itself
 
-Before approving MetaMask, check account, chain, contract/spender, amount, and gas. Payna confirmation is separate from a wallet signature and MetaMask may still request approval, burn, mint, bridge, or swap. Reject unexpected signatures or network additions; compare proposed network name, chain ID, and RPC with the guide.
+Before approving a MetaMask authentication, `/fund`, CCTP, or swap prompt, check account, chain, contract/spender, amount, and gas. Payna confirmation is separate from a wallet signature. Circle SCA/Gateway operations instead use their named Circle wallet and Gateway signer roles. Reject unexpected signatures or network additions; compare proposed network name, chain ID, and RPC with the guide.
 
 The Circle SCA, Gateway depositor, delegated Gateway signer, and MetaMask account have different roles. In particular, SCA USDC is not ready Gateway balance, and a Gateway signer is not automatically the balance owner. See [wallet roles](/docs/getting-started/account-and-wallets) and the [Gateway overview](/docs/circle/gateway/overview) before moving funds.
 
@@ -35,7 +35,7 @@ Cancel when any field differs from your request. Re-open a fresh preview after c
 
 ## Check addresses, chains, and allowances
 
-Use a copied full address and compare its first and last characters with a trusted source; never rely on a label alone. Confirm the source and destination are the intended testnets and open a hash only in that chain's explorer. A hash missing from the wrong explorer says nothing about the transaction.
+Verify the complete copied address character-for-character against a trusted source or a previously verified address-book entry; never use prefix/suffix-only checks because they do not prevent address poisoning. Confirm the source and destination are the intended testnets and open a hash only in that chain's explorer. A hash missing from the wrong explorer says nothing about the transaction.
 
 An ERC-20 approval authorizes a spender and is a separate gas-using action. Read its scope/network in MetaMask. Never plain-transfer USDC to a Gateway contract: it is not a deposit and may be lost; use `/deposit`. Be cautious with external links and never import a wallet, approve a contract, or install an extension only because chat asks.
 
