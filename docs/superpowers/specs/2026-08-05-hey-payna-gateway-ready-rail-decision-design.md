@@ -12,7 +12,7 @@ The audience is the ARC HOUSE Việt Nam hackathon jury. Visible slide copy rema
 
 ## Narrative change
 
-Insert two main-story slides after the current Circle Gateway slide and before the live demo. The deck grows from 16 to 18 slides. The live-demo slide and every later slide move forward by two positions; their content remains otherwise unchanged unless a page number or transition sentence must be updated.
+Insert two main-story slides after the current Circle Gateway slide and before the live demo. The deck grows from 16 to 18 slides. The live-demo slide and every later slide move forward by two positions; the thank-you slide is then moved to the final position at slide 18.
 
 The revised sequence is:
 
@@ -20,6 +20,9 @@ The revised sequence is:
 - Slide 7: choose CCTP Bridge or Circle Gateway according to where USDC is held.
 - Slide 8: HEY PAYNA turns Gateway-ready liquidity into a payment rail using scoped or unified intent execution.
 - Slide 9: live demo — pay Minh on Arc from Base.
+- Slide 14: main-story product conclusion.
+- Slides 15–17: appendix and demo fallback.
+- Slide 18: final thank-you and X contact.
 
 The existing appendix comparison remains available for Q&A, but its notes should point back to the new main-story explanation instead of repeating it verbatim.
 
@@ -146,6 +149,7 @@ Primary sources:
 
 - Final deck has exactly 18 slides.
 - The two new slides appear immediately before the live demo.
+- The thank-you/X contact slide is the final slide, numbered 18.
 - A jury member can answer where USDC must be located for Bridge, SCA deposit, and Gateway execution after reading slide 7.
 - Slide 8 visibly distinguishes one scoped BurnIntent from a multi-source BurnIntentSet capped at 16 intents.
 - The dApp support list matches the current local implementation.

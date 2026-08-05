@@ -4,7 +4,7 @@
 
 **Goal:** Add two Vietnamese main-story slides that explain when HEY PAYNA uses CCTP Bridge versus Circle Gateway and how Gateway-ready execution selects one BurnIntent or a multi-source BurnIntentSet.
 
-**Architecture:** Import the current 16-slide ARC HOUSE PPTX as the template source, insert two editable Artifact Tool slides immediately after current slide 6, and renumber the downstream deck to 18 slides. Preserve every existing visual, logo, note, and demo asset; update only the new slides, page numbers, demo transition, standalone notes, README, and regenerated exports.
+**Architecture:** Import the current 16-slide ARC HOUSE PPTX as the template source, insert two editable Artifact Tool slides immediately after current slide 6, move the thank-you slide to the final position, and renumber the deck to 18 slides. Preserve every existing visual, logo, note, and demo asset; update only the new slides, ordering, page numbers, demo transition, standalone notes, README, and regenerated exports.
 
 **Tech Stack:** JavaScript ES modules, `@oai/artifact-tool`, Open XML PPTX import/export through Artifact Tool, bundled presentation/PDF QA scripts, LibreOffice PDF export, Poppler rendering.
 
@@ -12,6 +12,7 @@
 
 - Final deck has exactly 18 slides.
 - New slides become slides 7 and 8; live demo becomes slide 9.
+- The original thank-you/X contact slide becomes final slide 18; appendix slides become 15–17.
 - Visible copy is Vietnamese with precise English protocol terms retained.
 - Preserve the ARC HOUSE × HEY PAYNA graphite, emerald/cyan, and restrained amber system.
 - Keep official Circle and Arc logos at the top-right of all 18 slides.
@@ -27,7 +28,7 @@
 
 ## File map
 
-- Create `tmp/hey-payna-gateway-ready/add-rail-slides.mjs`: import current deck, insert slides, renumber, update notes, and export PPTX/layout inspection.
+- Create `tmp/hey-payna-gateway-ready/add-rail-slides.mjs`: import current deck, insert slides, move thank-you last, renumber, update notes, and export PPTX/layout inspection.
 - Create `tmp/hey-payna-gateway-ready/verify-deck.mjs`: structural assertions for slide count, titles, notes, sources, logo coverage, and updated page numbers.
 - Create `tmp/hey-payna-gateway-ready/template-frame-map.json`: template lineage for 18 output slides.
 - Create `tmp/hey-payna-gateway-ready/source-notes.txt`: official Circle sources and local implementation evidence.
@@ -89,7 +90,7 @@ PATH=/Users/xuanhaj/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin
 
 - [ ] **Step 4: Create the 18-slide frame map**
 
-Map output slides 1–6 to source slides 1–6, output slides 7–8 to source slide 6 with declared `replace` regions, and output slides 9–18 to source slides 7–16. Declare Circle/Arc logo additions on new slides and page-number text/move changes on downstream numbered slides.
+Map output slides 1–6 to source slides 1–6, output slides 7–8 to source slide 6 with declared `replace` regions, output slides 9–14 to source slides 7–12, output slides 15–17 to source slides 14–16, and output slide 18 to source slide 13. Declare Circle/Arc logo additions on new slides, the intentional slide reorder, and page-number text/move changes on downstream numbered slides.
 
 - [ ] **Step 5: Checkpoint without a binary commit**
 
@@ -116,6 +117,8 @@ assert.equal(slideText(8).includes("Gateway-ready liquidity"), true);
 assert.equal(slideText(8).includes("BurnIntentSet"), true);
 assert.equal(slideText(8).includes("≤ 16"), true);
 assert.equal(slideText(9).includes("Trả USDC cho Minh"), true);
+assert.equal(slideText(18).includes("Cảm ơn mọi người"), true);
+assert.equal(slideText(18).includes("@0xWarg__"), true);
 assert.equal(slidesWithName("infra-circle-logo"), 18);
 assert.equal(slidesWithName("infra-arc-logo"), 18);
 assert.equal(slidesWithVisibleNotes(), 18);
@@ -292,7 +295,7 @@ Nếu source được chỉ định đủ capacity, Payna giữ scoped mode và 
 
 - [ ] **Step 7: Renumber downstream slides and update live-demo notes**
 
-For every slide, derive its 1-based final index. If it has a shape whose name matches `/^number-\d+$/`, set the shape text to a two-digit index and rename it `number-${index}`. The live demo must be slide 9 and its notes must begin the demo by pointing out:
+Move the original thank-you slide, now temporarily at position 15 after insertion, to final position 18. For every slide, derive its 1-based final index. If it has a shape whose name matches `/^number-\d+$/`, set the shape text to a two-digit index and rename it `number-${index}`. The live demo must be slide 9 and its notes must begin the demo by pointing out:
 
 ```text
 Trước khi xác nhận, chỉ rõ Source mode trong preview: Scoped dùng một BurnIntent; Unified Gateway hiện bảng allocation và BurnIntentSet.
@@ -333,7 +336,7 @@ Add the exact speaker-note text from Task 3. Renumber the previous slide 7–16 
 
 - [ ] **Step 2: Update every live-demo reference**
 
-Replace references to live demo slide 7 with slide 9. Update the main-story range to slides 2–13, the closing to slide 14, thank-you to slide 15, and appendix to slides 16–18.
+Replace references to live demo slide 7 with slide 9. Update the main-story range to slides 2–14, appendix to slides 15–17, and thank-you/X contact to slide 18. Add a presenter note on slide 14: jump to slide 18 for the normal closing; open slides 15–17 only for Q&A or demo fallback.
 
 - [ ] **Step 3: Update README file descriptions**
 
@@ -343,8 +346,8 @@ Document:
 - 18-slide Vietnamese ARC HOUSE deck.
 - Slides 7–8 explain Bridge vs Gateway and scoped vs unified BurnIntent execution.
 - Live demo is slide 9.
-- Slide 15 contains X @0xWarg__.
-- Slides 16–18 are Q&A/demo fallback.
+- Slides 15–17 are Q&A/demo fallback.
+- Slide 18 is the final thank-you and contains X @0xWarg__.
 - Hey-Payna-Hackathon-Demo-VI-pre-gateway-ready.pptx is the 16-slide backup.
 ```
 
@@ -390,7 +393,7 @@ Use bundled LibreOffice to export the PPTX to a temporary directory, then copy t
 
 - [ ] **Step 5: Render and inspect all PDF pages**
 
-Use `pdftoppm -png -r 150` and build a PDF contact sheet. Inspect all pages and view slides 7, 8, 9, and 15 individually at original resolution.
+Use `pdftoppm -png -r 150` and build a PDF contact sheet. Inspect all pages and view slides 7, 8, 9, and 18 individually at original resolution.
 
 - [ ] **Step 6: Run final structural audit**
 
@@ -405,7 +408,7 @@ Arc logo slides = 18
 slide 7 contains Bridge/Gateway decision copy
 slide 8 contains BurnIntentSet and ≤ 16
 slide 9 contains the live-demo command
-slide 15 contains @0xWarg__
+slide 18 contains @0xWarg__ and the thank-you copy
 slide PNGs = 18
 PDF pages = 18
 backup exists
