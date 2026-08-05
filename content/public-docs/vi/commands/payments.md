@@ -55,7 +55,7 @@ Contacts resolve identity; `/pay` và payroll chuyển Gateway USDC; request t�
 - **Syntax và variants:** `/payroll create <name> <amount> [from <source>]` lưu; `/payroll run <name> <amount> [from <source>]` tạo và execute. Source mặc định Arc; amount tính mỗi contact.
 - **Ví dụ:** `/payroll run august 25 from base`; natural language: “Trả active contacts 25 USDC từ Base.”
 - **Điều kiện:** Active contacts có route đã verify và source-scoped Gateway liquidity đủ total cộng fees.
-- **Preview:** Payna hiện active-recipient count, per-item amount, source và total—không có name, address, destination hay snapshot. Load lỗi hoặc zero recipient khóa confirm.
+- **Preview:** Payna chỉ hiện active-recipient count và aggregate total được tính—không có name, address, destination hay snapshot. Load lỗi hoặc zero recipient khóa confirm.
 - **Ranh giới confirm:** Confirm authorize batch từ active contacts fetch sau đó; count/total không phải approval list và có thể đổi. `run` dùng Gateway-signer attempt tuần tự—không phải MetaMask hay atomic transaction.
 - **Kết quả và dữ liệu lưu:** `payroll_batches` lưu `draft/running/success/failed/partial_failed`; items lưu recipient, amount, status và hash/error. Notification tổng kết.
 - **Lỗi và cách sửa:** **“No active contacts found for payroll”**: add/activate recipient. **“Payroll batch not found”**: mở đúng batch thuộc user. Với **`partial_failed`**, reconcile item hash và chỉ retry recipient chưa nhận—không chạy lại toàn batch mù quáng.
