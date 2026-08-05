@@ -19,7 +19,8 @@
     "contract:deploy:swap:arc": "hardhat run scripts/deploy-payna-swap-stack.cjs --network arcTestnet",
     "chain:check": "node scripts/check-bridge-chains.cjs",
     "gateway:webhook:configure": "node scripts/configure-circle-gateway-webhook.mjs",
-    "gateway:webhook:update": "node scripts/configure-circle-gateway-webhook.mjs --update-only"
+    "gateway:webhook:update": "node scripts/configure-circle-gateway-webhook.mjs --update-only",
+    "wallet:derive-sca": "node --env-file=.env.local scripts/derive-current-user-sca.ts"
   },
   "dependencies": {
     "@circle-fin/adapter-viem-v2": "^1.1.1",

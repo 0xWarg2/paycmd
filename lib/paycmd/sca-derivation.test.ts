@@ -3,12 +3,15 @@ import test from "node:test";
 
 import {
   buildScaDerivationPlan,
+  executeScaDerivationPlan,
+  parseScaDerivationArgs,
   validateDerivedScaWallet,
   type CircleScaWalletIdentity,
 } from "../circle/sca-derivation.ts";
 
 const SOURCE_ADDRESS = "0x1111111111111111111111111111111111111111";
 const OTHER_ADDRESS = "0x2222222222222222222222222222222222222222";
+const USER_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 
 const source: CircleScaWalletIdentity = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -56,6 +59,18 @@ test("skips matching SCA targets and rejects a conflicting target identity", () 
   );
 });
 
+test("ignores the expected EOA record when planning an SCA on the same blockchain", () => {
+  const plan = buildScaDerivationPlan(source, [
+    source,
+    {
+      ...arbSca,
+      accountType: "EOA",
+    },
+  ]);
+
+  assert.equal(plan[0]?.status, "missing");
+});
+
 test("rejects a derived SCA response whose identity differs from the source", () => {
   assert.throws(
     () => validateDerivedScaWallet(source, "OP-SEPOLIA", { ...opSca, address: OTHER_ADDRESS }),
@@ -81,4 +96,78 @@ test("rejects a derived SCA response whose identity differs from the source", ()
 
 test("accepts a derived SCA with the same identity on the requested blockchain", () => {
   assert.deepEqual(validateDerivedScaWallet(source, "OP-SEPOLIA", opSca), opSca);
+});
+
+test("parses a required user UUID and keeps preview as the default mode", () => {
+  assert.deepEqual(parseScaDerivationArgs(["--user-id", USER_ID]), {
+    userId: USER_ID,
+    apply: false,
+  });
+  assert.deepEqual(parseScaDerivationArgs(["--user-id", USER_ID, "--apply"]), {
+    userId: USER_ID,
+    apply: true,
+  });
+  assert.throws(() => parseScaDerivationArgs(["--apply"]), /--user-id/);
+  assert.throws(() => parseScaDerivationArgs(["--user-id", "not-a-uuid"]), /UUID/);
+  assert.throws(() => parseScaDerivationArgs(["--user-id", USER_ID, "--all"]), /Unknown argument/);
+});
+
+test("preview reports missing targets without calling the Circle derive dependency", async () => {
+  let calls = 0;
+  const preview = await executeScaDerivationPlan({
+    source,
+    wallets: [source],
+    apply: false,
+    derive: async () => {
+      calls += 1;
+      return opSca;
+    },
+  });
+
+  assert.equal(calls, 0);
+  assert.deepEqual(preview, [
+    { blockchain: "ARB-SEPOLIA", status: "missing" },
+    { blockchain: "OP-SEPOLIA", status: "missing" },
+    { blockchain: "MATIC-AMOY", status: "missing" },
+    { blockchain: "UNI-SEPOLIA", status: "missing" },
+  ]);
+});
+
+test("apply stops on the first Circle failure and reports earlier derived targets", async () => {
+  const calls: string[] = [];
+
+  await assert.rejects(
+    () =>
+      executeScaDerivationPlan({
+        source,
+        wallets: [source],
+        apply: true,
+        derive: async (_sourceWalletId, blockchain) => {
+          calls.push(blockchain);
+          if (blockchain === "OP-SEPOLIA") {
+            throw new Error("Circle unavailable");
+          }
+          return {
+            ...source,
+            id: `derived-${blockchain}`,
+            blockchain,
+          };
+        },
+      }),
+    (error: unknown) => {
+      assert.equal(error instanceof Error, true);
+      const derivationError = error as Error & {
+        blockchain?: string;
+        completed?: unknown[];
+      };
+      assert.match(derivationError.message, /OP-SEPOLIA/);
+      assert.equal(derivationError.blockchain, "OP-SEPOLIA");
+      assert.deepEqual(derivationError.completed, [
+        { blockchain: "ARB-SEPOLIA", status: "derived" },
+      ]);
+      return true;
+    },
+  );
+
+  assert.deepEqual(calls, ["ARB-SEPOLIA", "OP-SEPOLIA"]);
 });
