@@ -32,6 +32,16 @@ const requiredSlugs = [
   "safety-and-support/faq",
 ] as const;
 
+function publicDocsWordCount(value: string) {
+  return value.match(/[\p{L}\p{N}][\p{L}\p{N}’'-]*/gu)?.length ?? 0;
+}
+
+function selectedPublicDocsPages<T extends { slug: string }>(pages: T[]) {
+  const selectors = new Set((process.env.PUBLIC_DOCS_SLUGS ?? "").split(",").filter(Boolean));
+  if (selectors.size === 0) return pages;
+  return pages.filter((page) => selectors.has(page.slug || "overview"));
+}
+
 test("public docs expose a paired Vietnamese and English page for every slug", async () => {
   const catalogModule = await import("../public-docs/catalog.ts").catch(() => null);
 
@@ -44,6 +54,45 @@ test("public docs expose a paired Vietnamese and English page for every slug", a
   for (const page of pages) {
     assert.ok(page.locales.vi, `${page.slug || "overview"} is missing Vietnamese content`);
     assert.ok(page.locales.en, `${page.slug || "overview"} is missing English content`);
+  }
+});
+
+test("public docs provide substantial bilingual reading depth", async () => {
+  const { loadPublicDocsCatalog } = await import("../public-docs/catalog.ts");
+  const pages = await loadPublicDocsCatalog();
+
+  for (const page of selectedPublicDocsPages(pages)) {
+    for (const locale of ["vi", "en"] as const) {
+      const count = publicDocsWordCount(page.locales[locale].searchText);
+      const [minimum, maximum] = page.slug === ""
+        ? [350, 700]
+        : page.slug === "circle/gateway/support-matrix"
+          ? [450, 1000]
+          : page.slug.startsWith("circle/gateway/")
+            ? [900, 1700]
+            : [500, 1000];
+      assert.ok(count >= minimum, `${locale}:${page.slug || "overview"} has only ${count} words`);
+      assert.ok(count <= maximum, `${locale}:${page.slug || "overview"} has ${count} words and needs editing`);
+    }
+  }
+});
+
+test("paired locales keep equivalent document structure and finished copy", async () => {
+  const { loadPublicDocsCatalog } = await import("../public-docs/catalog.ts");
+  const pages = await loadPublicDocsCatalog();
+
+  const draftMarkers = new RegExp("\\b(?:T[B]D|T[O]DO|FIXM[E])\\b|lorem ipsum|coming soon", "i");
+  for (const page of selectedPublicDocsPages(pages)) {
+    assert.deepEqual(
+      page.locales.vi.headings.map((heading) => heading.level),
+      page.locales.en.headings.map((heading) => heading.level),
+      `${page.slug || "overview"} must keep the same VI/EN heading hierarchy`,
+    );
+    for (const locale of ["vi", "en"] as const) {
+      const localized = page.locales[locale];
+      assert.ok(localized.headings.length >= 5, `${locale}:${page.slug || "overview"} needs at least five sections`);
+      assert.doesNotMatch(localized.content, draftMarkers);
+    }
   }
 });
 

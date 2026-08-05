@@ -17,10 +17,22 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { isValidElement, type ReactNode, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  isValidElement,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+
+import styles from "./public-docs-portal.module.css";
 
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { ThemeSwitcher } from "@/components/theme-switcher";
@@ -150,15 +162,15 @@ function MarkdownContent({ content, locale }: { content: string; locale: Locale 
   const components: Components = {
     h2: ({ children }) => {
       const title = reactNodeText(children);
-      return <h2 id={publicDocsHeadingId(title)} className="scroll-mt-28 pt-8 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">{children}</h2>;
+      return <h2 id={publicDocsHeadingId(title)} className="scroll-mt-6 pt-8 text-[22px] font-semibold tracking-tight text-foreground sm:text-[26px]">{children}</h2>;
     },
     h3: ({ children }) => {
       const title = reactNodeText(children);
-      return <h3 id={publicDocsHeadingId(title)} className="scroll-mt-28 pt-5 text-xl font-semibold text-foreground">{children}</h3>;
+      return <h3 id={publicDocsHeadingId(title)} className="scroll-mt-6 pt-5 text-lg font-semibold text-foreground sm:text-xl">{children}</h3>;
     },
-    p: ({ children }) => <p className="text-[15px] leading-7 text-muted-foreground sm:text-base">{children}</p>,
-    ul: ({ children }) => <ul className="my-4 list-disc space-y-2 pl-6 text-[15px] leading-7 text-muted-foreground sm:text-base">{children}</ul>,
-    ol: ({ children }) => <ol className="my-4 list-decimal space-y-2 pl-6 text-[15px] leading-7 text-muted-foreground sm:text-base">{children}</ol>,
+    p: ({ children }) => <p className="text-[15px] leading-[1.75] text-muted-foreground">{children}</p>,
+    ul: ({ children }) => <ul className="my-4 list-disc space-y-2 pl-6 text-[15px] leading-[1.75] text-muted-foreground">{children}</ul>,
+    ol: ({ children }) => <ol className="my-4 list-decimal space-y-2 pl-6 text-[15px] leading-[1.75] text-muted-foreground">{children}</ol>,
     strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
     blockquote: ({ children }) => <blockquote className="my-5 rounded-r-xl border-l-4 border-primary bg-primary/8 px-5 py-3 text-foreground">{children}</blockquote>,
     a: ({ href = "", children }) => {
@@ -176,7 +188,7 @@ function MarkdownContent({ content, locale }: { content: string; locale: Locale 
       );
     },
     code: ({ children }) => <CommandCode locale={locale}>{children}</CommandCode>,
-    table: ({ children }) => <div className="my-6 overflow-x-auto rounded-xl border border-border"><table className="w-full min-w-[560px] text-left text-sm">{children}</table></div>,
+    table: ({ children }) => <div className="my-6 overflow-x-auto rounded-xl border border-border" tabIndex={0}><table className="w-full min-w-[560px] text-left text-sm">{children}</table></div>,
     th: ({ children }) => <th className="border-b border-border bg-muted/70 px-4 py-3 font-semibold text-foreground">{children}</th>,
     td: ({ children }) => <td className="border-b border-border/60 px-4 py-3 text-muted-foreground">{children}</td>,
   };
@@ -308,7 +320,7 @@ function GatewaySupportMatrix({ rows, locale }: { rows: GatewaySupport[]; locale
     <section aria-labelledby="gateway-support-title" className="my-8">
       <h2 id="gateway-support-title" className="text-2xl font-semibold text-foreground">{labels.supportTitle}</h2>
       <p className="mt-2 text-sm text-muted-foreground">{labels.supportIntro}</p>
-      <div className="mt-5 overflow-x-auto rounded-2xl border border-border">
+      <div className="mt-5 overflow-x-auto rounded-2xl border border-border" tabIndex={0}>
         <table className="w-full min-w-[620px] text-left text-sm">
           <thead className="bg-muted/70 text-foreground">
             <tr><th className="px-4 py-3">{labels.chain}</th><th className="px-4 py-3">{labels.domain}</th><th className="px-4 py-3">{labels.listed}</th><th className="px-4 py-3">{labels.sdk}</th></tr>
@@ -351,25 +363,200 @@ function OverviewCards({ sections, locale }: { sections: PublicDocsNavigationSec
   );
 }
 
+type DocsScrollMetrics = {
+  clientHeight: number;
+  maxScroll: number;
+  scrollTop: number;
+  scrollHeight: number;
+  thumbHeight: number;
+  thumbTop: number;
+  trackHeight: number;
+};
+
+const initialDocsScrollMetrics: DocsScrollMetrics = {
+  clientHeight: 0,
+  maxScroll: 0,
+  scrollTop: 0,
+  scrollHeight: 0,
+  thumbHeight: 48,
+  thumbTop: 0,
+  trackHeight: 0,
+};
+
+function DocsMainScroller({ children, locale }: { children: ReactNode; locale: Locale }) {
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ pointerId: number; startScrollTop: number; startY: number } | null>(null);
+  const [metrics, setMetrics] = useState(initialDocsScrollMetrics);
+
+  const measure = useCallback(() => {
+    const scroller = scrollerRef.current;
+    const track = trackRef.current;
+    if (!scroller || !track) return;
+
+    const clientHeight = scroller.clientHeight;
+    const scrollHeight = scroller.scrollHeight;
+    const maxScroll = Math.max(scrollHeight - clientHeight, 0);
+    const scrollTop = Math.min(Math.max(scroller.scrollTop, 0), maxScroll);
+    const trackHeight = track.clientHeight;
+    const proportionalThumb = scrollHeight > 0 ? trackHeight * (clientHeight / scrollHeight) : trackHeight;
+    const thumbHeight = Math.min(trackHeight, Math.max(48, proportionalThumb));
+    const thumbTravel = Math.max(trackHeight - thumbHeight, 0);
+    const thumbTop = maxScroll > 0 ? (scrollTop / maxScroll) * thumbTravel : 0;
+    const next = { clientHeight, maxScroll, scrollTop, scrollHeight, thumbHeight, thumbTop, trackHeight };
+
+    setMetrics((current) => Object.keys(next).every((key) => current[key as keyof DocsScrollMetrics] === next[key as keyof DocsScrollMetrics]) ? current : next);
+  }, []);
+
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    const track = trackRef.current;
+    if (!scroller || !track) return;
+
+    const resizeObserver = new ResizeObserver(measure);
+    resizeObserver.observe(scroller);
+    resizeObserver.observe(track);
+    if (scroller.firstElementChild) resizeObserver.observe(scroller.firstElementChild);
+    const mutationObserver = new MutationObserver(measure);
+    mutationObserver.observe(scroller, { childList: true, subtree: true, characterData: true });
+    scroller.addEventListener("scroll", measure, { passive: true });
+    const animationFrame = requestAnimationFrame(measure);
+
+    return () => {
+      cancelAnimationFrame(animationFrame);
+      scroller.removeEventListener("scroll", measure);
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+    };
+  }, [measure]);
+
+  const scrollFromTrackPoint = (clientY: number) => {
+    const scroller = scrollerRef.current;
+    const track = trackRef.current;
+    if (!scroller || !track || metrics.maxScroll <= 0) return;
+    const rect = track.getBoundingClientRect();
+    const thumbTravel = Math.max(metrics.trackHeight - metrics.thumbHeight, 1);
+    const thumbTop = Math.min(Math.max(clientY - rect.top - metrics.thumbHeight / 2, 0), thumbTravel);
+    scroller.scrollTop = (thumbTop / thumbTravel) * metrics.maxScroll;
+  };
+
+  const handleTrackPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) return;
+    event.preventDefault();
+    scrollFromTrackPoint(event.clientY);
+  };
+
+  const handleThumbPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = { pointerId: event.pointerId, startScrollTop: scroller.scrollTop, startY: event.clientY };
+  };
+
+  const handleThumbPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    const scroller = scrollerRef.current;
+    if (!drag || !scroller || drag.pointerId !== event.pointerId) return;
+    const thumbTravel = Math.max(metrics.trackHeight - metrics.thumbHeight, 1);
+    scroller.scrollTop = drag.startScrollTop + ((event.clientY - drag.startY) / thumbTravel) * metrics.maxScroll;
+  };
+
+  const finishThumbDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    dragRef.current = null;
+  };
+
+  const handleScrollbarKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    const pageStep = Math.max(scroller.clientHeight * 0.85, 48);
+    const commands: Partial<Record<string, () => void>> = {
+      ArrowDown: () => scroller.scrollBy({ top: 48 }),
+      ArrowUp: () => scroller.scrollBy({ top: -48 }),
+      PageDown: () => scroller.scrollBy({ top: pageStep }),
+      PageUp: () => scroller.scrollBy({ top: -pageStep }),
+      Home: () => scroller.scrollTo({ top: 0 }),
+      End: () => scroller.scrollTo({ top: scroller.scrollHeight }),
+    };
+    const command = commands[event.key];
+    if (!command) return;
+    event.preventDefault();
+    command();
+  };
+
+  const scrollLabel = locale === "vi" ? "Cuộn nội dung tài liệu" : "Scroll document content";
+  const percentage = metrics.maxScroll > 0 ? Math.round((metrics.scrollTop / metrics.maxScroll) * 100) : 0;
+
+  return (
+    <main aria-label={scrollLabel} className={styles.mainScrollFrame}>
+      <div
+        id="docs-scroll-container"
+        ref={scrollerRef}
+        data-testid="docs-scroll-container"
+        role="region"
+        tabIndex={0}
+        aria-label={scrollLabel}
+        className={cn(styles.mainScrollbar, "min-h-0 min-w-0 overflow-y-auto px-5 py-8 sm:px-8 lg:px-10 xl:px-12")}
+      >
+        {children}
+      </div>
+      <div
+        ref={trackRef}
+        data-testid="docs-scrollbar"
+        role="scrollbar"
+        tabIndex={0}
+        aria-label={scrollLabel}
+        aria-controls="docs-scroll-container"
+        aria-orientation="vertical"
+        aria-valuemin={0}
+        aria-valuemax={Math.round(metrics.maxScroll)}
+        aria-valuenow={Math.round(metrics.scrollTop)}
+        aria-valuetext={`${percentage}%`}
+        aria-disabled={metrics.maxScroll <= 0}
+        className={styles.customScrollbar}
+        onKeyDown={handleScrollbarKeyDown}
+        onPointerDown={handleTrackPointerDown}
+      >
+        <div
+          data-testid="docs-scrollbar-thumb"
+          className={styles.customScrollThumb}
+          style={{ height: `${metrics.thumbHeight}px`, transform: `translateY(${metrics.thumbTop}px)` }}
+          onPointerDown={handleThumbPointerDown}
+          onPointerMove={handleThumbPointerMove}
+          onPointerUp={finishThumbDrag}
+          onPointerCancel={finishThumbDrag}
+        />
+      </div>
+    </main>
+  );
+}
+
 export function PublicDocsPortal({ page, navigation, searchIndex, adjacent, gatewaySupport, version }: PublicDocsPortalProps) {
   const { locale } = useI18n();
   const labels = ui[locale];
   const localized = page.locales[locale];
   const router = useRouter();
-  const pathname = usePathname();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   useEffect(() => {
-    if (pathname !== "/docs") return;
-    const hash = window.location.hash.slice(1) as keyof typeof legacyDocsDestinations;
-    const destination = legacyDocsDestinations[hash];
-    if (destination && destination !== "/docs") router.replace(destination);
-  }, [pathname, router]);
+    const redirectLegacyHash = () => {
+      if (window.location.pathname.replace(/\/$/, "") !== "/docs") return;
+      const hash = window.location.hash.slice(1) as keyof typeof legacyDocsDestinations;
+      const destination = legacyDocsDestinations[hash];
+      if (destination && destination !== "/docs") router.replace(destination);
+    };
+    redirectLegacyHash();
+    window.addEventListener("hashchange", redirectLegacyHash);
+    return () => window.removeEventListener("hashchange", redirectLegacyHash);
+  }, [router]);
 
   const breadcrumb = page.slug.split("/").filter(Boolean);
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <header className="sticky top-0 z-40 border-b border-border/80 bg-background/90 backdrop-blur-xl">
+    <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
+      <header className="relative z-40 shrink-0 border-b border-border/80 bg-background/90 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-[1600px] items-center gap-3 px-4 sm:px-6">
           <Dialog open={drawerOpen} onOpenChange={setDrawerOpen}>
             <DialogTrigger asChild>
@@ -398,12 +585,12 @@ export function PublicDocsPortal({ page, navigation, searchIndex, adjacent, gate
         <div className="border-t border-border/60 px-4 py-2 md:hidden"><DocsSearch entries={searchIndex} locale={locale} /></div>
       </header>
 
-      <div className="mx-auto grid max-w-[1600px] lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)_220px]">
-        <aside aria-label={labels.menuTitle} className="sticky top-16 hidden h-[calc(100vh-4rem)] overflow-y-auto border-r border-border/70 px-5 py-8 lg:block">
+      <div className="mx-auto grid min-h-0 w-full max-w-[1600px] flex-1 overflow-hidden lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)_220px]">
+        <aside aria-label={labels.menuTitle} className={cn(styles.scrollbar, "hidden min-h-0 overflow-y-auto border-r border-border/70 px-5 py-8 lg:block")}>
           <DocsNavigation sections={navigation[locale]} activeSlug={page.slug} locale={locale} />
         </aside>
 
-        <main className="min-w-0 px-5 py-8 sm:px-8 lg:px-10 xl:px-12">
+        <DocsMainScroller locale={locale}>
           <div className="mx-auto max-w-3xl">
             <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
               <Link href="/docs" className="hover:text-foreground">{labels.docs}</Link>
@@ -413,8 +600,8 @@ export function PublicDocsPortal({ page, navigation, searchIndex, adjacent, gate
             </nav>
             <div className="mt-6 border-b border-border pb-8">
               <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground"><span className="rounded-full border border-border bg-muted/60 px-2.5 py-1">v{version}</span><span>{labels.updated} {localized.lastUpdated}</span></div>
-              <h1 className="mt-4 text-3xl font-bold tracking-tight text-foreground sm:text-4xl lg:text-5xl">{localized.title}</h1>
-              <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">{localized.description}</p>
+              <h1 className="mt-4 text-[28px] font-bold tracking-tight text-foreground sm:text-[32px] lg:text-4xl">{localized.title}</h1>
+              <p className="mt-4 max-w-2xl text-[15px] leading-7 text-muted-foreground">{localized.description}</p>
             </div>
 
             {page.slug === "circle/gateway/overview" ? <GatewayFlow locale={locale} /> : null}
@@ -427,9 +614,9 @@ export function PublicDocsPortal({ page, navigation, searchIndex, adjacent, gate
               {adjacent.next ? <Link href={`/docs/${adjacent.next.slug}`} className="rounded-xl border border-border p-4 text-right hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><span className="flex items-center justify-end gap-2 text-xs text-muted-foreground">{labels.next}<ArrowRight className="h-3.5 w-3.5" /></span><span className="mt-2 block font-semibold text-foreground">{adjacent.next.locales[locale].title}</span></Link> : null}
             </nav>
           </div>
-        </main>
+        </DocsMainScroller>
 
-        <aside aria-label={labels.onPage} className="sticky top-16 hidden h-[calc(100vh-4rem)] overflow-y-auto border-l border-border/70 px-5 py-8 xl:block">
+        <aside aria-label={labels.onPage} className={cn(styles.scrollbar, "hidden min-h-0 overflow-y-auto border-l border-border/70 px-5 py-8 xl:block")}>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">{labels.onPage}</p>
           <nav className="mt-4 space-y-2" aria-label={labels.onPage}>
             {localized.headings.map((heading) => <a key={heading.id} href={`#${heading.id}`} className={cn("block text-sm leading-5 text-muted-foreground hover:text-foreground", heading.level === 3 && "pl-3")}>{heading.title}</a>)}

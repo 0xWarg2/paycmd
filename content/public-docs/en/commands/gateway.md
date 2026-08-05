@@ -14,16 +14,55 @@ aiSummary:
 
 ## `/deposit`
 
-Syntax: `/deposit <amount> from <chain>`. Moves SCA USDC into Gateway and remains pending until finality. Do not repeat it while the prior deposit is pending.
+- **Purpose:** Move USDC from your Circle SCA into the Gateway depositor balance on one source domain.
+- **Syntax and variants:** `/deposit <amount> [USDC] from <source-chain>`; amount must be positive with up to six decimals.
+- **Example:** `/deposit 50 from base`; natural language: “Deposit 50 Base USDC into Gateway.”
+- **Prerequisites:** SCA, sufficient chain-scoped SCA USDC, native gas for delegate/approval/deposit calls, and supported Gateway/Wallet SDK chain.
+- **Preview:** Check amount, token, source, SCA/depositor, rail, and gas. This preview does not claim funds are ready.
+- **Confirmation boundary:** Payna confirmation authorizes Circle-wallet contract execution; MetaMask is not the signer. Delegate and approval can occur before the final deposit call.
+- **Success and persisted data:** A confirmed hash is stored as `pending_gateway_finality`, with block data when available. It becomes `success` only after verified webhook or recovery sync evidence.
+- **Named errors and fixes:** **“Insufficient USDC balance”**: `/fund` the SCA first. **“Insufficient gas or gas estimation failed”**: fund the named SCA's native gas. **`GATEWAY_FINALITY_PENDING`**: wait/sync the existing hash; never duplicate the deposit. See [deposit and finality](/docs/circle/gateway/deposit-and-finality).
 
 ## `/withdraw`
 
-Syntax: `/withdraw <amount> from <chain>`. Moves ready Gateway balance to the SCA on the same domain. The preview exposes fee and SCA destination.
+- **Purpose:** Burn ready Gateway USDC on a source domain and mint the same requested amount back to your SCA on that same domain.
+- **Syntax and variants:** `/withdraw <amount> [USDC] from <source-chain>`.
+- **Example:** `/withdraw 5 from base`; natural language: “Return 5 Base Gateway USDC to my SCA.”
+- **Prerequisites:** SCA, authorized Gateway signer, ready source-scoped balance for amount plus quoted fee, and destination mint gas in the wallet Payna names.
+- **Preview:** Review amount, source, same-domain SCA recipient, and withdraw rail. Current preview does not fetch the fee; execution quotes after confirmation and returns estimate/required balance.
+- **Confirmation boundary:** Payna confirmation starts signer initialization if needed, estimate, checks, burn-intent signature, attestation, and manual mint; MetaMask does not sign.
+- **Success and persisted data:** Result includes transfer ID, fee/source debit, mint hash, wallet, and a `withdraw` history row.
+- **Named errors and fixes:** **`INSUFFICIENT_GATEWAY_BALANCE`**: reduce amount or deposit and await finality. **`INSUFFICIENT_GAS`**: fund the specified SCA/signer. **“Gateway attestation missing”**: preserve transfer ID and reconcile before retrying. See [withdraw](/docs/circle/gateway/withdraw).
 
 ## `/transfer`
 
-Syntax: `/transfer <amount> from <source> to <destination> [manual]`. The source needs `amount + fee`. Auto forwarding is default; manual mode requires destination native gas.
+- **Purpose:** Move source-scoped Gateway USDC across supported domains.
+- **Syntax and variants:** `/transfer <amount> [USDC] from <source> to <destination> [manual]`; omission selects auto forwarding.
+- **Example:** `/transfer 10 from base to arc`; natural language: “Transfer 10 Gateway USDC from Base to Arc.”
+- **Prerequisites:** SCA/depositor and signer, distinct supported chains, source ready balance for `amount + fee`, or eligible SCA funds for auto-deposit.
+- **Preview:** Verify amount, route, current fee estimate or max-fee reserve, required source balance, forwarding state, and destination-gas owner. A failed quote disables confirm.
+- **Confirmation boundary:** Payna confirmation authorizes server-side auto-deposit/delegation, typed burn intent, attestation, and forwarder/manual mint. Manual destination uses SCA or signer gas, not MetaMask.
+- **Success and persisted data:** History stores `transfer`, route, amount, result hash, status, fee, transfer ID, and optional Arc proof.
+- **Named errors and fixes:** **`GATEWAY_FEE_ESTIMATE_UNAVAILABLE`**: retry the read before any mutation. **`INSUFFICIENT_GATEWAY_BALANCE`/`INSUFFICIENT_USDC`**: fund the selected source, not another domain. **`GATEWAY_FORWARDING_FAILED`**: keep transfer ID/hashes and reconcile instead of resending. See [Gateway transfer](/docs/circle/gateway/transfer).
 
-## `/gas` and `/gateway`
+## `/gas`
 
-`/gas <chain>` checks native gas for relevant wallets. `/gateway info` exposes depositor, signer, and configuration; `/gateway balance [chain]` reads only Gateway balance and does not add SCA funds.
+- **Purpose:** Read native gas for the Circle wallet relevant to Gateway execution on one chain.
+- **Syntax and variants:** `/gas check <chain>`; `check` and chain are both required by the parser.
+- **Example:** `/gas check arc`; natural language: “Check my Arc wallet gas.”
+- **Prerequisites:** Signed-in user, existing Circle SCA, supported chain, and current Wallet SDK coverage.
+- **Preview:** Immediate read; inspect wallet ID/address, blockchain, native symbol, raw/formatted balance, and `hasGas`.
+- **Confirmation boundary:** None; no transaction or signature occurs.
+- **Success and persisted data:** Returns a gas snapshot and does not write history.
+- **Named errors and fixes:** **“No Circle wallet found”**: run `/wallet create`. **“Invalid chain”**: use the support matrix. **“current Circle wallet SDK cannot check signer gas”**: choose a covered chain or inspect the named address with that chain's explorer.
+
+## `/gateway`
+
+- **Purpose:** Inspect Gateway configuration or only Gateway ledger balance, without adding SCA funds.
+- **Syntax and variants:** `/gateway info`, `/gateway balance`, or `/gateway balance <chain>`.
+- **Example:** `/gateway balance base`; natural language: “Show my Base Gateway balance.”
+- **Prerequisites:** Sign in; balance requires an SCA/depositor address. No gas is needed for reads.
+- **Preview:** Immediate read. `info` exposes public domains/contracts; `balance` exposes Gateway rows, partial/unavailable flags, and selected scope.
+- **Confirmation boundary:** None; these variants never move money.
+- **Success and persisted data:** Returns live configuration or fetched Gateway balance; no transaction-history row is created.
+- **Named errors and fixes:** **“No wallet address found”**: create the SCA. **“Unsupported chain”**: correct the scope. **Gateway unavailable/partial**: retry later and do not interpret missing data as zero. See [unified balance](/docs/circle/gateway/unified-balance).
