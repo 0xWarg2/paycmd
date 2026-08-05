@@ -37,9 +37,9 @@ Relayer authorization proves who may write, not that every statement is automati
 
 ## Verify on ArcScan
 
-Open the “Payna proof” link from the chat receipt or Activity record. Confirm that the explorer is Arc Testnet and that the proof hash succeeded at the registry address shown by Payna. Inspect the `ReceiptRecorded` log, then compare action type, amount in the token's atomic precision, source/destination chain IDs, participant addresses, and transaction hashes with the original receipt. For swap amounts, atomic precision follows the input token; other actions default to six-decimal USDC unless an explicit atomic amount was supplied.
+When present, open the “Payna proof” ArcScan transaction link from the chat receipt. Activity currently renders transaction hashes but not proof fields, and Payna does not display `proofContractAddress`. On ArcScan, confirm the proof transaction succeeded, identify its called contract, and inspect the `ReceiptRecorded` log. Compare action type, atomic amount, chain IDs, participant addresses, and source/destination hashes with the original receipt. Swap precision follows the input token; other actions default to six-decimal USDC unless an explicit atomic amount was supplied.
 
-Next, open the source and destination explorer links separately. A proof link, source hash, and mint hash answer different questions. See [Activity and notifications](/docs/features/activity-and-notifications) for reconciliation and [Arc Swap](/docs/arc/overview-and-swap) for swap-specific receipts.
+Next, open source and destination explorer links separately. Proof, source, and mint hashes answer different questions. Use [Activity and notifications](/docs/features/activity-and-notifications) to reconcile the underlying transaction, not to find proof fields; see [Arc Swap](/docs/arc/overview-and-swap) for swap receipts. If chat has no proof link, do not infer failure from Activity alone.
 
 ## Failure and retry boundaries
 

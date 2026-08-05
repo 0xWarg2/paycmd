@@ -51,11 +51,11 @@ Contacts resolve identity; `/pay` and payroll move Gateway USDC; a request creat
 
 ## `/payroll`
 
-- **Purpose:** Snapshot up to 25 active contacts into a batch, then optionally run one Gateway payment per item.
-- **Syntax and variants:** `/payroll create <batch-name> <amount> [from <source>]` saves a draft; `/payroll run <batch-name> <amount> [from <source>]` creates and executes it. Source defaults to Arc; amount is per contact.
-- **Example:** `/payroll run august 25 from base`; natural language: “Pay every active contact 25 USDC from Base in the August batch.”
-- **Prerequisites:** Active contacts with verified addresses/destinations and enough source-scoped Gateway liquidity plus fees for aggregate exposure.
-- **Preview:** Payna loads active recipient count and shows every recipient snapshot, per-item amount, source, destinations, total exposure, and confirmation total. Zero/failed loading disables confirmation.
-- **Confirmation boundary:** One Payna confirmation authorizes the snapshot and, for `run`, sequential Gateway-signer attempts—not MetaMask or an atomic transaction.
+- **Purpose:** Snapshot up to 25 active contacts and optionally run a Gateway payment per item.
+- **Syntax and variants:** `/payroll create <batch-name> <amount> [from <source>]` saves; `/payroll run <batch-name> <amount> [from <source>]` creates and executes. Source defaults to Arc; amount is per contact.
+- **Example:** `/payroll run august 25 from base`; natural language: “Pay active contacts 25 USDC from Base.”
+- **Prerequisites:** Active contacts with verified routes and source-scoped Gateway liquidity for total amount plus fees.
+- **Preview:** Payna shows active-recipient count, per-item amount, source, and calculated total—not names, addresses, destinations, or a frozen snapshot. Zero/failed loading disables confirmation.
+- **Confirmation boundary:** Confirmation authorizes a batch from active contacts fetched afterward; count/total is not an approval list and may change. `run` uses sequential Gateway-signer attempts—not MetaMask or an atomic transaction.
 - **Success and persisted data:** `payroll_batches` stores `draft/running/success/failed/partial_failed`; items store recipient, amount, status, hash/error, with explorer evidence in Activity. A notification summarizes successes.
 - **Named errors and fixes:** **“No active contacts found for payroll”**: add/activate recipients. **“Payroll batch not found”**: reopen the owned batch. For **`partial_failed`**, reconcile item hashes and retry only unpaid recipients—never rerun the whole batch blindly.

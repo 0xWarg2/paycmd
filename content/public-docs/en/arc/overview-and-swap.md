@@ -19,7 +19,7 @@ This flow spends tokens held by the selected MetaMask account. It does not spend
 
 ## Commands and supported routes
 
-Use `/swap <amount> <token-in> to <token-out>`, for example `/swap 1 USDC to EURC`. `EURC`, `EUROC`, and “Euro Coin” normalize to EURC; `cirBTC`, “Circle BTC,” and `BTC` normalize to cirBTC. The input and output must differ, the amount must be positive, and the command parser accepts no more than six fractional digits even though cirBTC balances use eight.
+Use `/swap <amount> <token-in> to <token-out>`, for example `/swap 1 USDC to EURC`. Each side accepts one token: `EURC` or `EUROC` selects EURC; `cirBTC` or `BTC` selects cirBTC. Spaced “Euro Coin” and “Circle BTC” do not parse as one asset. Input/output must differ, amount must be positive, and the parser accepts no more than six fractional digits even though cirBTC balances use eight.
 
 Pairs containing USDC take a direct two-token path: USDC ↔ EURC or USDC ↔ cirBTC. EURC ↔ cirBTC uses two pools and routes through USDC. The preview names every token in route order, so a two-hop route is visible before confirmation. A missing pair or empty reserves stops the quote; Payna does not silently substitute another asset or route.
 

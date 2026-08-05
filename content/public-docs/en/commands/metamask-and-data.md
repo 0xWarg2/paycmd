@@ -30,7 +30,7 @@ aiSummary:
 ## `/swap`
 
 - **Purpose:** Exchange USDC, EURC, or cirBTC held by MetaMask through Payna's adapter on Arc Testnet only.
-- **Syntax and variants:** `/swap <amount> <token-in> to <token-out>`; supported aliases normalize to USDC, EURC, or cirBTC, and assets must differ.
+- **Syntax and variants:** `/swap <amount> <token-in> to <token-out>`; use single-token symbols/aliases (`USDC`, `EURC`/`EUROC`, `cirBTC`/`BTC`). Spaced “Euro Coin” or “Circle BTC” does not parse; assets must differ.
 - **Example:** `/swap 1 USDC to EURC`; natural language: “Convert one USDC to EURC on Arc Testnet.”
 - **Prerequisites:** Connected MetaMask, configured adapter, Arc input balance, nonzero Arc native gas, live pair reserves, and allowance when needed.
 - **Preview:** Check input, estimated output, minimum output, fixed 1% slippage, direct or USDC-routed path, pool count, and Payna Swap rail. Confirmation is disabled on quote error.

@@ -13,15 +13,15 @@ aiSummary:
 
 ## Mục đích và lifecycle
 
-Payna onchain proof là application receipt tùy chọn trên **Arc Testnet**. Sau `bridge`, Gateway `transfer`, `pay` hoặc Arc `swap`, backend có thể yêu cầu relayer được cấp quyền gọi `recordReceipt`. User không ký proof; nó nằm sau chuyển tiền và Gateway, CCTP hay swap adapter không cần nó.
+Payna onchain proof là receipt tùy chọn trên **Arc Testnet**. Sau `bridge`, Gateway `transfer`, `pay` hoặc Arc `swap`, backend có thể yêu cầu authorized relayer gọi `recordReceipt`. User không ký; proof nằm sau chuyển tiền và Gateway, CCTP hay swap adapter không cần nó.
 
-Việc ghi proof phụ thuộc configuration. Nếu receipt bị tắt, registry address không có hoặc relayer credential không hợp lệ, Payna đánh dấu proof `skipped` hoặc `failed` nhưng giữ nguyên transaction record. Source action đã thành công vẫn thành công dù proof phía sau không tồn tại.
+Ghi proof phụ thuộc configuration. Nếu receipt bị tắt, registry address thiếu hoặc relayer credential không hợp lệ, Payna đánh dấu `skipped`/`failed` nhưng giữ transaction record. Thiếu proof không đổi source success.
 
 ## Payload của receipt event
 
 `ReceiptRecorded` emit command ID đã hash, action type dạng số (`1` bridge, `2` transfer, `3` pay, `4` swap ở V2), user address, recipient address, atomic amount, EVM chain ID nguồn và đích, transaction hash nguồn và đích, cùng metadata hash. Address hoặc hash thiếu hay không hợp lệ lúc ghi được thay bằng giá trị zero, không phải dữ liệu suy đoán.
 
-Command ID được hash từ identifier cụ thể hoặc field ổn định của action/route. Metadata hash commit vào canonical JSON gồm app/version Payna và chi tiết như history ID, transfer ID, mode, label hoặc swap route. Event giữ hash chứ không lưu metadata object.
+Command ID được hash từ identifier hoặc field ổn định của action/route. Metadata hash commit vào canonical JSON gồm app/version Payna và history ID, transfer ID, mode, label hoặc swap route. Event giữ hash, không lưu metadata object.
 
 ## Proof chứng minh điều gì
 
@@ -37,9 +37,9 @@ Quyền relayer chỉ chứng minh ai được ghi, không khiến mọi stateme
 
 ## Verify trên ArcScan
 
-Mở link “Payna proof” từ chat receipt hoặc Activity record. Kiểm tra explorer là Arc Testnet và proof hash thành công tại registry address Payna hiển thị. Mở log `ReceiptRecorded`, rồi so action type, amount theo atomic precision của token, source/destination chain ID, participant address và transaction hash với receipt gốc. Với swap, atomic precision theo input token; action khác mặc định dùng USDC 6 decimals trừ khi có explicit atomic amount.
+Khi có, mở link “Payna proof” tới ArcScan từ chat receipt. Activity chỉ render transaction hash, không có proof field; Payna không hiển thị `proofContractAddress`. Trên ArcScan, xác nhận proof tx thành công, nhận diện contract và mở log `ReceiptRecorded`. So action type, atomic amount, chain ID, participant address cùng source/destination hash với receipt gốc. Swap dùng precision của input token; action khác mặc định dùng USDC 6 decimals trừ khi có atomic amount riêng.
 
-Tiếp theo mở riêng source và destination explorer link. Proof link, source hash và mint hash trả lời các câu hỏi khác nhau. Xem [Activity và notifications](/docs/features/activity-and-notifications) để reconcile và [Arc Swap](/docs/arc/overview-and-swap) cho receipt riêng của swap.
+Mở riêng source và destination explorer link. Proof, source và mint hash trả lời câu hỏi khác nhau. Dùng [Activity và notifications](/docs/features/activity-and-notifications) để reconcile transaction gốc, không tìm proof field; xem [Arc Swap](/docs/arc/overview-and-swap) cho swap receipt. Nếu chat không có proof link, đừng suy ra failure từ Activity.
 
 ## Ranh giới failure và retry
 

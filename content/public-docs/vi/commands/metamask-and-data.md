@@ -30,7 +30,7 @@ aiSummary:
 ## `/swap`
 
 - **Mục đích:** Đổi USDC, EURC hoặc cirBTC trong MetaMask qua Payna adapter, chỉ trên Arc Testnet.
-- **Syntax và variants:** `/swap <amount> <token-in> to <token-out>`; alias được normalize về USDC, EURC hoặc cirBTC và hai asset phải khác.
+- **Syntax và variants:** `/swap <amount> <token-in> to <token-out>`; dùng symbol/alias một token (`USDC`, `EURC`/`EUROC`, `cirBTC`/`BTC`). “Euro Coin” hoặc “Circle BTC” có khoảng trắng không parse; hai asset phải khác.
 - **Ví dụ:** `/swap 1 USDC to EURC`; natural language: “Đổi một USDC sang EURC trên Arc Testnet.”
 - **Điều kiện:** MetaMask connect, adapter đã configure, đủ Arc input balance, native gas khác 0, pair reserves hoạt động và allowance nếu cần.
 - **Preview:** Kiểm tra input, estimated output, minimum output, slippage cố định 1%, path trực tiếp hoặc qua USDC, pool count và Payna Swap rail. Quote lỗi sẽ khóa confirm.

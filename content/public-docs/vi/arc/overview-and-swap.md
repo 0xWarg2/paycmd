@@ -13,13 +13,13 @@ aiSummary:
 
 ## Tài sản hỗ trợ
 
-Payna Swap hiện là flow MetaMask **chỉ dành cho Arc Testnet**. Flow hỗ trợ USDC và EURC với 6 decimals, cùng cirBTC (Circle BTC) với 8 decimals. Precision này quyết định cách parse amount và hiển thị balance; nó không có nghĩa các token ngang giá. Chỉ dùng testnet asset và kiểm tra MetaMask hiển thị Arc Testnet, chain ID `5042002`, trước khi ký.
+Payna Swap là flow MetaMask **chỉ dành cho Arc Testnet**. Flow hỗ trợ USDC và EURC với 6 decimals, cùng cirBTC (Circle BTC) với 8 decimals. Precision này quyết định parse amount và hiển thị balance; nó không có nghĩa các token ngang giá. Chỉ dùng testnet asset và kiểm tra MetaMask hiển thị Arc Testnet, chain ID `5042002`, trước khi ký.
 
 Flow này dùng token trong MetaMask account đang chọn. Nó không dùng Circle SCA wallet hay Circle Gateway balance, cũng không deposit, burn, mint hoặc transfer qua Gateway. Hãy đọc [account và vai trò wallet](/docs/getting-started/account-and-wallets) trước khi chọn rail.
 
 ## Command và route hỗ trợ
 
-Dùng `/swap <amount> <token-in> to <token-out>`, ví dụ `/swap 1 USDC to EURC`. Input và output phải khác nhau, amount phải dương, và parser nhận tối đa sáu chữ số thập phân dù balance cirBTC dùng tám.
+Dùng `/swap <amount> <token-in> to <token-out>`, ví dụ `/swap 1 USDC to EURC`. Mỗi phía nhận một token: `EURC`/`EUROC` chọn EURC; `cirBTC`/`BTC` chọn cirBTC. “Euro Coin” và “Circle BTC” có khoảng trắng nên không parse thành một asset. Input/output phải khác, amount phải dương, và parser nhận tối đa sáu chữ số thập phân dù cirBTC dùng tám.
 
 Pair có USDC đi trực tiếp: USDC ↔ EURC hoặc USDC ↔ cirBTC. EURC ↔ cirBTC dùng hai pool qua USDC. Preview liệt kê route trước confirm. Thiếu pair hoặc reserves rỗng làm quote dừng; Payna không tự đổi asset.
 
