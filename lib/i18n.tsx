@@ -33,6 +33,15 @@ const dictionaries: Record<Locale, TranslationMap> = {
     "common.balanceUnavailable": "không đọc được",
     "common.usdc": "USDC",
 
+    "contacts.deleteLabel": "Xoá contact {name}",
+    "contacts.deleteTitle": "Xoá contact?",
+    "contacts.deleteDescription": "Bạn có chắc muốn xoá {name} khỏi danh bạ? Hành động này không thể hoàn tác.",
+    "contacts.deleteAction": "Xoá contact",
+    "contacts.deletePending": "Đang xoá...",
+    "contacts.deleteSuccess": "Đã xoá contact {name}.",
+    "contacts.deleteError": "Không thể xoá contact. Vui lòng thử lại.",
+    "pages.contacts.empty": "Chưa có contact. Thử /contacts add Minh 0x... on arc trong chat.",
+
     "nav.chat": "Chat",
     "nav.activity": "Hoạt động",
     "nav.budgets": "Budgets",
@@ -655,6 +664,15 @@ const dictionaries: Record<Locale, TranslationMap> = {
     "common.balancePartial": "at least — unavailable: {sources}",
     "common.balanceUnavailable": "unavailable",
     "common.usdc": "USDC",
+
+    "contacts.deleteLabel": "Delete contact {name}",
+    "contacts.deleteTitle": "Delete contact?",
+    "contacts.deleteDescription": "Are you sure you want to remove {name} from your contacts? This action cannot be undone.",
+    "contacts.deleteAction": "Delete contact",
+    "contacts.deletePending": "Deleting...",
+    "contacts.deleteSuccess": "Deleted contact {name}.",
+    "contacts.deleteError": "Could not delete contact. Please try again.",
+    "pages.contacts.empty": "No contacts yet. Try /contacts add Minh 0x... on arc in chat.",
 
     "nav.chat": "Chat",
     "nav.activity": "Activity",
