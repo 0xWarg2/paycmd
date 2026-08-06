@@ -154,7 +154,7 @@ type EthereumProvider = {
 // database says "asksurf" — renaming the value would drop that history out of the rich research
 // renderer and show it as raw markdown. Rename what the user sees, not these.
 type AiProvider = "openai" | "asksurf" | "paycmd";
-type ChatMode = "paycmd" | "asksurf";
+export type ChatMode = "paycmd" | "asksurf";
 type SurfMode = "instant" | "research";
 // Two tiers, matching the two models available. `extended` and `maximum` were the pre-merge values;
 // `normalizeSurfEffort` folds them into `deep` when reading persisted rows.
@@ -169,7 +169,7 @@ type ChatCitation = {
   publishedAt?: string;
 };
 
-type AssistantAction =
+export type AssistantAction =
   | {
       kind: "switch_to_paycmd";
       label: string;
@@ -189,6 +189,33 @@ type AssistantAction =
       label: string;
       draft: ParsedCommand;
     };
+
+export function useChatModeBoundary({
+  activeDraftId,
+  onCancelActiveDraft,
+  initialMode = "paycmd",
+}: {
+  activeDraftId: string | null;
+  onCancelActiveDraft: (draftId: string) => void;
+  initialMode?: ChatMode;
+}) {
+  const [chatMode, setChatMode] = useState<ChatMode>(initialMode);
+  const chatModeRef = useRef<ChatMode>(initialMode);
+
+  function changeChatMode(nextMode: ChatMode) {
+    chatModeRef.current = nextMode;
+    if (nextMode === "asksurf" && activeDraftId) {
+      onCancelActiveDraft(activeDraftId);
+    }
+    setChatMode(nextMode);
+  }
+
+  function canRunPaynaAction() {
+    return chatModeRef.current === "paycmd";
+  }
+
+  return { chatMode, changeChatMode, canRunPaynaAction };
+}
 
 type DraftState = "active" | "cancelled" | "confirmed";
 type PreviewDisplayState = DraftState | "closed";
@@ -2516,7 +2543,12 @@ export function PayCmdApp() {
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
-  const [chatMode, setChatMode] = useState<ChatMode>("paycmd");
+  const { chatMode, changeChatMode, canRunPaynaAction } = useChatModeBoundary({
+    activeDraftId,
+    onCancelActiveDraft: (draftId) => {
+      void cancelDraft(draftId);
+    },
+  });
   const [selectedSurfMode, setSelectedSurfMode] = useState<SurfMode>("research");
   const [selectedSurfEffort, setSelectedSurfEffort] = useState<SurfEffort>("standard");
   const [suggestionChips, setSuggestionChips] = useState<string[]>([]);
@@ -3416,6 +3448,7 @@ export function PayCmdApp() {
   }
 
   async function runCommand(draft: ParsedCommand) {
+    if (!canRunPaynaAction()) return;
     if (draft.missingFields.length) return;
 
     if (isForegroundOnlyCommand(draft)) {
@@ -3789,7 +3822,7 @@ export function PayCmdApp() {
     void (async () => {
       submitLockRef.current = true;
       setIsSubmitting(true);
-      setChatMode("asksurf");
+      changeChatMode("asksurf");
 
       try {
         await submitValue(value, "asksurf");
@@ -3807,13 +3840,11 @@ export function PayCmdApp() {
   // by construction rather than by remembering.
   function submitSuggestedCommand(command: string) {
     const value = command.trim();
-    if (!value || submitLockRef.current) return;
+    if (!value || submitLockRef.current || !canRunPaynaAction()) return;
 
     void (async () => {
       submitLockRef.current = true;
       setIsSubmitting(true);
-      // A slash command must not be rerouted into research by a leftover AskSurf mode.
-      setChatMode("paycmd");
 
       try {
         await submitValue(value, "paycmd");
@@ -3828,7 +3859,7 @@ export function PayCmdApp() {
   // is only attached to such failures (see runForegroundCommand's catch), so this never
   // re-submits a bridge whose burn already landed.
   function retryCommand(draft: ParsedCommand) {
-    if (submitLockRef.current) return;
+    if (submitLockRef.current || !canRunPaynaAction()) return;
 
     void (async () => {
       submitLockRef.current = true;
@@ -3843,7 +3874,7 @@ export function PayCmdApp() {
   }
 
   function switchToPayCmd(query: string) {
-    setChatMode("paycmd");
+    changeChatMode("paycmd");
     setInput(query);
   }
 
@@ -3908,6 +3939,11 @@ export function PayCmdApp() {
   }
 
   function confirmDraft(messageId: string, draft: ParsedCommand) {
+    if (!canRunPaynaAction()) {
+      void updateDraftState(messageId, "cancelled");
+      return;
+    }
+
     const target = messages.find((message) => message.id === messageId);
     if (!target || !previewCanConfirm(target)) {
       void updateDraftState(messageId, "cancelled", { cancellationReason: "expired" });
@@ -4243,6 +4279,7 @@ export function PayCmdApp() {
                     <MessageBubble
                       key={message.id}
                       message={message}
+                      chatMode={chatMode}
                       activeDraftId={activeDraftId}
                       isLatestExecutionStatus={
                         message.kind === "status" && message.execution
@@ -4330,7 +4367,7 @@ export function PayCmdApp() {
                 surfMode={selectedSurfMode}
                 surfEffort={selectedSurfEffort}
                 isBusy={isInputBusy}
-                onChatModeChange={setChatMode}
+                onChatModeChange={changeChatMode}
                 onSurfModeChange={(mode) => {
                   setSelectedSurfMode(mode);
                   if (mode === "instant") setSelectedSurfEffort("standard");
@@ -4847,8 +4884,28 @@ export function CommandPalette({
   );
 }
 
+export function ModeBoundCommandPreview({
+  chatMode,
+  fallback,
+  ...previewProps
+}: {
+  chatMode: ChatMode;
+  fallback?: ReactNode;
+  draft: ParsedCommand;
+  state: PreviewDisplayState;
+  isActive: boolean;
+  previewExpiresAt?: string;
+  cancellationReason?: "expired";
+  onConfirm: (draft: ParsedCommand) => void;
+  onCancel: (cancellationReason?: "expired") => void;
+}) {
+  if (chatMode !== "paycmd") return <>{fallback ?? null}</>;
+  return <CommandPreviewCard {...previewProps} />;
+}
+
 function MessageBubble({
   message,
+  chatMode,
   activeDraftId,
   isLatestExecutionStatus,
   isLastMessage,
@@ -4860,6 +4917,7 @@ function MessageBubble({
   onSuggestedCommand,
 }: {
   message: ChatMessage;
+  chatMode: ChatMode;
   activeDraftId: string | null;
   isLatestExecutionStatus: boolean;
   // Distinct from isLatestExecutionStatus, which is per-execution: a transfer's success card stays
@@ -4913,7 +4971,9 @@ function MessageBubble({
             renderer, the plain-text branch, previews and statuses alike. */}
         {!isUser && message.reasoning ? <ReasoningDisclosure reasoning={message.reasoning} /> : null}
         {message.kind === "preview" && message.draft ? (
-          <CommandPreviewCard
+          <ModeBoundCommandPreview
+            chatMode={chatMode}
+            fallback={<span className="block whitespace-pre-wrap break-words">{message.text}</span>}
             draft={message.draft}
             state={
               message.draftState ??
@@ -4930,7 +4990,7 @@ function MessageBubble({
             execution={message.execution}
             text={message.text}
             isLatest={isLatestExecutionStatus}
-            showFollowUps={isLastMessage}
+            showFollowUps={chatMode === "paycmd" && isLastMessage}
             onSuggestedCommand={onSuggestedCommand}
           />
         ) : (
@@ -4958,6 +5018,7 @@ function MessageBubble({
             ) : null}
             {message.actions?.length ? (
               <AssistantActionBar
+                chatMode={chatMode}
                 actions={message.actions}
                 onAskSurf={onRelatedQuestion}
                 onPayCmd={onSwitchToPayCmd}
@@ -4988,20 +5049,27 @@ function executionStatusTone(execution: ExecutionItem, isLatest: boolean) {
   return "rounded-bl-md border border-border bg-muted/20 text-foreground";
 }
 
-function AssistantActionBar({
+export function AssistantActionBar({
+  chatMode,
   actions,
   onAskSurf,
   onPayCmd,
   onRetry,
 }: {
+  chatMode: ChatMode;
   actions: AssistantAction[];
   onAskSurf: (question: string) => void;
   onPayCmd: (query: string) => void;
   onRetry: (draft: ParsedCommand) => void;
 }) {
+  const visibleActions = actions.filter(
+    (action) => chatMode === "paycmd" || action.kind !== "retry_command",
+  );
+  if (!visibleActions.length) return null;
+
   return (
     <div className="flex flex-wrap gap-2 border-t pt-3">
-      {actions.map((action, index) =>
+      {visibleActions.map((action, index) =>
         action.kind === "retry_command" ? (
           <Button
             key={`retry_${action.draft.command}_${index}`}

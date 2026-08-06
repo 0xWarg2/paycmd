@@ -2,7 +2,7 @@
 
 import { Activity, Bell, ChevronDown, Contact, MessageCircle, MoreHorizontal, Network, ShieldCheck, Wallet, WalletCards } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +10,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
-import { CommandPalette, CommandPreviewCard } from "@/components/paycmd-app";
+import {
+  AssistantActionBar,
+  CommandPalette,
+  CommandPreviewCard,
+  ModeBoundCommandPreview,
+  useChatModeBoundary,
+  type AssistantAction,
+} from "@/components/paycmd-app";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { TransactionHistory, type Transaction } from "@/components/transaction-history";
 import {
@@ -93,12 +100,102 @@ const previewTransactions: Transaction[] = [
   },
 ];
 
+function ModeSafetyFixture() {
+  const [activeDraftId, setActiveDraftId] = useState<string | null>("mode-safety-preview");
+  const [draftState, setDraftState] = useState<"active" | "cancelled">("active");
+  const [input, setInput] = useState("");
+  const [confirmedCount, setConfirmedCount] = useState(0);
+  const [retriedCount, setRetriedCount] = useState(0);
+  const [submittedCount] = useState(0);
+  const [researchCount, setResearchCount] = useState(0);
+  const [previewExpiresAt] = useState(() => new Date(Date.now() + 300_000).toISOString());
+
+  function cancelActiveDraft() {
+    setDraftState("cancelled");
+    setActiveDraftId(null);
+  }
+
+  const { chatMode, changeChatMode, canRunPaynaAction } = useChatModeBoundary({
+    activeDraftId,
+    onCancelActiveDraft: cancelActiveDraft,
+  });
+  const staleConfirmRef = useRef(() => {
+    if (canRunPaynaAction()) setConfirmedCount((count) => count + 1);
+  });
+  const staleRetryRef = useRef(() => {
+    if (canRunPaynaAction()) setRetriedCount((count) => count + 1);
+  });
+  const actions: AssistantAction[] = [
+    { kind: "retry_command", label: "Retry command", draft: previewDraft },
+    {
+      kind: "switch_to_paycmd",
+      label: "Switch to Payna",
+      query: "/pay 50 USDC to Minh on arc from base",
+    },
+    {
+      kind: "switch_to_asksurf",
+      label: "Switch to AskPayna",
+      query: "What is Circle Gateway?",
+    },
+  ];
+
+  return (
+    <main className="mx-auto max-w-3xl space-y-5 p-8">
+      <h1 className="text-xl font-semibold">Chat mode safety fixture</h1>
+      <div className="flex gap-2">
+        <Button type="button" onClick={() => changeChatMode("paycmd")}>Select Payna</Button>
+        <Button type="button" variant="outline" onClick={() => changeChatMode("asksurf")}>Select AskPayna</Button>
+      </div>
+      <Input aria-label="Mode safety input" value={input} onChange={(event) => setInput(event.target.value)} />
+      <ModeBoundCommandPreview
+        chatMode={chatMode}
+        fallback={<p>Preview controls are unavailable in AskPayna.</p>}
+        draft={previewDraft}
+        state={draftState}
+        isActive={activeDraftId !== null && draftState === "active"}
+        previewExpiresAt={previewExpiresAt}
+        onConfirm={() => staleConfirmRef.current()}
+        onCancel={cancelActiveDraft}
+      />
+      <p>This question requires AskPayna consent.</p>
+      <AssistantActionBar
+        chatMode={chatMode}
+        actions={actions}
+        onAskSurf={() => {
+          changeChatMode("asksurf");
+          setResearchCount((count) => count + 1);
+        }}
+        onPayCmd={(query) => {
+          changeChatMode("paycmd");
+          setInput(query);
+        }}
+        onRetry={() => staleRetryRef.current()}
+      />
+      <div className="flex gap-2">
+        <Button type="button" variant="outline" onClick={() => staleConfirmRef.current()}>
+          Invoke stale confirm callback
+        </Button>
+        <Button type="button" variant="outline" onClick={() => staleRetryRef.current()}>
+          Invoke stale retry callback
+        </Button>
+      </div>
+      <output data-testid="mode-safety-state">
+        {chatMode}:{draftState}:confirmed={confirmedCount}:retried={retriedCount}:submitted={submittedCount}:research={researchCount}
+      </output>
+    </main>
+  );
+}
+
 export function CommandCenterPreview() {
   const searchParams = useSearchParams();
   const [paletteInput, setPaletteInput] = useState("/balance a");
   const requestedLease = searchParams.get("previewLease");
   const previewLease: PreviewLeaseFixture =
     requestedLease === "expired" || requestedLease === "legacy" ? requestedLease : "live";
+
+  if (searchParams.get("modeSafety") === "1") {
+    return <ModeSafetyFixture />;
+  }
 
   return (
     <main className="command-center-canvas min-h-dvh text-foreground">
