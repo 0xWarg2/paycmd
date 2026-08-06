@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-07
 **Product version:** 1.0.0
-**Status:** Design approved; written spec awaiting review
+**Status:** Approved
 
 ## Goal
 
