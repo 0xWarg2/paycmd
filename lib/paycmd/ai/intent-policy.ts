@@ -1,3 +1,5 @@
+import type { ParsedCommand } from "../commands";
+
 export type SpeechAct = "action" | "question" | "ambiguous";
 export type ChatMode = "paycmd" | "asksurf";
 export type IntentDecision = {
@@ -33,15 +35,18 @@ export function questionSignals(input: string): boolean {
 }
 
 function isValidIntentDecision(decision: Partial<IntentDecision>): decision is IntentDecision {
+  const reasonCode = decision.reasonCode;
+
   if (
     (decision.speechAct !== "action" && decision.speechAct !== "question" && decision.speechAct !== "ambiguous") ||
     (decision.confidence !== "high" && decision.confidence !== "medium") ||
-    !REASON_CODES.has(decision.reasonCode ?? "conflicting_signals")
+    !reasonCode ||
+    !REASON_CODES.has(reasonCode)
   ) {
     return false;
   }
 
-  return COMPATIBLE_REASON_CODES[decision.speechAct].includes(decision.reasonCode);
+  return COMPATIBLE_REASON_CODES[decision.speechAct].includes(reasonCode);
 }
 
 export function normalizeIntentDecision(raw: Partial<IntentDecision>, input: string): IntentDecision {
@@ -62,4 +67,8 @@ export function applyModePolicy(mode: ChatMode, decision: IntentDecision): ModeP
   if (decision.speechAct === "action") return "run_payna_action";
   if (decision.speechAct === "question") return "offer_askpayna";
   return "clarify";
+}
+
+export function guardParsedCommand(mode: ChatMode, decision: IntentDecision, parsed: ParsedCommand | null) {
+  return applyModePolicy(mode, decision) === "run_payna_action" ? parsed : null;
 }
