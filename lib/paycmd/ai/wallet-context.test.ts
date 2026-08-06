@@ -21,7 +21,7 @@ type QueryCall = {
 function createSupabaseFixture(rows: {
   wallets?: unknown[];
   user_external_wallets?: unknown[];
-}) {
+}, errors: Partial<Record<"wallets" | "user_external_wallets", unknown>> = {}) {
   const calls: QueryCall[] = [];
   const client = {
     from(table: string) {
@@ -43,7 +43,8 @@ function createSupabaseFixture(rows: {
         },
         then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
           const data = rows[table as keyof typeof rows] ?? [];
-          return Promise.resolve({ data, error: null }).then(onFulfilled, onRejected);
+          const error = errors[table as keyof typeof errors] ?? null;
+          return Promise.resolve({ data, error }).then(onFulfilled, onRejected);
         },
       };
       return builder;
@@ -93,6 +94,8 @@ test("loads context for operational wallet questions", () => {
   assert.equal(walletContextRelevant("Làm sao gửi 50 USDC sang Arc nhanh nhất?"), true);
   assert.equal(walletContextRelevant("Can I afford 50 USDC?"), true);
   assert.equal(walletContextRelevant("Tôi có đủ 50 USDC không?"), true);
+  assert.equal(walletContextRelevant("Do I have 50 USDC?"), true);
+  assert.equal(walletContextRelevant("Tôi có 50 USDC không?"), true);
   assert.equal(walletContextRelevant("What is my USDC balance?"), true);
   assert.equal(walletContextRelevant("Số dư USDC của tôi là gì?"), true);
 });
@@ -102,6 +105,8 @@ test("does not load authenticated context for conceptual questions", () => {
   assert.equal(walletContextRelevant("What does balance mean in crypto?"), false);
   assert.equal(walletContextRelevant("How do pending transactions work?"), false);
   assert.equal(walletContextRelevant("What does available balance mean?"), false);
+  assert.equal(walletContextRelevant("How do pending wallet balances work?"), false);
+  assert.equal(walletContextRelevant("What is USDC?"), false);
   assert.equal(walletContextRelevant("USDC là gì?"), false);
 });
 
@@ -215,6 +220,39 @@ test("marks a server source unavailable at the eight-second family deadline", as
     address: scaAddress,
     usdc: "0",
   }]);
+});
+
+test("propagates an immediate external-wallet query rejection without leaking or zeroing it", async () => {
+  const privateError = "database connection contained private provider detail";
+  const supabase = createSupabaseFixture({
+    wallets: [],
+    user_external_wallets: [],
+  }, {
+    user_external_wallets: new Error(privateError),
+  });
+  const dependencies = createServerWalletContextDependencies({
+    getSupabase: async () => supabase.client,
+    gatewayReaders: {
+      fetchReady: async () => ({ token: "USDC", balances: [] }),
+      fetchPending: async () => ({ token: "USDC", deposits: [] }),
+      chainByDomain: {},
+    },
+    readUsdcBalance: async () => 0n,
+    readChainBalance: async () => ({ nativeBalance: 0n, usdc: 0n }),
+    chains: ["baseSepolia"],
+  });
+
+  const context = await buildWalletContext("auth-user", dependencies);
+  const formatted = formatWalletContext(context);
+
+  assert.equal(context.status, "partial");
+  assert.deepEqual(context.unavailable, ["external_wallets"]);
+  assert.deepEqual(context.gateway, []);
+  assert.deepEqual(context.circleSca, []);
+  assert.deepEqual(context.externalWallets, []);
+  assert.match(formatted, /External wallet balance unavailable/);
+  assert.doesNotMatch(formatted, new RegExp(privateError));
+  assert.doesNotMatch(formatted, /0 USDC/);
 });
 
 test("keeps ready and pending Gateway observations separate", async () => {

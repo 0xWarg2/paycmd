@@ -55,6 +55,7 @@ export function walletContextRelevant(input: string): boolean {
   if (conceptual) return false;
 
   return (walletOrAsset && affordability) ||
+    (walletOrAsset && possession && concreteAmount) ||
     (accountState && possession) ||
     (walletOrAsset && action && (firstPerson || concreteAmount));
 }
