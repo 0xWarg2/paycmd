@@ -225,7 +225,7 @@ export function useChatModeBoundary({
 type DraftState = "active" | "cancelled" | "confirmed";
 type PreviewDisplayState = DraftState | "closed";
 
-type ChatMessage = {
+export type ChatMessage = {
   id: string;
   role: "assistant" | "user" | "system";
   text: string;
@@ -297,7 +297,7 @@ type AiCommandResult = {
   quota?: AiQuota;
 };
 
-type CryptoResearchResult = {
+export type CryptoResearchResult = {
   assistantText: string;
   citations?: ChatCitation[];
   provider: "asksurf";
@@ -312,7 +312,7 @@ type CryptoResearchResult = {
   walletContextStatus?: WalletContextStatus;
 };
 
-type ChatMessageRow = {
+export type ChatMessageRow = {
   id: string;
   thread_id: string;
   user_id: string;
@@ -2488,7 +2488,73 @@ async function executeCommand(draft: ParsedCommand) {
   throw new Error("Unsupported command");
 }
 
-function mapRowToMessage(row: ChatMessageRow): ChatMessage {
+export function chatMessageMetadata(message: Omit<ChatMessage, "id"> | ChatMessage) {
+  return {
+    draft: message.draft ?? null,
+    draftState: message.draftState ?? null,
+    previewExpiresAt: message.previewExpiresAt ?? null,
+    cancellationReason: message.cancellationReason ?? null,
+    execution: message.execution ?? null,
+    provider: message.provider ?? null,
+    citations: message.citations ?? null,
+    model: message.model ?? null,
+    surfMode: message.surfMode ?? null,
+    effort: message.effort ?? null,
+    durationMs: message.durationMs ?? null,
+    actions: message.actions ?? null,
+    reasoning: message.reasoning ?? null,
+    quota: message.quota ?? null,
+    quotaContactCta: message.quotaContactCta ?? null,
+    groundingStatus: message.groundingStatus ?? null,
+    knowledgeSources: message.knowledgeSources ?? null,
+    ...walletContextMetadata(message.walletContextStatus),
+  };
+}
+
+export function buildChatMessageInsertPayload(
+  message: Omit<ChatMessage, "id">,
+  threadId: string,
+  userId: string,
+) {
+  return {
+    thread_id: threadId,
+    user_id: userId,
+    role: message.role,
+    content: message.text,
+    kind: message.kind === "onboarding" ? "text" as const : message.kind ?? "text" as const,
+    metadata: chatMessageMetadata(message),
+  };
+}
+
+export function askPaynaAssistantMessageFromResponse(
+  result: CryptoResearchResult,
+  options: {
+    text: string;
+    surfMode: SurfMode;
+    effort: SurfEffort;
+    actions?: AssistantAction[];
+  },
+): Omit<ChatMessage, "id"> {
+  const walletMetadata = walletContextMetadataFromResearch(result);
+  return {
+    role: "assistant",
+    text: options.text,
+    provider: "asksurf",
+    citations: result.citations ?? [],
+    model: result.model,
+    surfMode: result.surfMode ?? options.surfMode,
+    effort: normalizeSurfEffort(result.effort ?? options.effort),
+    durationMs: result.durationMs,
+    reasoning: result.reasoning,
+    quota: result.quota,
+    groundingStatus: result.groundingStatus,
+    knowledgeSources: result.knowledgeSources,
+    walletContextStatus: walletMetadata.walletContextStatus ?? undefined,
+    actions: options.actions,
+  };
+}
+
+export function mapRowToMessage(row: ChatMessageRow): ChatMessage {
   const metadata = row.metadata ?? {};
 
   return {
@@ -2701,38 +2767,9 @@ export function PayCmdApp() {
     }
 
     const supabase = createClient();
-    const metadata = {
-      draft: message.draft ?? null,
-      draftState: message.draftState ?? null,
-      previewExpiresAt: message.previewExpiresAt ?? null,
-      cancellationReason: message.cancellationReason ?? null,
-      execution: message.execution ?? null,
-      provider: message.provider ?? null,
-      citations: message.citations ?? null,
-      model: message.model ?? null,
-      surfMode: message.surfMode ?? null,
-      effort: message.effort ?? null,
-      durationMs: message.durationMs ?? null,
-      actions: message.actions ?? null,
-      // Any key added here must also be added to the metadata object in `updateDraftState` below,
-      // which rewrites this whole object field by field. Omitting it there silently drops the value.
-      reasoning: message.reasoning ?? null,
-      quota: message.quota ?? null,
-      quotaContactCta: message.quotaContactCta ?? null,
-      groundingStatus: message.groundingStatus ?? null,
-      knowledgeSources: message.knowledgeSources ?? null,
-      ...walletContextMetadata(message.walletContextStatus),
-    };
     const { data, error } = await supabase
       .from("chat_messages")
-      .insert({
-        thread_id: threadId,
-        user_id: userId,
-        role: message.role,
-        content: message.text,
-        kind: message.kind === "onboarding" ? "text" : message.kind ?? "text",
-        metadata,
-      })
+      .insert(buildChatMessageInsertPayload(message, threadId, userId))
       .select("*")
       .single();
 
@@ -2780,28 +2817,7 @@ export function PayCmdApp() {
     const { error } = await supabase
       .from("chat_messages")
       .update({
-        metadata: {
-          draft: target.draft,
-          draftState,
-          previewExpiresAt: target.previewExpiresAt ?? null,
-          cancellationReason: cancellationReason ?? null,
-          execution: target.execution ?? null,
-          provider: target.provider ?? null,
-          citations: target.citations ?? null,
-          model: target.model ?? null,
-          surfMode: target.surfMode ?? null,
-          effort: target.effort ?? null,
-          durationMs: target.durationMs ?? null,
-          actions: target.actions ?? null,
-          // This update replaces `metadata` wholesale rather than patching it, so every field
-          // `saveMessage` writes has to be repeated here or confirming a draft erases it.
-          reasoning: target.reasoning ?? null,
-          quota: target.quota ?? null,
-          quotaContactCta: target.quotaContactCta ?? null,
-          groundingStatus: target.groundingStatus ?? null,
-          knowledgeSources: target.knowledgeSources ?? null,
-          ...walletContextMetadata(target.walletContextStatus),
-        },
+        metadata: chatMessageMetadata({ ...target, draftState, cancellationReason }),
       })
       .eq("id", messageId)
       .eq("user_id", userId);
@@ -2890,24 +2906,13 @@ export function PayCmdApp() {
           locale,
         }),
       })) as CryptoResearchResult;
-      const walletMetadata = walletContextMetadataFromResearch(result);
 
-      await saveMessage({
-        role: "assistant",
+      await saveMessage(askPaynaAssistantMessageFromResponse(result, {
         text: withAskPaynaSafetyCopy(result.assistantText),
-        provider: "asksurf",
-        citations: result.citations ?? [],
-        model: result.model,
-        surfMode: result.surfMode ?? surfMode,
-        effort: normalizeSurfEffort(result.effort ?? effort),
-        durationMs: result.durationMs,
-        reasoning: result.reasoning,
-        quota: result.quota,
-        groundingStatus: result.groundingStatus,
-        knowledgeSources: result.knowledgeSources,
-        walletContextStatus: walletMetadata.walletContextStatus ?? undefined,
+        surfMode,
+        effort,
         actions: paynaSwitchActions,
-      });
+      }));
     } catch (error) {
       if ((error as { name?: string })?.name === "AbortError") {
         if (timedOut) {
@@ -4915,7 +4920,7 @@ export function ModeBoundCommandPreview({
   return <CommandPreviewCard {...previewProps} />;
 }
 
-function MessageBubble({
+export function MessageBubble({
   message,
   chatMode,
   activeDraftId,
@@ -5124,7 +5129,7 @@ export function AssistantActionBar({
   );
 }
 
-export function ProviderBadge({
+function ProviderBadge({
   provider,
   model,
   surfMode,

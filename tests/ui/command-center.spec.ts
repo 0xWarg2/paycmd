@@ -71,13 +71,21 @@ test("shows compact wallet availability on AskPayna answers without exposing add
     ["partial", "Some balances unavailable"],
     ["unavailable", "Balances unavailable"],
   ] as const) {
-    const message = page.getByTestId(`wallet-context-message-${status}`);
+    const message = page.getByTestId(`wallet-context-production-message-${status}`);
     await expect(message.getByText(label, { exact: true })).toBeVisible();
-    await expect(page.getByTestId(`wallet-context-metadata-${status}`)).toHaveText(
-      JSON.stringify({ walletContextStatus: status }),
+    const metadata = page.getByTestId(`wallet-context-production-metadata-${status}`);
+    await expect(metadata).toContainText(
+      `"walletContextStatus":"${status}"`,
     );
+    await expect(metadata).not.toContainText("0x2222222222222222222222222222222222222222");
   }
+  const invalidMessage = page.getByTestId("wallet-context-production-message-invalid");
+  await expect(invalidMessage).not.toContainText("Balances");
+  await expect(page.getByTestId("wallet-context-production-metadata-invalid")).toContainText(
+    '"walletContextStatus":null',
+  );
   await expect(page.getByText("0x2222222222222222222222222222222222222222")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /confirm|retry command|switch to payna/i })).toHaveCount(0);
 });
 
 test("expires a transaction preview after fifteen seconds", async ({ page }) => {
