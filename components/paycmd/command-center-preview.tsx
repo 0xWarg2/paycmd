@@ -15,6 +15,7 @@ import {
   CommandPalette,
   CommandPreviewCard,
   ModeBoundCommandPreview,
+  WalletContextBadge,
   useChatModeBoundary,
   type AssistantAction,
 } from "@/components/paycmd-app";
@@ -195,6 +196,16 @@ export function CommandCenterPreview() {
 
   if (searchParams.get("modeSafety") === "1") {
     return <ModeSafetyFixture />;
+  }
+
+  if (searchParams.get("walletContext") === "1") {
+    return (
+      <main className="mx-auto flex max-w-3xl flex-wrap gap-3 p-8">
+        <WalletContextBadge status="verified" />
+        <WalletContextBadge status="partial" />
+        <WalletContextBadge status="unavailable" />
+      </main>
+    );
   }
 
   return (

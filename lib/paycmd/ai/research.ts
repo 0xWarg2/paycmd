@@ -1,6 +1,13 @@
 import { askDeepSeek as defaultAskDeepSeek } from "./deepseek.ts";
 import { formatKnowledgeContext, gatherKnowledge as defaultGatherKnowledge } from "./knowledge-orchestrator.ts";
-import type { GroundedCitation, GroundingStatus, KnowledgeSource } from "./knowledge-types.ts";
+import type {
+  GroundedCitation,
+  GroundingStatus,
+  KnowledgeBundle,
+  KnowledgeSource,
+  WalletContextStatus,
+} from "./knowledge-types.ts";
+import { formatWalletContext, type WalletContext } from "./wallet-context.ts";
 
 export type ResearchCitation = GroundedCitation;
 export type ResearchMode = "instant" | "research";
@@ -24,6 +31,7 @@ export type ResearchResult = {
   reasoning?: string;
   groundingStatus: GroundingStatus;
   knowledgeSources: KnowledgeSource[];
+  walletContextStatus?: WalletContextStatus;
 };
 
 type ResearchOptions = {
@@ -32,6 +40,7 @@ type ResearchOptions = {
   surfMode?: ResearchMode;
   effort?: ResearchEffort | "extended" | "maximum";
   locale?: "vi" | "en";
+  walletContext?: WalletContext | null;
 };
 
 type ResearchDependencies = {
@@ -106,8 +115,29 @@ function removeUnverifiedLinks(text: string) {
     .replace(/[ \t]+\n/g, "\n");
 }
 
+function shortenWalletAddresses(text: string) {
+  return text.replace(/\b0x[a-fA-F0-9]{40}\b/g, (address) => `${address.slice(0, 6)}…${address.slice(-4)}`);
+}
+
+export function assembleResearchContext({
+  knowledge,
+  walletContext,
+}: {
+  input: string;
+  knowledge: KnowledgeBundle;
+  walletContext?: WalletContext | null;
+}) {
+  const officialEvidence = formatKnowledgeContext(knowledge);
+  const walletEvidence = walletContext ? shortenWalletAddresses(formatWalletContext(walletContext)) : "";
+
+  return {
+    promptContext: [officialEvidence, walletEvidence].filter(Boolean).join("\n\n"),
+    citations: knowledge.citations,
+  };
+}
+
 export async function askResearch(
-  { input, recentMessages = [], surfMode, effort, locale }: ResearchOptions,
+  { input, recentMessages = [], surfMode, effort, locale, walletContext }: ResearchOptions,
   dependencies: ResearchDependencies = {},
 ) {
   const resolvedSurfMode = surfMode === "instant" ? "instant" : "research";
@@ -115,7 +145,8 @@ export async function askResearch(
   const profile = researchRequestProfile(resolvedSurfMode, resolvedEffort);
   const startedAt = Date.now();
   const knowledge = await (dependencies.gatherKnowledge ?? defaultGatherKnowledge)({ input, locale: locale ?? "vi" });
-  const evidence = formatKnowledgeContext(knowledge);
+  const researchContext = assembleResearchContext({ input, knowledge, walletContext });
+  const evidence = researchContext.promptContext;
   const languageInstruction = locale === "en" ? "Write entirely in English." : "Write entirely in Vietnamese.";
   const depth = resolvedSurfMode === "instant" ? "Keep the answer concise." : resolvedEffort === "deep" ? "Be comprehensive and nuanced." : "Provide a clear, useful research answer.";
   const system = [
@@ -127,6 +158,13 @@ export async function askResearch(
     knowledge.status === "unavailable"
       ? "Online verification was unavailable. Say this clearly and do not present current or live claims as verified."
       : "Base technical and time-sensitive factual claims on the supplied evidence. Say when the evidence is incomplete.",
+    ...(walletContext
+      ? [
+          "Point-in-time wallet observations are authenticated read-only context, not web citations.",
+          "Gateway ready, pending Gateway, Circle SCA, external-wallet USDC, and native gas balances are separate rails; never add or otherwise combine them.",
+          "Refer to a MetaMask wallet by provider when relevant, and shorten public addresses in general explanations unless the full address is operationally necessary.",
+        ]
+      : []),
     "Do not create, sign, or execute transactions. Suggest a slash command if the user wants to act in Payna.",
     // Every line below is load-bearing for a renderer in components/paycmd-app.tsx, and the vague
     // "clear title, summary, relevant sections, Sources" this replaced satisfied none of them — which
@@ -154,14 +192,15 @@ export async function askResearch(
     thinking: profile.thinking,
   });
   return {
-    assistantText: removeUnverifiedLinks(response.text),
-    citations: knowledge.citations,
+    assistantText: shortenWalletAddresses(removeUnverifiedLinks(response.text)),
+    citations: researchContext.citations,
     model: response.model,
     surfMode: resolvedSurfMode,
     effort: resolvedEffort,
     durationMs: Date.now() - startedAt,
-    reasoning: response.reasoning || undefined,
+    reasoning: response.reasoning ? shortenWalletAddresses(response.reasoning) : undefined,
     groundingStatus: knowledge.status,
     knowledgeSources: knowledge.sources,
+    walletContextStatus: walletContext?.status,
   } satisfies ResearchResult;
 }

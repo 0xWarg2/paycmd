@@ -10,6 +10,7 @@ import {
 
 import { supportedChains, type PayCmdChain } from "../chains.ts";
 import { web3Chains } from "../web3-chains.ts";
+import { buildWalletContext } from "./wallet-context.ts";
 import type {
   CircleScaWalletObservation,
   ExternalWalletObservation,
@@ -19,6 +20,13 @@ import type {
 
 const WALLET_CONTEXT_FAMILY_TIMEOUT_MS = 8_000;
 const MAX_CONTEXT_WALLETS = 5;
+
+export function loadAuthenticatedWalletContext(
+  userId: string,
+  dependencies: WalletContextDependencies = createServerWalletContextDependencies(),
+) {
+  return buildWalletContext(userId, dependencies);
+}
 
 type GatewayBalance = { domain: number; depositor: string; balance: string };
 type GatewayPendingDeposit = { domain: number; depositor: string; amount: string };

@@ -95,7 +95,7 @@ export function formatWalletContext(context: WalletContext): string {
     `Observed at: ${context.observedAt}`,
     `Status: ${context.status}`,
     "",
-    "Gateway (ready and pending are separate):",
+    "Gateway ready USDC (pending Gateway is separate):",
   ];
 
   if (unavailable.has("gateway")) {
@@ -127,11 +127,12 @@ export function formatWalletContext(context: WalletContext): string {
     lines.push("No linked external wallet balance observed.");
   } else {
     for (const item of context.externalWallets) {
+      const provider = item.provider === "metamask" ? "MetaMask" : "External wallet";
       const balances = [
         item.usdc === undefined ? "" : `${item.usdc} USDC`,
         item.nativeBalance === undefined ? "" : `${item.nativeBalance} native`,
       ].filter(Boolean).join("; ");
-      lines.push(`- ${item.provider} ${item.address} on ${item.chain}: ${balances || "balance unavailable"}`);
+      lines.push(`- ${provider} ${item.address} on ${item.chain}: ${balances || "balance unavailable"}`);
     }
   }
 

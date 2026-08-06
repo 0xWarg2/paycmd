@@ -63,6 +63,15 @@ test("Payna questions wait for the explicit AskPayna consent action", async ({ p
   await expect(page.getByTestId("mode-safety-state")).toContainText("research=1");
 });
 
+test("shows compact wallet availability on AskPayna answers without exposing addresses", async ({ page }) => {
+  await page.goto("/dev/ui-preview?walletContext=1");
+
+  await expect(page.getByText("Balances verified", { exact: true })).toBeVisible();
+  await expect(page.getByText("Some balances unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByText("Balances unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByText("0x2222222222222222222222222222222222222222")).toHaveCount(0);
+});
+
 test("expires a transaction preview after fifteen seconds", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-08-07T00:00:00.000Z") });
   await page.addInitScript(() => window.localStorage.setItem("paycmd_locale", "en"));

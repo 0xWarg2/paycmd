@@ -72,6 +72,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import { localeRequestHeaders, translateClient, useI18n } from "@/lib/i18n";
+import type { GroundingStatus, KnowledgeSource, WalletContextStatus } from "@/lib/paycmd/ai/knowledge-types";
 import { balanceBreakdown } from "@/lib/paycmd/balance-breakdown";
 import {
   buildTransactionPreviewModel,
@@ -159,8 +160,7 @@ type SurfMode = "instant" | "research";
 // Two tiers, matching the two models available. `extended` and `maximum` were the pre-merge values;
 // `normalizeSurfEffort` folds them into `deep` when reading persisted rows.
 type SurfEffort = "standard" | "deep";
-type KnowledgeSource = "payna" | "circle" | "arc" | "web";
-type GroundingStatus = "verified" | "partial" | "unavailable" | "not_applicable";
+export type { WalletContextStatus } from "@/lib/paycmd/ai/knowledge-types";
 
 type ChatCitation = {
   title?: string;
@@ -245,6 +245,7 @@ type ChatMessage = {
   quotaContactCta?: boolean;
   groundingStatus?: GroundingStatus;
   knowledgeSources?: KnowledgeSource[];
+  walletContextStatus?: WalletContextStatus;
 };
 
 type AiQuota = {
@@ -303,6 +304,7 @@ type CryptoResearchResult = {
   quota?: AiQuota;
   groundingStatus?: GroundingStatus;
   knowledgeSources?: KnowledgeSource[];
+  walletContextStatus?: WalletContextStatus;
 };
 
 type ChatMessageRow = {
@@ -414,6 +416,10 @@ function normalizeGroundingStatus(value: unknown): GroundingStatus | undefined {
   return value === "verified" || value === "partial" || value === "unavailable" || value === "not_applicable"
     ? value
     : undefined;
+}
+
+function normalizeWalletContextStatus(value: unknown): WalletContextStatus | undefined {
+  return value === "verified" || value === "partial" || value === "unavailable" ? value : undefined;
 }
 
 function normalizeKnowledgeSources(value: unknown): KnowledgeSource[] | undefined {
@@ -2518,6 +2524,7 @@ function mapRowToMessage(row: ChatMessageRow): ChatMessage {
     quotaContactCta: metadata.quotaContactCta === true,
     groundingStatus: normalizeGroundingStatus(metadata.groundingStatus),
     knowledgeSources: normalizeKnowledgeSources(metadata.knowledgeSources),
+    walletContextStatus: normalizeWalletContextStatus(metadata.walletContextStatus),
   };
 }
 
@@ -2713,6 +2720,7 @@ export function PayCmdApp() {
       quotaContactCta: message.quotaContactCta ?? null,
       groundingStatus: message.groundingStatus ?? null,
       knowledgeSources: message.knowledgeSources ?? null,
+      walletContextStatus: message.walletContextStatus ?? null,
     };
     const { data, error } = await supabase
       .from("chat_messages")
@@ -2791,6 +2799,7 @@ export function PayCmdApp() {
           quotaContactCta: target.quotaContactCta ?? null,
           groundingStatus: target.groundingStatus ?? null,
           knowledgeSources: target.knowledgeSources ?? null,
+          walletContextStatus: target.walletContextStatus ?? null,
         },
       })
       .eq("id", messageId)
@@ -2894,6 +2903,7 @@ export function PayCmdApp() {
         quota: result.quota,
         groundingStatus: result.groundingStatus,
         knowledgeSources: result.knowledgeSources,
+        walletContextStatus: result.walletContextStatus,
         actions: paynaSwitchActions,
       });
     } catch (error) {
@@ -4965,6 +4975,7 @@ function MessageBubble({
             quota={message.quota}
             groundingStatus={message.groundingStatus}
             knowledgeSources={message.knowledgeSources}
+            walletContextStatus={message.walletContextStatus}
           />
         ) : null}
         {/* Above the content branches rather than inside them, so one placement covers the research
@@ -5120,6 +5131,7 @@ function ProviderBadge({
   quota,
   groundingStatus,
   knowledgeSources,
+  walletContextStatus,
 }: {
   provider: AiProvider;
   model?: string;
@@ -5129,6 +5141,7 @@ function ProviderBadge({
   quota?: AiQuota;
   groundingStatus?: GroundingStatus;
   knowledgeSources?: KnowledgeSource[];
+  walletContextStatus?: WalletContextStatus;
 }) {
   const { t } = useI18n();
   const Icon = provider === "asksurf" ? Waypoints : provider === "openai" ? Bot : Sparkles;
@@ -5159,7 +5172,23 @@ function ProviderBadge({
       {knowledgeSources?.length ? (
         <span className="text-muted-foreground">· {knowledgeSources.map(knowledgeSourceLabel).join(" + ")}</span>
       ) : null}
+      {walletContextStatus ? <WalletContextBadge status={walletContextStatus} /> : null}
     </div>
+  );
+}
+
+export function WalletContextBadge({ status }: { status: WalletContextStatus }) {
+  const labels: Record<WalletContextStatus, string> = {
+    verified: "Balances verified",
+    partial: "Some balances unavailable",
+    unavailable: "Balances unavailable",
+  };
+
+  return (
+    <span className="inline-flex items-center gap-1 text-muted-foreground">
+      <WalletCards className="h-3 w-3" aria-hidden="true" />
+      {labels[status]}
+    </span>
   );
 }
 

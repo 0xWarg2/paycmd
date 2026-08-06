@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { askResearch } from "@/lib/paycmd/ai/research";
 import { AiAccessError, runDeepSeekWithQuota } from "@/lib/paycmd/ai/access";
+import { walletContextRelevant } from "@/lib/paycmd/ai/wallet-context";
+import {
+  createServerWalletContextDependencies,
+  loadAuthenticatedWalletContext,
+} from "@/lib/paycmd/ai/wallet-context-server";
 import { createClient } from "@/lib/supabase/server";
 
 type CryptoResearchRequest = {
@@ -36,15 +41,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "input is required" }, { status: 400 });
     }
 
-    const { result, quota } = await runDeepSeekWithQuota(supabase, () =>
-      askResearch({
+    const { result, quota } = await runDeepSeekWithQuota(supabase, async () => {
+      const walletContext = walletContextRelevant(input)
+        ? await loadAuthenticatedWalletContext(
+            user.id,
+            createServerWalletContextDependencies({ getSupabase: async () => supabase }),
+          )
+        : null;
+
+      return askResearch({
         input,
         recentMessages: body.recentMessages ?? [],
         surfMode: body.surfMode,
         effort: body.effort,
         locale: body.locale,
-      }),
-    );
+        walletContext,
+      });
+    });
 
     return NextResponse.json({
       ...result,

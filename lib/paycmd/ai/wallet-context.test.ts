@@ -8,6 +8,7 @@ import {
 } from "./wallet-context.ts";
 import {
   createServerWalletContextDependencies,
+  loadAuthenticatedWalletContext,
   loadExternalWalletObservations,
   loadGatewayBalanceResponse,
   loadGatewayWalletObservations,
@@ -108,6 +109,28 @@ test("does not load authenticated context for conceptual questions", () => {
   assert.equal(walletContextRelevant("How do pending wallet balances work?"), false);
   assert.equal(walletContextRelevant("What is USDC?"), false);
   assert.equal(walletContextRelevant("USDC là gì?"), false);
+});
+
+test("loads wallet observations for exactly the authenticated user", async () => {
+  const userIds: string[] = [];
+  const context = await loadAuthenticatedWalletContext("auth-user", {
+    gateway: async (userId) => {
+      userIds.push(userId);
+      return [{ chain: "baseSepolia", readyUsdc: "50" }];
+    },
+    circleSca: async (userId) => {
+      userIds.push(userId);
+      return [];
+    },
+    externalWallets: async (userId) => {
+      userIds.push(userId);
+      return [];
+    },
+  });
+
+  assert.deepEqual(userIds, ["auth-user", "auth-user", "auth-user"]);
+  assert.equal(context.gateway[0]?.readyUsdc, "50");
+  assert.equal(context.status, "verified");
 });
 
 test("scopes server wallet sources to the authenticated user and configured chains", async () => {
