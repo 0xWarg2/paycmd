@@ -33,6 +33,42 @@ test("never grants an action to low-confidence or invalid output", () => {
   assert.equal(normalizeIntentDecision({}, "send money").speechAct, "ambiguous");
 });
 
+test("fails invalid router output closed even when the input is a question", () => {
+  const decision = normalizeIntentDecision({}, "How do I send USDC?");
+
+  assert.equal(decision.speechAct, "ambiguous");
+  assert.equal(applyModePolicy("paycmd", decision), "clarify");
+});
+
+test("fails low-confidence actions closed even when the input is a question", () => {
+  const decision = normalizeIntentDecision({ speechAct: "action", confidence: "low" }, "Làm sao gửi USDC?");
+
+  assert.equal(decision.speechAct, "ambiguous");
+  assert.equal(applyModePolicy("paycmd", decision), "clarify");
+});
+
+test("rejects action decisions with non-action reason codes", () => {
+  for (const reasonCode of ["informational_question", "missing_action_commitment", "conflicting_signals"] as const) {
+    const decision = normalizeIntentDecision(
+      { speechAct: "action", confidence: "high", reasonCode },
+      "Send 50 USDC to Minh",
+    );
+
+    assert.equal(decision.speechAct, "ambiguous");
+    assert.equal(applyModePolicy("paycmd", decision), "clarify");
+  }
+});
+
+test("does not authorize malformed action decisions passed directly to the policy", () => {
+  const malformedAction = {
+    speechAct: "action",
+    confidence: "low",
+    reasonCode: "informational_question",
+  } as IntentDecision;
+
+  assert.equal(applyModePolicy("paycmd", malformedAction), "clarify");
+});
+
 test("allows an explicit action only inside Payna", () => {
   const decision = normalizeIntentDecision(
     { speechAct: "action", confidence: "high", reasonCode: "explicit_imperative" },

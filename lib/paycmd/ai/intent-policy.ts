@@ -22,33 +22,43 @@ const REASON_CODES = new Set<IntentDecision["reasonCode"]>([
   "conflicting_signals",
 ]);
 
+const COMPATIBLE_REASON_CODES: Record<SpeechAct, readonly IntentDecision["reasonCode"][]> = {
+  action: ["explicit_imperative", "explicit_slash_command"],
+  question: ["informational_question"],
+  ambiguous: ["missing_action_commitment", "conflicting_signals"],
+};
+
 export function questionSignals(input: string): boolean {
   return QUESTION_SIGNAL.test(input);
 }
 
+function isValidIntentDecision(decision: Partial<IntentDecision>): decision is IntentDecision {
+  if (
+    (decision.speechAct !== "action" && decision.speechAct !== "question" && decision.speechAct !== "ambiguous") ||
+    (decision.confidence !== "high" && decision.confidence !== "medium") ||
+    !REASON_CODES.has(decision.reasonCode ?? "conflicting_signals")
+  ) {
+    return false;
+  }
+
+  return COMPATIBLE_REASON_CODES[decision.speechAct].includes(decision.reasonCode);
+}
+
 export function normalizeIntentDecision(raw: Partial<IntentDecision>, input: string): IntentDecision {
+  if (!isValidIntentDecision(raw)) {
+    return { speechAct: "ambiguous", confidence: "low", reasonCode: "conflicting_signals" };
+  }
+
   if (questionSignals(input)) {
     return { speechAct: "question", confidence: "high", reasonCode: "informational_question" };
   }
 
-  if (
-    (raw.speechAct !== "action" && raw.speechAct !== "question" && raw.speechAct !== "ambiguous") ||
-    raw.confidence === "low" ||
-    (raw.confidence !== "high" && raw.confidence !== "medium") ||
-    !REASON_CODES.has(raw.reasonCode ?? "conflicting_signals")
-  ) {
-    return { speechAct: "ambiguous", confidence: "low", reasonCode: "conflicting_signals" };
-  }
-
-  return {
-    speechAct: raw.speechAct,
-    confidence: raw.confidence,
-    reasonCode: raw.reasonCode ?? "conflicting_signals",
-  };
+  return raw;
 }
 
 export function applyModePolicy(mode: ChatMode, decision: IntentDecision): ModePolicyAction {
   if (mode === "asksurf") return "run_askpayna";
+  if (!isValidIntentDecision(decision)) return "clarify";
   if (decision.speechAct === "action") return "run_payna_action";
   if (decision.speechAct === "question") return "offer_askpayna";
   return "clarify";
