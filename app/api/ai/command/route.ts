@@ -5,7 +5,7 @@ import { chainAliases, supportedChains } from "@/lib/paycmd/chains";
 import { askDeepSeek } from "@/lib/paycmd/ai/deepseek";
 import { AiAccessError, runDeepSeekWithQuota } from "@/lib/paycmd/ai/access";
 import { commandRouterModel, commandRouterModelProfile } from "@/lib/paycmd/ai/models";
-import { guardParsedCommand, normalizeIntentDecision, type ChatMode, type IntentDecision } from "@/lib/paycmd/ai/intent-policy";
+import { guardCommandResponse, normalizeIntentDecision, type ChatMode } from "@/lib/paycmd/ai/intent-policy";
 import { aiCommandRequestSchema, aiCommandResponseSchema } from "@/lib/paycmd/ai/schema";
 import { requestLocale, tr, type PayCmdLocale } from "@/lib/i18n/server";
 import { commandRegistry, parsePayCmd, type CommandName } from "@/lib/paycmd/commands";
@@ -516,29 +516,6 @@ function deterministicCommandFallback(
   };
 }
 
-function guardCommandResult(
-  result: {
-    intent: "command" | "clarify";
-    canonicalCommand: string;
-    assistantText: string;
-    missingFields: string[];
-    suggestions: string[];
-    parsedCommand: ReturnType<typeof parsePayCmd> | null;
-    modelProfile: string;
-  },
-  mode: ChatMode,
-  decision: IntentDecision,
-) {
-  const failClosed = decision.speechAct === "ambiguous";
-
-  return {
-    ...result,
-    ...(failClosed ? { intent: "clarify" as const, canonicalCommand: "" } : {}),
-    decision,
-    parsedCommand: guardParsedCommand(mode, decision, result.parsedCommand),
-  };
-}
-
 // `reasoning` is passed separately rather than read off `aiResult`: every return below spreads the
 // zod-validated output, and the schema has no reasoning field, so it would be stripped on the way
 // through. Empty in practice while the router runs with thinking off.
@@ -550,39 +527,22 @@ function commandRouterResult(
   reasoning?: string,
   input?: string,
 ) {
-  let decision = normalizeIntentDecision(aiResult.decision, input ?? "");
-
-  if (aiResult.intent === "command" && decision.speechAct !== "action") {
-    decision = normalizeIntentDecision({}, input ?? "");
-  }
-
-  if (decision.speechAct === "ambiguous") {
-    return {
-      ...aiResult,
-      intent: "clarify",
-      canonicalCommand: "",
-      decision,
-      parsedCommand: null,
-      modelProfile,
-      reasoning: reasoning || undefined,
-    };
-  }
+  const decision = normalizeIntentDecision(aiResult.decision, input ?? "");
 
   if (aiResult.intent !== "command") {
-    return {
+    return guardCommandResponse(mode, decision, {
       ...aiResult,
-      decision,
       parsedCommand: null,
       modelProfile,
       reasoning: reasoning || undefined,
-    };
+    });
   }
 
   const canonicalCommand = preserveNamedBalanceChain(aiResult.canonicalCommand, input ?? "");
   const parsedCommand = parsePayCmd(canonicalCommand, locale);
 
   if (parsedCommand.missingFields.length || parsedCommand.status !== "draft_ready") {
-    return {
+    return guardCommandResponse(mode, decision, {
       intent: "clarify",
       canonicalCommand,
       assistantText:
@@ -590,21 +550,19 @@ function commandRouterResult(
         tr(locale, "ai.missingFields", { fields: parsedCommand.missingFields.join(", ") }),
       missingFields: parsedCommand.missingFields,
       suggestions: aiResult.suggestions,
-      decision,
-      parsedCommand: guardParsedCommand(mode, decision, parsedCommand),
+      parsedCommand,
       modelProfile,
       reasoning: reasoning || undefined,
-    };
+    });
   }
 
-  return {
+  return guardCommandResponse(mode, decision, {
     ...aiResult,
     canonicalCommand,
-    decision,
-    parsedCommand: guardParsedCommand(mode, decision, parsedCommand),
+    parsedCommand,
     modelProfile,
     reasoning: reasoning || undefined,
-  };
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -647,7 +605,9 @@ export async function POST(req: NextRequest) {
         input,
       );
       return NextResponse.json(
-        guardCommandResult(
+        guardCommandResponse(
+          chatMode,
+          decision,
           {
             intent: "command",
             canonicalCommand: completedPayment.raw,
@@ -657,8 +617,6 @@ export async function POST(req: NextRequest) {
             parsedCommand: completedPayment,
             modelProfile: "paycmd-rules-fallback",
           },
-          chatMode,
-          decision,
         ),
       );
     }
@@ -670,7 +628,9 @@ export async function POST(req: NextRequest) {
         input,
       );
       return NextResponse.json(
-        guardCommandResult(
+        guardCommandResponse(
+          chatMode,
+          decision,
           {
             intent: "clarify",
             canonicalCommand: "",
@@ -682,8 +642,6 @@ export async function POST(req: NextRequest) {
             parsedCommand: pendingPayment,
             modelProfile: "paycmd-rules-fallback",
           },
-          chatMode,
-          decision,
         ),
       );
     }
@@ -764,10 +722,10 @@ export async function POST(req: NextRequest) {
         rawTail: response.text.slice(-120),
       });
       return NextResponse.json({
-        ...guardCommandResult(
-          deterministicCommandFallback(input, locale, recentMessages),
+        ...guardCommandResponse(
           chatMode,
           normalizeIntentDecision({}, input),
+          deterministicCommandFallback(input, locale, recentMessages),
         ),
         // Empty while `thinking` is off above, but this is the most valuable place to have a trace if
         // it is ever turned back on — it is the branch where the model answered and we could not use
@@ -787,10 +745,10 @@ export async function POST(req: NextRequest) {
         missingFields: parsedOutput.data.missingFields,
       });
       return NextResponse.json({
-        ...guardCommandResult(
-          deterministicCommandFallback(input, locale, recentMessages),
+        ...guardCommandResponse(
           chatMode,
           normalizeIntentDecision({}, input),
+          deterministicCommandFallback(input, locale, recentMessages),
         ),
         reasoning: response.reasoning || undefined,
         quota,
@@ -819,10 +777,10 @@ export async function POST(req: NextRequest) {
     console.error("DeepSeek command router failed:", error);
     if (fallbackInput) {
       return NextResponse.json(
-        guardCommandResult(
-          deterministicCommandFallback(fallbackInput, locale, fallbackRecentMessages),
+        guardCommandResponse(
           fallbackChatMode,
           normalizeIntentDecision({}, fallbackInput),
+          deterministicCommandFallback(fallbackInput, locale, fallbackRecentMessages),
         ),
       );
     }

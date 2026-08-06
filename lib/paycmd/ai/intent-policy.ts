@@ -14,6 +14,22 @@ export type IntentDecision = {
 };
 export type ModePolicyAction = "run_payna_action" | "run_askpayna" | "offer_askpayna" | "clarify";
 
+type GuardableCommandResponse = {
+  intent: "command" | "answer" | "clarify" | "crypto_research";
+  canonicalCommand: string;
+  parsedCommand: ParsedCommand | null;
+};
+
+type GuardedCommandResponse<T extends GuardableCommandResponse> = Omit<
+  T,
+  "intent" | "canonicalCommand" | "parsedCommand"
+> & {
+  intent: T["intent"] | "clarify";
+  canonicalCommand: string;
+  parsedCommand: ParsedCommand | null;
+  decision: IntentDecision;
+};
+
 const QUESTION_SIGNAL = /(?:\?|\bhow\b|\bwhat\b|\bwhy\b|\bshould\b|\blàm sao\b|\blà gi\b|\blà gì\b|\bvì sao\b|\bcó nên\b|\bphí (?:là |bao nhiêu))/iu;
 
 const REASON_CODES = new Set<IntentDecision["reasonCode"]>([
@@ -34,6 +50,10 @@ export function questionSignals(input: string): boolean {
   return QUESTION_SIGNAL.test(input);
 }
 
+function ambiguousIntentDecision(): IntentDecision {
+  return { speechAct: "ambiguous", confidence: "low", reasonCode: "conflicting_signals" };
+}
+
 function isValidIntentDecision(decision: Partial<IntentDecision>): decision is IntentDecision {
   const reasonCode = decision.reasonCode;
 
@@ -51,7 +71,7 @@ function isValidIntentDecision(decision: Partial<IntentDecision>): decision is I
 
 export function normalizeIntentDecision(raw: Partial<IntentDecision>, input: string): IntentDecision {
   if (!isValidIntentDecision(raw)) {
-    return { speechAct: "ambiguous", confidence: "low", reasonCode: "conflicting_signals" };
+    return ambiguousIntentDecision();
   }
 
   if (questionSignals(input)) {
@@ -71,4 +91,24 @@ export function applyModePolicy(mode: ChatMode, decision: IntentDecision): ModeP
 
 export function guardParsedCommand(mode: ChatMode, decision: IntentDecision, parsed: ParsedCommand | null) {
   return applyModePolicy(mode, decision) === "run_payna_action" ? parsed : null;
+}
+
+export function guardCommandResponse<T extends GuardableCommandResponse>(
+  mode: ChatMode,
+  decision: IntentDecision,
+  response: T,
+): GuardedCommandResponse<T> {
+  const guardedDecision =
+    response.intent === "command" && applyModePolicy("paycmd", decision) !== "run_payna_action"
+      ? ambiguousIntentDecision()
+      : decision;
+  const failClosed = guardedDecision.speechAct === "ambiguous";
+
+  return {
+    ...response,
+    intent: failClosed ? "clarify" : response.intent,
+    canonicalCommand: failClosed ? "" : response.canonicalCommand,
+    decision: guardedDecision,
+    parsedCommand: guardParsedCommand(mode, guardedDecision, response.parsedCommand),
+  };
 }

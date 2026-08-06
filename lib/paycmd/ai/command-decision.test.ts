@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { parsePayCmd } from "../commands.ts";
-import { guardParsedCommand } from "./intent-policy.ts";
+import { guardCommandResponse, guardParsedCommand, normalizeIntentDecision } from "./intent-policy.ts";
 import { aiCommandRequestSchema, aiCommandResponseSchema } from "./schema.ts";
 
 test("suppresses a parsed command outside Payna action policy", () => {
@@ -64,4 +64,53 @@ test("requires a structured intent decision from the command router", () => {
     }).success,
     false,
   );
+});
+
+test("fails a deterministic command with question morphology closed", () => {
+  const parsedCommand = parsePayCmd("/pay 50 USDC to Minh on arc from base");
+  const questionDecision = normalizeIntentDecision(
+    { speechAct: "action", confidence: "high", reasonCode: "explicit_imperative" },
+    "from base to arc?",
+  );
+
+  const guarded = guardCommandResponse(
+    "paycmd",
+    questionDecision,
+    {
+      intent: "command",
+      canonicalCommand: parsedCommand.raw,
+      parsedCommand,
+    },
+  );
+
+  assert.equal(guarded.intent, "clarify");
+  assert.equal(guarded.canonicalCommand, "");
+  assert.deepEqual(guarded.decision, {
+    speechAct: "ambiguous",
+    confidence: "low",
+    reasonCode: "conflicting_signals",
+  });
+  assert.equal(guarded.parsedCommand, null);
+});
+
+test("keeps a compatible deterministic action executable in Payna", () => {
+  const parsedCommand = parsePayCmd("/pay 50 USDC to Minh on arc from base");
+  const actionDecision = normalizeIntentDecision(
+    { speechAct: "action", confidence: "high", reasonCode: "explicit_imperative" },
+    "Gửi 50 USDC cho Minh từ Base sang Arc",
+  );
+
+  const guarded = guardCommandResponse(
+    "paycmd",
+    actionDecision,
+    {
+      intent: "command",
+      canonicalCommand: parsedCommand.raw,
+      parsedCommand,
+    },
+  );
+
+  assert.equal(guarded.intent, "command");
+  assert.equal(guarded.decision.speechAct, "action");
+  assert.equal(guarded.parsedCommand?.command, "pay");
 });

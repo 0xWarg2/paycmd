@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { applyModePolicy, normalizeIntentDecision, questionSignals } from "./intent-policy.ts";
+import {
+  applyModePolicy,
+  normalizeIntentDecision,
+  questionSignals,
+  type IntentDecision,
+} from "./intent-policy.ts";
 
 test("keeps Vietnamese transfer questions non-transactional in AskPayna", () => {
   const decision = normalizeIntentDecision(
