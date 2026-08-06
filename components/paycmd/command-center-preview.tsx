@@ -15,7 +15,7 @@ import {
   CommandPalette,
   CommandPreviewCard,
   ModeBoundCommandPreview,
-  WalletContextBadge,
+  ProviderBadge,
   useChatModeBoundary,
   type AssistantAction,
 } from "@/components/paycmd-app";
@@ -25,6 +25,10 @@ import {
   ExecutionTimeline,
 } from "@/components/paycmd/transaction-safety";
 import { createPreviewExpiresAt } from "@/lib/paycmd/preview-lease";
+import {
+  normalizeWalletContextStatus,
+  walletContextMetadataFromResearch,
+} from "@/lib/paycmd/ai/wallet-context-status";
 import type { ParsedCommand } from "@/lib/paycmd/commands";
 
 const previewDraft: ParsedCommand = {
@@ -45,6 +49,28 @@ const previewDraft: ParsedCommand = {
 };
 
 type PreviewLeaseFixture = "live" | "expired" | "legacy";
+
+const walletContextFixtureAddress = "0x2222222222222222222222222222222222222222";
+
+function WalletContextMessageFixture({ status }: { status: "verified" | "partial" | "unavailable" }) {
+  const apiResponse = {
+    walletContextStatus: status,
+    walletContext: {
+      externalWallets: [{ address: walletContextFixtureAddress, usdc: "30" }],
+    },
+  };
+  const persistedMetadata = walletContextMetadataFromResearch(apiResponse);
+  const reloadedStatus = normalizeWalletContextStatus(persistedMetadata.walletContextStatus);
+
+  return (
+    <section data-testid={`wallet-context-message-${status}`}>
+      {reloadedStatus ? <ProviderBadge provider="asksurf" walletContextStatus={reloadedStatus} /> : null}
+      <output data-testid={`wallet-context-metadata-${status}`} className="sr-only">
+        {JSON.stringify(persistedMetadata)}
+      </output>
+    </section>
+  );
+}
 
 function ProductionPreviewLeaseFixture({ lease }: { lease: PreviewLeaseFixture }) {
   const [previewExpiresAt] = useState<string | undefined>(() => {
@@ -201,9 +227,9 @@ export function CommandCenterPreview() {
   if (searchParams.get("walletContext") === "1") {
     return (
       <main className="mx-auto flex max-w-3xl flex-wrap gap-3 p-8">
-        <WalletContextBadge status="verified" />
-        <WalletContextBadge status="partial" />
-        <WalletContextBadge status="unavailable" />
+        <WalletContextMessageFixture status="verified" />
+        <WalletContextMessageFixture status="partial" />
+        <WalletContextMessageFixture status="unavailable" />
       </main>
     );
   }

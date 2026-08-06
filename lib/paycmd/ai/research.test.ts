@@ -124,6 +124,7 @@ test("appends point-in-time wallet evidence after official evidence and disclose
 test("shortens full wallet addresses in model context, answers, and persisted reasoning", async () => {
   const fullAddress = "0x2222222222222222222222222222222222222222";
   const shortenedAddress = "0x2222…2222";
+  const officialAddress = "0x3333333333333333333333333333333333333333";
   let prompt = "";
   const result = await askResearch(
     {
@@ -143,8 +144,8 @@ test("shortens full wallet addresses in model context, answers, and persisted re
       askDeepSeek: async (request) => {
         prompt = request.messages.map((message) => message.content).join("\n");
         return {
-          text: `# Balance\n\n## Wallet\nAddress ${fullAddress}.\n\n## Related Questions\n- What is Gateway?`,
-          reasoning: `The observed wallet is ${fullAddress}.`,
+          text: `# Balance\n\n## Wallet\nWallet ${fullAddress}; official contract ${officialAddress}.\n\n## Related Questions\n- What is Gateway?`,
+          reasoning: `The observed wallet is ${fullAddress}; the unrelated official contract is ${officialAddress}.`,
           model: request.model,
         };
       },
@@ -157,6 +158,8 @@ test("shortens full wallet addresses in model context, answers, and persisted re
   assert.match(result.assistantText, new RegExp(shortenedAddress));
   assert.doesNotMatch(result.reasoning ?? "", new RegExp(fullAddress));
   assert.match(result.reasoning ?? "", new RegExp(shortenedAddress));
+  assert.match(result.assistantText, new RegExp(officialAddress));
+  assert.match(result.reasoning ?? "", new RegExp(officialAddress));
 });
 
 test("does not fall back to static or model-authored links when retrieval is unavailable", async () => {

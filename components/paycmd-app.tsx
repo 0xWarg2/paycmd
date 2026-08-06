@@ -73,6 +73,11 @@ import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import { localeRequestHeaders, translateClient, useI18n } from "@/lib/i18n";
 import type { GroundingStatus, KnowledgeSource, WalletContextStatus } from "@/lib/paycmd/ai/knowledge-types";
+import {
+  normalizeWalletContextStatus,
+  walletContextMetadata,
+  walletContextMetadataFromResearch,
+} from "@/lib/paycmd/ai/wallet-context-status";
 import { balanceBreakdown } from "@/lib/paycmd/balance-breakdown";
 import {
   buildTransactionPreviewModel,
@@ -416,10 +421,6 @@ function normalizeGroundingStatus(value: unknown): GroundingStatus | undefined {
   return value === "verified" || value === "partial" || value === "unavailable" || value === "not_applicable"
     ? value
     : undefined;
-}
-
-function normalizeWalletContextStatus(value: unknown): WalletContextStatus | undefined {
-  return value === "verified" || value === "partial" || value === "unavailable" ? value : undefined;
 }
 
 function normalizeKnowledgeSources(value: unknown): KnowledgeSource[] | undefined {
@@ -2720,7 +2721,7 @@ export function PayCmdApp() {
       quotaContactCta: message.quotaContactCta ?? null,
       groundingStatus: message.groundingStatus ?? null,
       knowledgeSources: message.knowledgeSources ?? null,
-      walletContextStatus: message.walletContextStatus ?? null,
+      ...walletContextMetadata(message.walletContextStatus),
     };
     const { data, error } = await supabase
       .from("chat_messages")
@@ -2799,7 +2800,7 @@ export function PayCmdApp() {
           quotaContactCta: target.quotaContactCta ?? null,
           groundingStatus: target.groundingStatus ?? null,
           knowledgeSources: target.knowledgeSources ?? null,
-          walletContextStatus: target.walletContextStatus ?? null,
+          ...walletContextMetadata(target.walletContextStatus),
         },
       })
       .eq("id", messageId)
@@ -2889,6 +2890,7 @@ export function PayCmdApp() {
           locale,
         }),
       })) as CryptoResearchResult;
+      const walletMetadata = walletContextMetadataFromResearch(result);
 
       await saveMessage({
         role: "assistant",
@@ -2903,7 +2905,7 @@ export function PayCmdApp() {
         quota: result.quota,
         groundingStatus: result.groundingStatus,
         knowledgeSources: result.knowledgeSources,
-        walletContextStatus: result.walletContextStatus,
+        walletContextStatus: walletMetadata.walletContextStatus ?? undefined,
         actions: paynaSwitchActions,
       });
     } catch (error) {
@@ -5122,7 +5124,7 @@ export function AssistantActionBar({
   );
 }
 
-function ProviderBadge({
+export function ProviderBadge({
   provider,
   model,
   surfMode,

@@ -66,9 +66,17 @@ test("Payna questions wait for the explicit AskPayna consent action", async ({ p
 test("shows compact wallet availability on AskPayna answers without exposing addresses", async ({ page }) => {
   await page.goto("/dev/ui-preview?walletContext=1");
 
-  await expect(page.getByText("Balances verified", { exact: true })).toBeVisible();
-  await expect(page.getByText("Some balances unavailable", { exact: true })).toBeVisible();
-  await expect(page.getByText("Balances unavailable", { exact: true })).toBeVisible();
+  for (const [status, label] of [
+    ["verified", "Balances verified"],
+    ["partial", "Some balances unavailable"],
+    ["unavailable", "Balances unavailable"],
+  ] as const) {
+    const message = page.getByTestId(`wallet-context-message-${status}`);
+    await expect(message.getByText(label, { exact: true })).toBeVisible();
+    await expect(page.getByTestId(`wallet-context-metadata-${status}`)).toHaveText(
+      JSON.stringify({ walletContextStatus: status }),
+    );
+  }
   await expect(page.getByText("0x2222222222222222222222222222222222222222")).toHaveCount(0);
 });
 

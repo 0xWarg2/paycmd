@@ -34,7 +34,7 @@ export type ResearchResult = {
   walletContextStatus?: WalletContextStatus;
 };
 
-type ResearchOptions = {
+export type ResearchOptions = {
   input: string;
   recentMessages?: { role: string; text: string }[];
   surfMode?: ResearchMode;
@@ -115,8 +115,17 @@ function removeUnverifiedLinks(text: string) {
     .replace(/[ \t]+\n/g, "\n");
 }
 
-function shortenWalletAddresses(text: string) {
-  return text.replace(/\b0x[a-fA-F0-9]{40}\b/g, (address) => `${address.slice(0, 6)}…${address.slice(-4)}`);
+function linkedWalletAddresses(context: WalletContext | null | undefined) {
+  if (!context) return new Set<string>();
+  return new Set([
+    ...context.circleSca.map((wallet) => wallet.address.toLowerCase()),
+    ...context.externalWallets.map((wallet) => wallet.address.toLowerCase()),
+  ]);
+}
+
+function shortenWalletAddresses(text: string, addresses: ReadonlySet<string>) {
+  return text.replace(/\b0x[a-fA-F0-9]{40}\b/g, (address) =>
+    addresses.has(address.toLowerCase()) ? `${address.slice(0, 6)}…${address.slice(-4)}` : address);
 }
 
 export function assembleResearchContext({
@@ -128,7 +137,9 @@ export function assembleResearchContext({
   walletContext?: WalletContext | null;
 }) {
   const officialEvidence = formatKnowledgeContext(knowledge);
-  const walletEvidence = walletContext ? shortenWalletAddresses(formatWalletContext(walletContext)) : "";
+  const walletEvidence = walletContext
+    ? shortenWalletAddresses(formatWalletContext(walletContext), linkedWalletAddresses(walletContext))
+    : "";
 
   return {
     promptContext: [officialEvidence, walletEvidence].filter(Boolean).join("\n\n"),
@@ -191,14 +202,15 @@ export async function askResearch(
     timeoutMs: profile.timeoutMs,
     thinking: profile.thinking,
   });
+  const walletAddresses = linkedWalletAddresses(walletContext);
   return {
-    assistantText: shortenWalletAddresses(removeUnverifiedLinks(response.text)),
+    assistantText: shortenWalletAddresses(removeUnverifiedLinks(response.text), walletAddresses),
     citations: researchContext.citations,
     model: response.model,
     surfMode: resolvedSurfMode,
     effort: resolvedEffort,
     durationMs: Date.now() - startedAt,
-    reasoning: response.reasoning ? shortenWalletAddresses(response.reasoning) : undefined,
+    reasoning: response.reasoning ? shortenWalletAddresses(response.reasoning, walletAddresses) : undefined,
     groundingStatus: knowledge.status,
     knowledgeSources: knowledge.sources,
     walletContextStatus: walletContext?.status,
