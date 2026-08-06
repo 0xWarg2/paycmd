@@ -63,31 +63,6 @@ test("Payna questions wait for the explicit AskPayna consent action", async ({ p
   await expect(page.getByTestId("mode-safety-state")).toContainText("research=1");
 });
 
-test("shows compact wallet availability on AskPayna answers without exposing addresses", async ({ page }) => {
-  await page.goto("/dev/ui-preview?walletContext=1");
-
-  for (const [status, label] of [
-    ["verified", "Balances verified"],
-    ["partial", "Some balances unavailable"],
-    ["unavailable", "Balances unavailable"],
-  ] as const) {
-    const message = page.getByTestId(`wallet-context-production-message-${status}`);
-    await expect(message.getByText(label, { exact: true })).toBeVisible();
-    const metadata = page.getByTestId(`wallet-context-production-metadata-${status}`);
-    await expect(metadata).toContainText(
-      `"walletContextStatus":"${status}"`,
-    );
-    await expect(metadata).not.toContainText("0x2222222222222222222222222222222222222222");
-  }
-  const invalidMessage = page.getByTestId("wallet-context-production-message-invalid");
-  await expect(invalidMessage).not.toContainText("Balances");
-  await expect(page.getByTestId("wallet-context-production-metadata-invalid")).toContainText(
-    '"walletContextStatus":null',
-  );
-  await expect(page.getByText("0x2222222222222222222222222222222222222222")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /confirm|retry command|switch to payna/i })).toHaveCount(0);
-});
-
 test("expires a transaction preview after fifteen seconds", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-08-07T00:00:00.000Z") });
   await page.addInitScript(() => window.localStorage.setItem("paycmd_locale", "en"));

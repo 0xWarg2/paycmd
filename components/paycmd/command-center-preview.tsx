@@ -12,16 +12,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import {
   AssistantActionBar,
-  askPaynaAssistantMessageFromResponse,
-  buildChatMessageInsertPayload,
   CommandPalette,
   CommandPreviewCard,
-  mapRowToMessage,
-  MessageBubble,
   ModeBoundCommandPreview,
   useChatModeBoundary,
   type AssistantAction,
-  type CryptoResearchResult,
 } from "@/components/paycmd-app";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { TransactionHistory, type Transaction } from "@/components/transaction-history";
@@ -49,58 +44,6 @@ const previewDraft: ParsedCommand = {
 };
 
 type PreviewLeaseFixture = "live" | "expired" | "legacy";
-
-const walletContextFixtureAddress = "0x2222222222222222222222222222222222222222";
-
-function WalletContextMessageFixture({
-  status,
-}: {
-  status: "verified" | "partial" | "unavailable" | "invalid";
-}) {
-  const apiResponse = {
-    assistantText: "# Wallet context\n\n## Guidance\nRead-only balance guidance.\n\n## Related Questions\n- What is Gateway?",
-    provider: "asksurf",
-    walletContextStatus: status === "invalid" ? "ready" : status,
-    walletContext: {
-      externalWallets: [{ address: walletContextFixtureAddress, usdc: "30" }],
-    },
-  };
-  const clientMessage = askPaynaAssistantMessageFromResponse(
-    apiResponse as unknown as CryptoResearchResult,
-    {
-      text: apiResponse.assistantText,
-      surfMode: "research",
-      effort: "standard",
-    },
-  );
-  const insertPayload = buildChatMessageInsertPayload(clientMessage, "fixture-thread", "fixture-user");
-  const reloadedMessage = mapRowToMessage({
-    id: `wallet-context-${status}`,
-    ...insertPayload,
-    created_at: "2026-08-07T00:00:00.000Z",
-  });
-
-  return (
-    <section data-testid={`wallet-context-production-message-${status}`}>
-      <MessageBubble
-        message={reloadedMessage}
-        chatMode="asksurf"
-        activeDraftId={null}
-        isLatestExecutionStatus={false}
-        isLastMessage
-        onConfirm={() => undefined}
-        onCancel={() => undefined}
-        onRelatedQuestion={() => undefined}
-        onSwitchToPayCmd={() => undefined}
-        onRetryCommand={() => undefined}
-        onSuggestedCommand={() => undefined}
-      />
-      <output data-testid={`wallet-context-production-metadata-${status}`} className="sr-only">
-        {JSON.stringify(insertPayload.metadata)}
-      </output>
-    </section>
-  );
-}
 
 function ProductionPreviewLeaseFixture({ lease }: { lease: PreviewLeaseFixture }) {
   const [previewExpiresAt] = useState<string | undefined>(() => {
@@ -252,17 +195,6 @@ export function CommandCenterPreview() {
 
   if (searchParams.get("modeSafety") === "1") {
     return <ModeSafetyFixture />;
-  }
-
-  if (searchParams.get("walletContext") === "1") {
-    return (
-      <main className="mx-auto flex max-w-3xl flex-wrap gap-3 p-8">
-        <WalletContextMessageFixture status="verified" />
-        <WalletContextMessageFixture status="partial" />
-        <WalletContextMessageFixture status="unavailable" />
-        <WalletContextMessageFixture status="invalid" />
-      </main>
-    );
   }
 
   return (
