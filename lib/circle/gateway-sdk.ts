@@ -35,8 +35,11 @@ import { type PayCmdChain } from "@/lib/paycmd/chains";
 import {
   gatewayForwardedMintReceiptMatches,
   gatewayForwardingSettlementFrom,
+  gatewayBurnIntentSetTransferPayload,
   pollGatewayForwardingTransfer,
   requestGatewayFeeEstimate,
+  requestGatewayFeeEstimateSet,
+  type GatewayBurnIntentSetEstimate,
   type GatewayFeeEstimate,
 } from "@/lib/paycmd/gateway-transfer";
 import { web3Chains } from "@/lib/paycmd/web3-chains";
@@ -483,6 +486,10 @@ const BurnIntent = [
   { name: "spec", type: "TransferSpec" },
 ] as const;
 
+const BurnIntentSet = [
+  { name: "intents", type: "BurnIntent[]" },
+] as const;
+
 function addressToBytes32(address: Address): `0x${string}` {
   return pad(address.toLowerCase() as Address, { size: 32 });
 }
@@ -549,6 +556,29 @@ export function buildGatewayBurnIntentPreview(params: {
   };
 }
 
+export function buildGatewayBurnIntentSetPreview(params: {
+  allocations: Array<{
+    amount: bigint;
+    sourceChain: SupportedChain;
+    sourceDepositor: Address;
+  }>;
+  destinationChain: SupportedChain;
+  recipient: Address;
+  sourceSigner: Address;
+}): BurnIntentData[] {
+  if (params.allocations.length === 0 || params.allocations.length > 16) {
+    throw new Error("Gateway BurnIntentSet requires between 1 and 16 source allocations.");
+  }
+  return params.allocations.map((allocation) => buildGatewayBurnIntentPreview({
+    amount: allocation.amount,
+    sourceChain: allocation.sourceChain,
+    destinationChain: params.destinationChain,
+    recipient: params.recipient,
+    sourceDepositor: allocation.sourceDepositor,
+    sourceSigner: params.sourceSigner,
+  }));
+}
+
 function burnIntentTypedData(burnIntent: BurnIntentData) {
   const domain = {
     name: "GatewayWallet",
@@ -572,6 +602,32 @@ function burnIntentTypedData(burnIntent: BurnIntentData) {
         destinationCaller: addressToBytes32(burnIntent.spec.destinationCaller),
       },
     },
+  };
+}
+
+function burnIntentMessage(burnIntent: BurnIntentData) {
+  return {
+    ...burnIntent,
+    spec: {
+      ...burnIntent.spec,
+      sourceContract: addressToBytes32(burnIntent.spec.sourceContract),
+      destinationContract: addressToBytes32(burnIntent.spec.destinationContract),
+      sourceToken: addressToBytes32(burnIntent.spec.sourceToken),
+      destinationToken: addressToBytes32(burnIntent.spec.destinationToken),
+      sourceDepositor: addressToBytes32(burnIntent.spec.sourceDepositor),
+      destinationRecipient: addressToBytes32(burnIntent.spec.destinationRecipient),
+      sourceSigner: addressToBytes32(burnIntent.spec.sourceSigner),
+      destinationCaller: addressToBytes32(burnIntent.spec.destinationCaller),
+    },
+  };
+}
+
+function burnIntentSetTypedData(burnIntents: BurnIntentData[]) {
+  return {
+    types: { EIP712Domain, TransferSpec, BurnIntent, BurnIntentSet },
+    domain: { name: "GatewayWallet", version: "1" },
+    primaryType: "BurnIntentSet" as const,
+    message: { intents: burnIntents.map(burnIntentMessage) },
   };
 }
 
@@ -818,6 +874,39 @@ export async function submitBurnIntent(
   };
 }
 
+export async function submitBurnIntentSet(
+  burnIntents: Record<string, unknown>[],
+  signature: `0x${string}`,
+  options?: { enableForwarder?: boolean },
+): Promise<{
+  attestation?: `0x${string}`;
+  attestationSignature?: `0x${string}`;
+  transferId: string;
+  fees: any;
+}> {
+  const transferUrl = new URL("https://gateway-api-testnet.circle.com/v1/transfer");
+  if (options?.enableForwarder) transferUrl.searchParams.set("enableForwarder", "true");
+
+  const response = await fetch(transferUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(gatewayBurnIntentSetTransferPayload(burnIntents, signature)),
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Gateway BurnIntentSet API error: ${response.status} - ${detail}`);
+  }
+
+  const data = await response.json();
+  const result = Array.isArray(data) ? data[0] : data;
+  return {
+    attestation: result.attestation as `0x${string}`,
+    attestationSignature: result.signature as `0x${string}`,
+    transferId: result.transferId,
+    fees: result.fees,
+  };
+}
+
 async function forwardedMintSucceededOnchain(
   transferDetails: unknown,
   destinationChain: SupportedChain,
@@ -1002,6 +1091,11 @@ async function getSignerWalletIdForUser(
   return await getGatewayEOAWalletId(userId, blockchain);
 }
 
+async function getMultichainSignerWalletIdForUser(userId: string) {
+  const { getGatewayEOAWalletId } = await import("@/lib/circle/create-gateway-eoa-wallets");
+  return await getGatewayEOAWalletId(userId, "MULTICHAIN");
+}
+
 /**
  * Check if a wallet has sufficient native token balance for gas fees
  * Returns the wallet address and balance info
@@ -1051,6 +1145,17 @@ export async function estimateGatewayTransferFee(
   return requestGatewayFeeEstimate(typedData.message as unknown as Record<string, unknown>, {
     enableForwarder: Boolean(options?.enableForwarder),
   });
+}
+
+export async function estimateGatewayTransferSetFee(
+  burnIntents: BurnIntentData[],
+  options?: { enableForwarder?: boolean },
+): Promise<GatewayBurnIntentSetEstimate> {
+  const typedData = burnIntentSetTypedData(burnIntents);
+  return requestGatewayFeeEstimateSet(
+    typedData.message.intents as unknown as Record<string, unknown>[],
+    { enableForwarder: Boolean(options?.enableForwarder) },
+  );
 }
 
 export async function isGatewaySignerAuthorized(
@@ -1111,6 +1216,69 @@ async function signBurnIntentWithEOA(
   }
 
   return response.data.signature as `0x${string}`;
+}
+
+async function signBurnIntentSetWithEOA(
+  burnIntents: BurnIntentData[],
+  userId: string,
+): Promise<`0x${string}`> {
+  const typedData = burnIntentSetTypedData(burnIntents);
+  const { walletId } = await getMultichainSignerWalletIdForUser(userId);
+  const serializedTypedData = JSON.parse(JSON.stringify(typedData, (_key, value) =>
+    typeof value === "bigint" ? value.toString() : value));
+  const response = await circleDeveloperSdk.signTypedData({
+    walletId,
+    data: JSON.stringify(serializedTypedData),
+  });
+  if (!response.data?.signature) throw new Error("Failed to sign BurnIntentSet with Circle SDK");
+  return response.data.signature as `0x${string}`;
+}
+
+export async function transferGatewayBurnIntentSetWithEOA(
+  userId: string,
+  burnIntents: BurnIntentData[],
+  destinationChain: SupportedChain,
+  recipientAddress: Address,
+  options?: { enableForwarder?: boolean },
+): Promise<{
+  transferId: string;
+  attestation?: `0x${string}`;
+  attestationSignature?: `0x${string}`;
+  fees?: any;
+  forwardingDetails?: any;
+  destinationTxHash?: Hash;
+}> {
+  if (burnIntents.length === 0 || burnIntents.length > 16) {
+    throw new Error("Gateway BurnIntentSet requires between 1 and 16 intents.");
+  }
+  const signerAddresses = new Set(burnIntents.map((intent) => intent.spec.sourceSigner.toLowerCase()));
+  if (signerAddresses.size !== 1) {
+    throw new Error("Every BurnIntentSet intent must use the same sourceSigner.");
+  }
+
+  const signature = await signBurnIntentSetWithEOA(burnIntents, userId);
+  const typedData = burnIntentSetTypedData(burnIntents);
+  const result = await submitBurnIntentSet(
+    typedData.message.intents as unknown as Record<string, unknown>[],
+    signature,
+    { enableForwarder: options?.enableForwarder },
+  );
+
+  if (!options?.enableForwarder) return result;
+  const amount = burnIntents.reduce((total, intent) => total + intent.spec.value, 0n);
+  const transferDetails = await pollForwardedGatewayTransfer(
+    result.transferId,
+    destinationChain,
+    recipientAddress,
+    amount,
+  );
+  const settlement = gatewayForwardingSettlementFrom(transferDetails);
+  return {
+    ...result,
+    fees: (transferDetails as any)?.fees ?? result.fees,
+    forwardingDetails: (transferDetails as any)?.forwardingDetails,
+    destinationTxHash: settlement.destinationTxHash,
+  };
 }
 
 /**

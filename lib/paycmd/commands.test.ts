@@ -19,3 +19,27 @@ test("pay becomes ready only after both chains are explicit", () => {
   assert.equal(draft.fields.sourceChain, "baseSepolia");
   assert.equal(draft.fields.destinationChain, "arcTestnet");
 });
+
+test("transfer from gateway selects unified source mode without requiring one source chain", () => {
+  const draft = parsePayCmd("/transfer 5 USDC from gateway to arc");
+
+  assert.equal(draft.status, "draft_ready");
+  assert.equal(draft.fields.sourceMode, "unified");
+  assert.equal(draft.fields.sourceChain, "");
+  assert.equal(draft.fields.destinationChain, "arcTestnet");
+  assert.deepEqual(draft.missingFields, []);
+});
+
+test("pay from gateway selects unified source mode while scoped pay remains unchanged", () => {
+  const unified = parsePayCmd("/pay 5 USDC to Minh on arc from gateway");
+  const scoped = parsePayCmd("/pay 5 USDC to Minh on arc from base");
+
+  assert.equal(unified.status, "draft_ready");
+  assert.equal(unified.fields.sourceMode, "unified");
+  assert.equal(unified.fields.sourceChain, "");
+  assert.deepEqual(unified.missingFields, []);
+
+  assert.equal(scoped.status, "draft_ready");
+  assert.equal(scoped.fields.sourceMode, "scoped");
+  assert.equal(scoped.fields.sourceChain, "baseSepolia");
+});

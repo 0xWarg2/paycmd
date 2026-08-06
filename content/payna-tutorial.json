@@ -74,7 +74,7 @@
           ],
           "content": [
             "Gateway ready balance gồm finalized deposit được ghi nhận cho một depositor và domain; SCA USDC và pending deposit là các phần riêng.",
-            "Payna có thể cộng SCA và Gateway để hiển thị visibility, nhưng transfer hiện tại chỉ debit một Gateway source domain được chọn rõ ràng."
+            "Payna giữ named source command strict, nhưng explicit unified fallback có thể allocate ready balance qua tối đa 16 intent trong BurnIntentSet."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/unified-balance"
         },
@@ -99,14 +99,14 @@
           "title": "Gateway transfer",
           "keywords": [
             "transfer",
-            "burn intent",
-            "mint",
-            "source-scoped",
+            "burn intent set",
+            "unified gateway",
+            "source allocation",
             "fee"
           ],
           "content": [
-            "Payna estimate trước, rồi yêu cầu amount cộng fee trên named source domain trước khi authorize và ký một burn intent.",
-            "Ví dụ `/transfer 5 from base to arc` chỉ tiêu ready balance trên Base; auto forwarding và manual mint tạo destination result khác nhau, và sau submission phải kiểm tra status trước khi retry."
+            "`/transfer 5 from base to arc` vẫn source-scoped. Nếu ready balance thiếu, Payna cho chọn minimum deposit hoặc unified BurnIntentSet; không auto-deposit.",
+            "Unified preview hiện từng allocation, maximum fee reserve và maximum debit, rồi bind confirmation với fingerprint của quote mới nhất."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/transfer"
         },
@@ -135,8 +135,8 @@
             "manual mint"
           ],
           "content": [
-            "Gateway fee debit source USDC, source-side wallet operation dùng native gas, còn manual destination mint cần native gas từ minting wallet.",
-            "Transfer flow quote trước state change; withdraw chỉ initialize signer sau confirmation rồi mới quote và check execution requirement."
+            "`fees.total` là current estimated/settled charge; `maxFee` từng intent là signed cap, và tổng cap là maximum reserve chứ không phải expected fee.",
+            "Unified allocation trừ maxFee từng intent khỏi usable balance; deposit và persistent delegate authorization là confirmation riêng."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/fees-gas-and-forwarding"
         },
@@ -287,7 +287,7 @@
             "gateway"
           ],
           "content": [
-            "Gateway commands gồm /deposit, /withdraw, /transfer, /gas và /gateway; mọi money movement có preview và source-scoped checks."
+            "Gateway command gồm /deposit, /withdraw, /transfer, /gas và /gateway; transfer scoped-first và có explicit fallback sang unified BurnIntentSet."
           ],
           "url": "https://heypayna.xyz/docs/commands/gateway"
         },
@@ -436,7 +436,7 @@
           ],
           "content": [
             "Gateway ready balance includes finalized deposits recorded for a depositor and domain; SCA USDC and pending deposits are separate.",
-            "Payna may display SCA and Gateway amounts together for visibility, but current transfers debit one explicitly selected Gateway source domain."
+            "Payna keeps scoped commands strict, but an explicit unified fallback can allocate ready balance across up to 16 BurnIntentSet intents."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/unified-balance"
         },
@@ -461,14 +461,14 @@
           "title": "Gateway transfer",
           "keywords": [
             "transfer",
-            "burn intent",
-            "mint",
-            "source-scoped",
+            "burn intent set",
+            "unified gateway",
+            "source allocation",
             "fee"
           ],
           "content": [
-            "Payna estimates first, then requires amount plus fee on the named source domain before authorizing and signing one burn intent.",
-            "For example, `/transfer 5 from base to arc` spends only ready balance on Base; auto forwarding and manual mint produce different destination results, and status must be checked before retrying."
+            "`/transfer 5 from base to arc` remains source-scoped. If that ready balance is short, Payna offers an explicit minimum deposit or a unified BurnIntentSet; it never auto-deposits.",
+            "A unified preview shows every allocation, maximum fee reserve and maximum debit, then binds confirmation to a fresh quote fingerprint."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/transfer"
         },
@@ -497,8 +497,8 @@
             "manual mint"
           ],
           "content": [
-            "Gateway fees debit source USDC, source-side wallet operations use native gas, and manual destination mint requires native gas from the minting wallet.",
-            "The transfer flow quotes before state changes; withdraw initializes its signer only after confirmation, then quotes and checks execution requirements."
+            "`fees.total` is the current estimated/settled charge; per-intent `maxFee` is a signed cap, and their sum is maximum reserve rather than expected fee.",
+            "Unified allocation subtracts each maxFee from usable balance; deposit and persistent delegate authorization are separate confirmations."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/fees-gas-and-forwarding"
         },
@@ -649,7 +649,7 @@
             "gateway"
           ],
           "content": [
-            "Gateway commands include /deposit, /withdraw, /transfer, /gas, and /gateway; all money movement uses previews and source-scoped checks."
+            "Gateway commands include /deposit, /withdraw, /transfer, /gas, and /gateway; transfer is scoped-first and can explicitly fall back to a unified BurnIntentSet."
           ],
           "url": "https://heypayna.xyz/docs/commands/gateway"
         },

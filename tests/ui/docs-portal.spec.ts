@@ -23,7 +23,7 @@ test("renders nested Circle Gateway docs with navigation, search, and accessible
   await page.goto("/docs/circle/gateway/unified-balance");
 
   await expect(page.getByRole("heading", { level: 1, name: "Circle Gateway unified balance" })).toBeVisible();
-  await expect(page.getByRole("heading", { level: 2, name: "Transfer vẫn source-scoped" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Transfer scoped-first và unified execution" })).toBeVisible();
   const search = page.getByRole("searchbox", { name: "Tìm trong tài liệu" });
   await expect(search).toBeVisible();
   await search.fill("finality");

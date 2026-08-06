@@ -9,7 +9,7 @@ keywords: ["Circle Gateway", "unified balance", "SCA", "depositor"]
 tutorial: true
 aiSummary:
   - "Gateway ready balance includes finalized deposits recorded for a depositor and domain; SCA USDC and pending deposits are separate."
-  - "Payna may display SCA and Gateway amounts together for visibility, but current transfers debit one explicitly selected Gateway source domain."
+  - "Payna keeps scoped commands strict, but an explicit unified fallback can allocate ready balance across up to 16 BurnIntentSet intents."
 ---
 
 The phrase “unified balance” describes Circle Gateway's deposited-liquidity model. It must not be used as shorthand for every USDC amount visible in Payna. The safest way to read the balance screen is to keep the owner, location, domain, and settlement state attached to every number.
@@ -49,11 +49,11 @@ The primary Payna settlement signal is Circle's signed `gateway.deposit.finalize
 
 After Gateway accepts a transfer request, its ledger can decrement before every local display has refreshed. Do not interpret a stale source row as reusable funds. Use the transfer ID, forwarding state, and destination transaction hash to reconcile submitted work.
 
-## Why transfer remains source-scoped
+## Scoped-first transfer and unified execution
 
-**Current Payna implementation behavior:** the command must name one source, and Payna constructs one burn intent for that source domain. It compares that domain's ready amount with `amount + estimatedGatewayFee`. It does not sum several domains for execution even though the balance screen may sum them for visibility and the Circle protocol can represent multi-source requests.
+**Current Payna implementation behavior:** a named command remains source-scoped. `/transfer 5 from base to arc` constructs one burn intent, compares Base ready balance with `amount + maxFee`, and never spends another domain silently. `/transfer 5 from gateway to arc`, or the explicit **Use Unified Gateway** fallback, constructs a BurnIntentSet from selected ready sources.
 
-This boundary makes a preview auditable. The user sees which chain supplies liquidity, where signer authorization may be needed, what source fee was estimated, whether an auto-deposit is proposed, and what retry command applies. A unified total is never a promise that every source choice can spend that total.
+Unified execution still does not blindly spend the displayed total. The preview subtracts each intent's `maxFee`, excludes unusable or unauthorized sources, shows every proposed allocation, and binds confirmation to a quote fingerprint. SCA balances and pending deposits remain excluded. A unified total is therefore visibility; `maximumUsableCapacity` is the safer execution number.
 
 ## Example with balances on two domains
 
@@ -66,7 +66,7 @@ Suppose one SCA address has these successfully read balances:
 
 The **Circle Gateway ready total is 14 USDC**. The **Payna visible total is 34 USDC**, calculated as 20 SCA plus 14 Gateway. The 20 SCA is not silently converted into deposited liquidity.
 
-Now consider `/transfer 10 from arc to base`. If the quote is 0.03 USDC, Arc needs 10.03 ready. Arc has only 3, so the transfer cannot debit the 11 ready on Base under current Payna behavior. With auto-deposit enabled, Payna may determine that Arc's SCA has enough to deposit the 7.03 shortfall, submit it, and return a pending-finality response. The user should wait for that exact deposit to become ready, then retry. Alternatively, selecting Base as source creates a different route and requires a fresh quote.
+Now consider `/transfer 10 from arc to base`. If the maximum reserve is 0.03 USDC, Arc needs 10.03 ready. Arc has only 3, so scoped confirmation is disabled. Payna offers an explicit minimum deposit of 7.03 or a unified preview. Unified mode can propose Base plus Arc only after reserving each source intent's fee; it never deposits the SCA's 20 USDC automatically. Changing the selected sources creates a fresh quote and fingerprint.
 
 ## Depositor and signer scope
 
@@ -79,8 +79,8 @@ If a user has multiple SCA records or an older deposit made by another address, 
 - Label every amount as SCA, Gateway pending, or Gateway ready and retain its chain/domain.
 - Exclude pending deposits from spendable Gateway balance.
 - Treat partial reads as lower bounds; inspect `failedChains` and `gatewayUnavailable` before drawing conclusions.
-- For a transfer, check the selected source row rather than the cross-domain display total.
-- Require the selected row to cover both amount and the current fee estimate.
+- For scoped transfer, check the selected source row rather than the cross-domain display total.
+- For unified transfer, check every allocation, maximum fee reserve, exclusion, and `maximumUsableCapacity`.
 - Keep transaction hashes and transfer IDs until history and balance views agree.
 - Never paste a private key, Circle API key, or private RPC URL into a support message.
 

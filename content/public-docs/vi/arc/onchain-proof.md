@@ -27,7 +27,7 @@ Command ID được hash từ identifier hoặc field ổn định của action/
 
 Một proof đã mined chứng minh recorder được cấp quyền đã gửi đúng receipt payload đó vào registry được cấu hình tại một Arc block cụ thể. Bất kỳ ai cũng có thể đối chiếu event với hash, address, chain ID, amount và metadata do Payna cung cấp. Vì contract chỉ emit event bất biến, nó tạo public timestamped linkage giữa Payna action, source transaction, destination hoặc mint transaction và metadata commitment.
 
-Với swap, hai hash thường cùng trỏ tới Arc transaction. Với CCTP, chúng có thể là source burn và destination mint. Với Gateway transfer/pay, source có thể là auto-deposit còn destination chỉ mint hoặc forwarding. Zero hash chỉ nghĩa là phía đó không được truyền vào.
+Với swap, hai hash thường cùng trỏ tới Arc transaction. Với CCTP, chúng có thể là source burn và destination mint. Với Gateway transfer/pay, source có thể là explicit deposit user đã yêu cầu còn destination chỉ mint hoặc forwarding. Zero hash chỉ nghĩa là phía đó không được truyền vào.
 
 ## Proof không chứng minh điều gì
 

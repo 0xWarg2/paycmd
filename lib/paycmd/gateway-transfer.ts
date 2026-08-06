@@ -44,6 +44,18 @@ export type GatewayFeeEstimate = {
   feeBreakdown: GatewayFeeBreakdown;
 };
 
+export type GatewayBurnIntentEstimate = {
+  burnIntent: Record<string, unknown>;
+  sourceDomain: number;
+  maxBlockHeight: bigint;
+  maxFeeAtomic: bigint;
+  estimatedFeeAtomic: bigint;
+};
+
+export type GatewayBurnIntentSetEstimate = GatewayFeeEstimate & {
+  intents: GatewayBurnIntentEstimate[];
+};
+
 const manualMintChains = new Set<PayCmdChain>([
   "arcTestnet",
   "arbitrumSepolia",
@@ -225,6 +237,78 @@ export function parseGatewayFeeEstimate(
     maxFeeAtomic: reserve,
     feeEstimateKind: "max_fee_reserve",
     feeBreakdown,
+  };
+}
+
+export function parseGatewayFeeEstimateSet(
+  value: unknown,
+  options: { enableForwarder: boolean },
+): GatewayBurnIntentSetEstimate {
+  const root = recordFrom(value);
+  const body = Array.isArray(value)
+    ? value
+    : Array.isArray(root.body)
+      ? root.body
+      : [];
+  const first = recordFrom(body[0]);
+  const fees = Object.keys(recordFrom(root.fees)).length
+    ? recordFrom(root.fees)
+    : recordFrom(first.fees);
+  const burnIntentSet = recordFrom(first.burnIntentSet);
+  const rawIntents = Array.isArray(burnIntentSet.intents) ? burnIntentSet.intents : [];
+  if (rawIntents.length === 0 || rawIntents.length > 16) {
+    throw new Error("Circle Gateway estimate must return between 1 and 16 BurnIntentSet intents.");
+  }
+
+  if (own(fees, "token") && String(fees.token).toUpperCase() !== "USDC") {
+    throw new Error("Circle Gateway fee token must be USDC.");
+  }
+  if (own(fees, "perIntent") && !Array.isArray(fees.perIntent)) {
+    throw new Error("Circle Gateway fees.perIntent must be an array.");
+  }
+  const perIntentFees = Array.isArray(fees.perIntent) ? fees.perIntent : [];
+
+  const intents = rawIntents.map((value, index): GatewayBurnIntentEstimate => {
+    const burnIntent = recordFrom(value);
+    const spec = recordFrom(burnIntent.spec);
+    const maxFeeAtomic = positiveAtomic(burnIntent.maxFee);
+    const maxBlockHeight = positiveAtomic(burnIntent.maxBlockHeight);
+    const sourceDomain = Number(spec.sourceDomain);
+    if (!maxFeeAtomic || !maxBlockHeight || !Number.isSafeInteger(sourceDomain) || sourceDomain < 0) {
+      throw new Error(`Circle Gateway BurnIntentSet intent ${index} is missing a usable maxFee, maxBlockHeight, or sourceDomain.`);
+    }
+
+    const intentFees = recordFrom(perIntentFees[index]);
+    const baseFeeAtomic = optionalFeeAtomic(intentFees, "baseFee") ?? 0n;
+    const transferFeeAtomic = optionalFeeAtomic(intentFees, "transferFee") ?? 0n;
+    return {
+      burnIntent,
+      sourceDomain,
+      maxBlockHeight,
+      maxFeeAtomic,
+      estimatedFeeAtomic: baseFeeAtomic + transferFeeAtomic,
+    };
+  });
+
+  const maxFeeAtomic = intents.reduce((total, intent) => total + intent.maxFeeAtomic, 0n);
+  const hasQuotedTotal = own(fees, "total");
+  const quotedTotal = hasQuotedTotal ? decimalUsdcToAtomic(fees.total) : null;
+  if (hasQuotedTotal && (!quotedTotal || quotedTotal <= 0n)) {
+    throw new Error("Circle Gateway fees.total must be a positive USDC decimal.");
+  }
+  if (quotedTotal && quotedTotal > maxFeeAtomic) {
+    throw new Error("Circle Gateway fees.total exceeds the BurnIntentSet maximum fee reserve.");
+  }
+  if (options.enableForwarder && !quotedTotal) {
+    throw new Error("Circle Gateway forwarding estimate did not include fees.total.");
+  }
+
+  return {
+    intents,
+    atomicFee: quotedTotal ?? maxFeeAtomic,
+    maxFeeAtomic,
+    feeEstimateKind: quotedTotal ? "quoted_total" : "max_fee_reserve",
+    feeBreakdown: gatewayFeeBreakdownFrom(fees),
   };
 }
 
@@ -560,6 +644,23 @@ function serializeBigInts(value: unknown): unknown {
   return value;
 }
 
+export function gatewayBurnIntentSetTransferPayload(
+  burnIntents: Record<string, unknown>[],
+  signature: string,
+) {
+  if (burnIntents.length === 0 || burnIntents.length > 16) {
+    throw new Error("Circle Gateway BurnIntentSet transfers require between 1 and 16 intents.");
+  }
+  if (!/^0x[0-9a-f]+$/i.test(signature)) {
+    throw new Error("Circle Gateway BurnIntentSet signature must be hex encoded.");
+  }
+
+  return serializeBigInts([{
+    burnIntentSet: { intents: burnIntents },
+    signature,
+  }]);
+}
+
 export async function requestGatewayFeeEstimate(
   burnIntent: Record<string, unknown>,
   options: {
@@ -586,6 +687,41 @@ export async function requestGatewayFeeEstimate(
   }
 
   return parseGatewayFeeEstimate(await response.json(), {
+    enableForwarder: options.enableForwarder,
+  });
+}
+
+export async function requestGatewayFeeEstimateSet(
+  burnIntents: Record<string, unknown>[],
+  options: {
+    enableForwarder: boolean;
+    fetchImpl?: typeof fetch;
+  },
+): Promise<GatewayBurnIntentSetEstimate> {
+  if (burnIntents.length === 0 || burnIntents.length > 16) {
+    throw new Error("Circle Gateway BurnIntentSet estimates require between 1 and 16 intents.");
+  }
+  const intents = burnIntents.map((intent) => {
+    const partial = { ...intent };
+    delete partial.maxFee;
+    return partial;
+  });
+  const estimateUrl = new URL("https://gateway-api-testnet.circle.com/v1/estimate");
+  if (options.enableForwarder) {
+    estimateUrl.searchParams.set("enableForwarder", "true");
+  }
+
+  const response = await (options.fetchImpl ?? fetch)(estimateUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify([serializeBigInts({ intents })]),
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Gateway BurnIntentSet fee estimate failed: ${response.status} - ${detail}`);
+  }
+
+  return parseGatewayFeeEstimateSet(await response.json(), {
     enableForwarder: options.enableForwarder,
   });
 }

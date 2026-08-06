@@ -3,9 +3,13 @@ import type { Address } from "viem";
 
 import {
   buildGatewayBurnIntentPreview,
+  CHAIN_BY_DOMAIN,
   estimateGatewayTransferFee,
+  fetchGatewayBalance,
   isSupportedGatewayChain,
+  type SupportedChain,
 } from "@/lib/circle/gateway-sdk";
+import { GatewayUnifiedInsufficientBalanceError } from "@/lib/paycmd/gateway-allocation";
 import {
   GatewayManualMintUnsupportedError,
   gatewayFeeBreakdownToDecimal,
@@ -15,7 +19,20 @@ import {
   gatewayTransferPreflight,
   usdcAmountToAtomic,
 } from "@/lib/paycmd/gateway-transfer";
+import { quoteUnifiedGatewayTransfer } from "@/lib/paycmd/gateway-unified-server";
+import { gatewayUnifiedEstimateResponse } from "@/lib/paycmd/gateway-unified-response";
 import { createClient } from "@/lib/supabase/server";
+
+function decimalUsdcToAtomic(value: unknown) {
+  const normalized = String(value ?? "0").trim();
+  if (!/^\d+(?:\.\d{1,6})?$/.test(normalized)) return 0n;
+  const [whole, fraction = ""] = normalized.split(".");
+  return BigInt(whole) * 1_000_000n + BigInt(fraction.padEnd(6, "0"));
+}
+
+function atomicUsdc(value: bigint) {
+  return Number(value) / 1_000_000;
+}
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
@@ -29,19 +46,25 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json().catch(() => ({}));
+    const sourceMode = body.sourceMode === "unified" ? "unified" : "scoped";
     const sourceChain = String(body.sourceChain ?? "");
     const destinationChain = String(body.destinationChain ?? "");
     const amountInAtomicUnits = usdcAmountToAtomic(body.amount);
 
-    if (!isSupportedGatewayChain(sourceChain) || !isSupportedGatewayChain(destinationChain)) {
+    if (
+      !isSupportedGatewayChain(destinationChain) ||
+      (sourceMode === "scoped" && !isSupportedGatewayChain(sourceChain))
+    ) {
       return NextResponse.json(
-        { error: "sourceChain and destinationChain must be supported Gateway chains." },
+        { error: sourceMode === "unified"
+          ? "destinationChain must be a supported Gateway chain."
+          : "sourceChain and destinationChain must be supported Gateway chains." },
         { status: 400 },
       );
     }
 
     const executionPlan = gatewayTransferExecutionPlan({
-      sourceChain,
+      sourceChain: sourceMode === "unified" ? destinationChain : sourceChain,
       destinationChain,
       mintGasMode: body.mintGasMode,
     });
@@ -64,9 +87,34 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (sourceMode === "unified") {
+      const requestedSources = Array.isArray(body.selectedSourceChains)
+        ? body.selectedSourceChains.filter((chain: unknown): chain is SupportedChain =>
+            typeof chain === "string" && isSupportedGatewayChain(chain))
+        : undefined;
+      const recipient = typeof body.recipientAddress === "string" && /^0x[0-9a-f]{40}$/i.test(body.recipientAddress)
+        ? body.recipientAddress as Address
+        : sourceDepositor;
+      const unified = await quoteUnifiedGatewayTransfer({
+        amountAtomic: amountInAtomicUnits,
+        destinationChain,
+        recipient,
+        sourceDepositor,
+        sourceSigner,
+        mintGasMode,
+        selectedSourceChains: requestedSources,
+      });
+
+      return NextResponse.json(gatewayUnifiedEstimateResponse(
+        unified,
+        amountInAtomicUnits,
+        { selectedSourceChains: requestedSources },
+      ));
+    }
+
     const burnIntentPreview = buildGatewayBurnIntentPreview({
       amount: amountInAtomicUnits,
-      sourceChain,
+      sourceChain: sourceChain as SupportedChain,
       destinationChain,
       recipient: sourceDepositor,
       sourceDepositor,
@@ -85,14 +133,26 @@ export async function POST(req: NextRequest) {
     );
     const quote = preflight.estimate;
     const feeAmounts = preflight.amounts;
+    const gatewayBalances = await fetchGatewayBalance(sourceDepositor);
+    const sourceBalanceAtomic = decimalUsdcToAtomic(
+      gatewayBalances.balances.find((balance) => CHAIN_BY_DOMAIN[balance.domain] === sourceChain)?.balance,
+    );
+    const shortfallAtomic = sourceBalanceAtomic < feeAmounts.requiredGatewayBalanceAtomic
+      ? feeAmounts.requiredGatewayBalanceAtomic - sourceBalanceAtomic
+      : 0n;
 
     return NextResponse.json({
+      sourceMode: "scoped",
       amount: Number(amountInAtomicUnits) / 1_000_000,
       sourceChain,
       destinationChain,
       estimatedGatewayFee: Number(feeAmounts.estimatedFeeAtomic) / 1_000_000,
       maximumGatewayFee: Number(feeAmounts.maxFeeAtomic) / 1_000_000,
       requiredGatewayBalance: Number(feeAmounts.requiredGatewayBalanceAtomic) / 1_000_000,
+      readyGatewayBalance: atomicUsdc(sourceBalanceAtomic),
+      sufficientGatewayBalance: shortfallAtomic === 0n,
+      minimumDepositAmount: atomicUsdc(shortfallAtomic),
+      fallbackOptions: shortfallAtomic > 0n ? ["deposit", "burn_intent_set"] : [],
       feeEstimateKind: quote.feeEstimateKind,
       feeBreakdown: gatewayFeeBreakdownToDecimal(quote.feeBreakdown),
       forwarding: mintGasMode === "auto_forwarding",
@@ -101,6 +161,16 @@ export async function POST(req: NextRequest) {
       manualMintSupported: gatewayManualMintSupported(destinationChain),
     });
   } catch (error) {
+    if (error instanceof GatewayUnifiedInsufficientBalanceError) {
+      return NextResponse.json({
+        error: error.code,
+        message: error.message,
+        readyBalance: atomicUsdc(error.readyBalanceAtomic),
+        maximumUsableCapacity: atomicUsdc(error.maximumUsableCapacityAtomic),
+        shortfall: atomicUsdc(error.shortfallAtomic),
+        exclusions: error.exclusions,
+      }, { status: 400 });
+    }
     if (error instanceof GatewayManualMintUnsupportedError) {
       return NextResponse.json(
         {

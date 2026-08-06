@@ -1,3 +1,5 @@
+import type { GatewayAllocationGuard } from "./gateway-allocation-guard";
+
 export type NavigationPlacement = "desktop" | "mobile-primary" | "mobile-more";
 
 export type AppNavigationItem = {
@@ -245,7 +247,26 @@ export function canSafelyRetryExecutionFailure({
   fundsMoved?: boolean;
   transferSubmitted?: boolean;
 }) {
-  return !fundsMoved && !transferSubmitted && errorCode === 4001;
+  return !fundsMoved && !transferSubmitted && (
+    errorCode === 4001 || errorCode === "GATEWAY_QUOTE_CHANGED"
+  );
+}
+
+export function gatewayAllocationGuardDraftField(guard: GatewayAllocationGuard | undefined) {
+  return guard ? JSON.stringify(guard) : "";
+}
+
+export function parseGatewayAllocationGuardDraftField(
+  field: string | undefined,
+): GatewayAllocationGuard | undefined {
+  if (!field) return undefined;
+  try {
+    const value = JSON.parse(field) as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    return value as GatewayAllocationGuard;
+  } catch {
+    return undefined;
+  }
 }
 
 export function gatewayTransferSubmitted(value: unknown) {

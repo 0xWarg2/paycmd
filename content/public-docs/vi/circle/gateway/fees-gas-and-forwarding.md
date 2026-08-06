@@ -8,8 +8,8 @@ lastUpdated: "2026-08-05"
 keywords: ["fee", "gas", "auto forwarding", "manual mint"]
 tutorial: true
 aiSummary:
-  - "Gateway fee debit source USDC, source-side wallet operation dùng native gas, còn manual destination mint cần native gas từ minting wallet."
-  - "Transfer flow quote trước state change; withdraw chỉ initialize signer sau confirmation rồi mới quote và check execution requirement."
+  - "`fees.total` là current estimated/settled charge; `maxFee` từng intent là signed cap, và tổng cap là maximum reserve chứ không phải expected fee."
+  - "Unified allocation trừ maxFee từng intent khỏi usable balance; deposit và persistent delegate authorization là confirmation riêng."
 ---
 
 ## Bốn loại cost cần tách biệt
@@ -18,48 +18,52 @@ Một Gateway operation có thể liên quan bốn cost category:
 
 1. **Gateway protocol fee** được charge bằng USDC vào source balance. Circle mô tả nó gồm source burn gas và transfer fee theo amount.
 2. **Forwarding fee** là source-side USDC bổ sung khi Circle Forwarding Service relay destination mint. Nó gồm forwarding service và destination gas component.
-3. **Source native gas** trả cho SCA on-chain action như thêm delegate, approve USDC hoặc auto-deposit. Nó nằm trong transaction-sending SCA, không bị trừ từ Gateway USDC.
+3. **Source native gas** trả cho explicit SCA on-chain action như thêm delegate, approve USDC hoặc deposit. Nó nằm trong transaction-sending SCA, không bị trừ từ Gateway USDC.
 4. **Destination native gas** do SCA hoặc Gateway signer trả khi Payna manual mint. Với forwarding, Circle trả destination execution và charge forwarding fee bằng source USDC.
 
 “Fee” trong receipt phải nói rõ category. Cộng USDC fee vào source debit khác với kiểm tra native-token balance của wallet.
 
 ## Gateway protocol fee và source debit
 
-[Gateway fee reference](https://developers.circle.com/gateway/references/fees) của Circle giải thích `maxFee` của burn intent phải cover source gas component, transfer fee và forwarding fee nếu có. Gateway collect fee khi fund bị burn trên source. Vì thế Payna yêu cầu selected source Gateway row giữ **`amount + estimated fee`**.
+[Gateway fee reference](https://developers.circle.com/gateway/references/fees) giải thích `maxFee` phải cover source gas, transfer fee và forwarding headroom. Scoped source phải giữ **`amount + maxFee`**; trong BurnIntentSet, mỗi source chỉ đóng góp tối đa **`ready balance - maxFee của intent đó`**.
 
-Nếu user gửi 10 USDC và current quote là 0.02 USDC, previewed source requirement là 10.02. Recipient amount vẫn 10; 0.02 thêm vào không thuộc destination mint. Cross-domain visible total trên 10.02 không giúp khi explicitly selected source row thấp hơn.
+Nếu user gửi 10 USDC và scoped reserve là 0.02 USDC, maximum source debit là 10.02. Recipient vẫn nhận 10. Unified mode có thể chia 10 qua nhiều source, nhưng tổng allocated value vẫn là 10 và mỗi row giữ cap riêng.
 
 Không copy static fee example thành operational promise. Network cost và route condition có thể đổi, forwarding route có composition khác manual route.
 
 ## Quote field trong Payna hiện tại
 
-**Current Payna implementation behavior:** Payna gửi partial burn intent tới `/v1/estimate` của Circle và bỏ placeholder `maxFee`. Với auto forwarding, nó thêm `enableForwarder=true`. Payna ưu tiên decimal `fees.total` từ top-level response hoặc response item đầu rồi convert sang six-decimal USDC atomic unit.
+**Current Payna implementation behavior:** scoped gửi một partial burn intent; unified gửi một partial set có `intents[]`. Cả hai bỏ caller placeholder `maxFee`. Auto forwarding thêm `enableForwarder=true`. Payna đọc `fees.total` làm aggregate estimate và đọc `maxFee`/`maxBlockHeight` của từng returned intent làm execution constraint.
 
-Nếu `fees.total` unusable và first returned burn intent có positive atomic `maxFee`, current shared parser dùng value đó làm reserve. Fallback này mode-agnostic; parser không yêu cầu manual mode. Response label hai successful case là `quoted_total` và `max_fee_reserve`. Nó chỉ fail khi không có cả usable positive total lẫn positive reserve, và không tự tạo zero fee.
+Với scoped non-forwarding quote, positive `maxFee` có thể được label `max_fee_reserve` khi không có total. Forwarding bắt buộc có positive `fees.total`. Set bắt buộc có positive cap cho mọi intent; Payna cộng các cap làm maximum reserve và fail closed nếu quoted total vượt reserve. Nó không tự tạo zero fee.
+
+`fees.total` và `sum(maxFee)` trả lời hai câu hỏi khác nhau: current estimate/settled charge và maximum debit được signature cho phép. UI hiển thị cả hai khi khác nhau. Base/transfer component đến từ `fees.perIntent`; forwarding là aggregate component. Không dùng hard-coded fee table thay `/v1/estimate`.
 
 Behavior này cần phân biệt với general API schema của Circle, nơi `maxFee` là maximum authorization của user và estimate endpoint có thể trả thêm burn-intent constraint. Xem [estimate API reference](https://developers.circle.com/api-reference/gateway/all/estimate-transfer) chính thức.
 
 ## Preview timing và quote freshness
 
-Với `/transfer`, Payna estimate trước signer creation, delegate authorization, auto-deposit hoặc burn signing. Ordering này khiến transfer quote failure là read-only failure và ngăn unavailable transfer preview để lại wallet hay balance mutation.
+Với `/transfer` và `/pay`, Payna estimate trước signer creation, delegate authorization, deposit hoặc burn signing. Preview dùng existing signer hoặc read-only placeholder. Quote failure vì thế không để lại wallet hay balance mutation.
 
 `/withdraw` có boundary khác. UI preview chỉ xác nhận amount, source và same-domain SCA recipient model. Sau confirmation, withdraw route resolve SCA rồi tìm hoặc tạo signer **trước** fee estimate; balance, mint gas và authorization check chạy sau đó. Vì vậy withdraw quote có thể fail sau signer initialization, dù chưa submit burn intent.
 
-Transfer estimate panel phải expose `estimatedGatewayFee`, `requiredGatewayBalance`, `feeEstimateKind`, mint mode và forwarding state. Nó không được hiển thị hard-coded fixed fee trước khi estimate trả về và không được gọi estimate là “actual”. Khi user đổi amount, source, destination, recipient hoặc mint mode, cần quote mới. Withdrawal chỉ hiển thị estimate và requirement trong confirmed execution response hoặc error, không phải current preview.
+Scoped panel expose ready balance, current fee, maximum reserve/debit, mint mode và explicit deposit/unified choice khi thiếu. Unified panel expose từng allocation/reserve, `fees.total`, `sum(maxFee)`, exclusion và fingerprint. Đổi amount, source, destination hay mint mode cần quote mới; execution mismatch trả `GATEWAY_QUOTE_CHANGED`.
 
 Khi execution, Payna ký quoted atomic fee làm `maxFee` của burn intent. Khi settled response có `fees.total`, receipt dùng value đó làm `actualGatewayFee` và tính `actualSourceDebit = amount + actual fee`. Nếu settled fee vắng, UI phải giữ estimate label thay vì tạo precision giả.
 
 ## Source gas
 
-Gateway transfer request được Circle-managed EOA ký dạng typed data, nhưng surrounding Payna operation có thể submit source-chain transaction. First deposit có thể cần `addDelegate`, USDC `approve` và Gateway `deposit`. Existing depositor có signer chưa authorized có thể cần delegate call khác. Auto-deposit cũng yêu cầu SCA approve và deposit shortfall.
+Gateway transfer request được Circle-managed EOA ký dạng typed data, nhưng surrounding Payna operation có thể submit source-chain transaction. First explicit deposit có thể cần `addDelegate`, USDC `approve` và Gateway `deposit`. Existing depositor có signer chưa authorized có thể cần delegate call khác. Payna tách riêng các action này và không tự bắt đầu shortfall deposit khi user chưa confirm.
 
-Các operation đó cần native gas trên source SCA và current Circle Wallet SDK support cho chain. SCA có thể đủ USDC nhưng vẫn fail `INSUFFICIENT_GAS`. Chỉ fund public address và network được error nêu, sau đó lấy fresh transfer estimate hoặc retry confirmed withdrawal execution tùy operation. Không gửi native gas tới depositor contract hoặc signer trừ khi response xác định nó là transaction sender.
+Các operation đó cần native gas trên source SCA và current Circle Wallet SDK support. `addDelegate` là persistent nên Payna hỏi riêng và không partial burn khi authorization pending. Balance đã authorize vẫn có thể dùng trên source mà SDK không submit được delegate mới; balance chưa authorize ở source đó bị exclude. Chỉ fund public address/network được error nêu.
 
 ## Automatic forwarding
 
 Auto forwarding là default của Payna. Estimate và transfer request dùng `enableForwarder=true`; Circle Forwarding Service mint ở destination nên user không cần destination native gas. Circle mô tả service, fee collection và polling model trong [Forwarding Service](https://developers.circle.com/gateway/references/forwarding-service) cùng [end-to-end how-to](https://developers.circle.com/gateway/howtos/forwarding-service).
 
 Payna chờ transfer status của Circle thành `confirmed` hoặc `finalized`. Sau đó nó yêu cầu valid `forwardingDetails.transactionHash`, trả forwarding detail và settled fee data rồi dùng hash đó làm `destinationTxHash`. Nó không submit separate manual mint nên `mintTxHash` có thể absent.
+
+Với BurnIntentSet, Circle có thể lấy forwarding cost từ `maxFee` headroom theo intent order rồi tiếp tục sang intent sau. Vì thế phải giữ per-intent cap theo order Circle trả; client không được tự giả định dồn toàn fee vào source balance lớn nhất.
 
 Nếu Circle báo `failed`, `expired`, timeout hoặc thiếu destination hash sau settlement, Payna raise forwarding-settlement error. Nó không auto-fallback sang manual vì forwarded request đã submit và có thể settle sau.
 
@@ -80,7 +84,8 @@ Với cả hai transfer mode, kiểm tra source, destination, recipient, source 
 ## Failure và retry checklist
 
 - Quote unavailable: transfer preview chưa làm stateful work; confirmed withdrawal có thể đã initialize signer, nhưng ở thời điểm này cả hai path chưa submit burn intent.
-- Source balance thiếu: tính cả fee rồi chờ hoặc tạo same-source deposit.
+- Scoped source thiếu: confirm rõ proposed minimum deposit hoặc review unified allocation; deposit không auto-send transfer.
+- Unified capacity thiếu: inspect ready balance, maximum usable capacity và exclusion; Payna không auto-deposit.
 - Source gas thiếu: fund SCA cho named delegate/deposit operation.
 - Manual destination gas thiếu: fund identified SCA/signer hoặc đổi mode rồi re-estimate.
 - Forwarded transfer đã submit: giữ `transferId`; inspect Circle status trước retry.

@@ -21,3 +21,11 @@ test("rejects unsupported payment chains instead of defaulting", () => {
     /sourceChain/,
   );
 });
+
+test("allows an explicit unified Gateway source without inventing a source chain", () => {
+  assert.deepEqual(requirePaymentChains({ sourceMode: "unified", destinationChain: "arc" }), {
+    sourceMode: "unified",
+    sourceChain: null,
+    destinationChain: "arcTestnet",
+  });
+});

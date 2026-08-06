@@ -98,3 +98,10 @@ export function toggleGatewayCustomSource(input: {
   if (input.currentSourceChains.length === 1) return [...input.currentSourceChains];
   return input.currentSourceChains.filter((chain) => chain !== input.sourceChain);
 }
+
+export function gatewaySelectedSourceRequest(
+  customSourceChains: string[] | null,
+): { selectedSourceChains?: string[] } {
+  if (!customSourceChains?.length) return {};
+  return { selectedSourceChains: [...customSourceChains] };
+}

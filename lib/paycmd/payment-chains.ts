@@ -11,16 +11,24 @@ export class PaymentChainValidationError extends Error {
 }
 
 export function requirePaymentChains(input: {
+  sourceMode?: unknown;
   sourceChain?: unknown;
   destinationChain?: unknown;
-}): { sourceChain: PayCmdChain; destinationChain: PayCmdChain } {
-  const sourceChain = normalizeChain(typeof input.sourceChain === "string" ? input.sourceChain : "");
-  if (!sourceChain) throw new PaymentChainValidationError("sourceChain");
+}):
+  | { sourceChain: PayCmdChain; destinationChain: PayCmdChain }
+  | { sourceMode: "unified"; sourceChain: null; destinationChain: PayCmdChain } {
+  const unified = input.sourceMode === "unified";
+  const sourceChain = unified
+    ? null
+    : normalizeChain(typeof input.sourceChain === "string" ? input.sourceChain : "");
+  if (!unified && !sourceChain) throw new PaymentChainValidationError("sourceChain");
 
   const destinationChain = normalizeChain(
     typeof input.destinationChain === "string" ? input.destinationChain : "",
   );
   if (!destinationChain) throw new PaymentChainValidationError("destinationChain");
 
-  return { sourceChain, destinationChain };
+  return unified
+    ? { sourceMode: "unified", sourceChain: null, destinationChain }
+    : { sourceChain: sourceChain as PayCmdChain, destinationChain };
 }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  gatewaySelectedSourceRequest,
   gatewaySourceSelectionRows,
   recommendedGatewaySourceChains,
   toggleGatewayCustomSource,
@@ -132,5 +133,14 @@ test("toggles custom sources without allowing the final source to be removed", (
       sourceChain: "baseSepolia",
     }),
     ["optimismSepolia", "baseSepolia"],
+  );
+});
+
+test("omits source constraints in automatic mode and sends them only in custom mode", () => {
+  assert.deepEqual(gatewaySelectedSourceRequest(null), {});
+  assert.deepEqual(gatewaySelectedSourceRequest([]), {});
+  assert.deepEqual(
+    gatewaySelectedSourceRequest(["unichainSepolia", "optimismSepolia"]),
+    { selectedSourceChains: ["unichainSepolia", "optimismSepolia"] },
   );
 });

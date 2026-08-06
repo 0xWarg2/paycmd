@@ -53,6 +53,7 @@ import {
   getChainMeta,
 } from "@/components/chain-identity";
 import { PayCmdShell } from "@/components/paycmd-shell";
+import { UnifiedGatewaySourceSelector } from "@/components/unified-gateway-source-selector";
 import {
   ExecutionTimeline,
   TransactionConfirmActions,
@@ -74,8 +75,11 @@ import { balanceBreakdown } from "@/lib/paycmd/balance-breakdown";
 import {
   buildTransactionPreviewModel,
   canSafelyRetryExecutionFailure,
+  gatewayAllocationGuardDraftField,
   gatewayTransferSubmitted,
+  parseGatewayAllocationGuardDraftField,
 } from "@/lib/paycmd/ui-models";
+import type { GatewayAllocationGuard } from "@/lib/paycmd/gateway-allocation-guard";
 import {
   normalizeQuotaOnboardingState,
   shouldShowQuotaOnboarding,
@@ -109,6 +113,11 @@ import {
   gatewayReceiptFeeComponents,
   gatewayTransferAmounts,
 } from "@/lib/paycmd/gateway-transfer";
+import {
+  gatewaySelectedSourceRequest,
+  recommendedGatewaySourceChains,
+  toggleGatewayCustomSource,
+} from "@/lib/paycmd/gateway-source-selection";
 import { formatNativeGasBalance } from "@/lib/paycmd/native-gas";
 import { isNearViewportBottom, jumpToLatestMessage } from "@/lib/paycmd/chat-scroll";
 import { web3Chains } from "@/lib/paycmd/web3-chains";
@@ -1886,10 +1895,44 @@ type BridgeEstimateSummary = {
 };
 
 type GatewayTransferEstimateSummary = {
-  amount: string;
-  estimatedGatewayFee: string;
-  maximumGatewayFee: string;
-  requiredGatewayBalance: string;
+  sourceMode?: "scoped" | "unified";
+  amount: string | number;
+  estimatedGatewayFee?: string | number;
+  totalEstimatedFee?: string | number;
+  totalFeeBuffer?: string | number;
+  maximumGatewayFee: string | number;
+  requiredGatewayBalance?: string | number;
+  maximumDebit?: string | number;
+  readyGatewayBalance?: string | number;
+  readyBalance?: string | number;
+  maximumUsableCapacity?: string | number;
+  sufficientGatewayBalance?: boolean;
+  minimumDepositAmount?: string | number;
+  fallbackOptions?: Array<"deposit" | "burn_intent_set">;
+  fingerprint?: string;
+  allocationGuard?: GatewayAllocationGuard;
+  allocations?: Array<{
+    sourceChain: string;
+    amount: number;
+    readyBalance: number;
+    estimatedFee: number;
+    maximumFeeReserve: number;
+    maximumDebit: number;
+    maxBlockHeight: string;
+    priorityReason: string;
+    authorized: boolean;
+    delegateRequired: boolean;
+  }>;
+  sources?: Array<{
+    sourceChain: string;
+    readyBalance: number;
+    authorized: boolean;
+    authorizationSupported: boolean;
+    usable: boolean;
+    exclusionReason?: string | null;
+    selected: boolean;
+    allocated: boolean;
+  }>;
   feeEstimateKind: "quoted_total" | "max_fee_reserve";
   forwarding: boolean;
   mintGasMode: "auto_forwarding" | "manual";
@@ -2278,11 +2321,17 @@ async function executeCommand(draft: ParsedCommand) {
     return requestJson("/api/gateway/transfer", {
       method: "POST",
       body: JSON.stringify({
+        sourceMode: draft.fields.sourceMode ?? "scoped",
         sourceChain: draft.fields.sourceChain,
         destinationChain: draft.fields.destinationChain,
         amount: draft.fields.amount,
-        autoDeposit: true,
+        autoDeposit: false,
         mintGasMode: draft.fields.mintGasMode ?? "auto_forwarding",
+        selectedSourceChains: draft.fields.selectedSourceChains
+          ? draft.fields.selectedSourceChains.split(",").filter(Boolean)
+          : undefined,
+        allocationFingerprint: draft.fields.allocationFingerprint || undefined,
+        allocationGuard: parseGatewayAllocationGuardDraftField(draft.fields.allocationGuard),
       }),
     });
   }
@@ -2293,9 +2342,15 @@ async function executeCommand(draft: ParsedCommand) {
       body: JSON.stringify({
         amount: draft.fields.amount,
         recipient: draft.fields.recipient,
+        sourceMode: draft.fields.sourceMode ?? "scoped",
         sourceChain: draft.fields.sourceChain,
         destinationChain: draft.fields.destinationChain,
         mintGasMode: draft.fields.mintGasMode ?? "auto_forwarding",
+        selectedSourceChains: draft.fields.selectedSourceChains
+          ? draft.fields.selectedSourceChains.split(",").filter(Boolean)
+          : undefined,
+        allocationFingerprint: draft.fields.allocationFingerprint || undefined,
+        allocationGuard: parseGatewayAllocationGuardDraftField(draft.fields.allocationGuard),
       }),
     });
   }
@@ -6375,7 +6430,7 @@ function CommandPreviewCard({
   const isBridge = draft.command === "bridge";
   const isSwap = draft.command === "swap";
   const isPayroll = draft.command === "payroll";
-  const [selectedMintGasMode, setSelectedMintGasMode] = useState(
+  const [selectedMintGasMode, setSelectedMintGasMode] = useState<"auto_forwarding" | "manual">(
     draft.fields.mintGasMode === "manual"
       ? "manual"
       : "auto_forwarding",
@@ -6406,6 +6461,15 @@ function CommandPreviewCard({
   const [gatewayEstimate, setGatewayEstimate] = useState<GatewayTransferEstimateSummary | null>(null);
   const [gatewayEstimateError, setGatewayEstimateError] = useState("");
   const [gatewayEstimateLoading, setGatewayEstimateLoading] = useState(false);
+  const [gatewayFallbackMode, setGatewayFallbackMode] = useState<"none" | "deposit" | "unified">(
+    draft.fields.sourceMode === "unified" ? "unified" : "none",
+  );
+  const [gatewayDepositAmount, setGatewayDepositAmount] = useState("");
+  const [selectedGatewaySources, setSelectedGatewaySources] = useState<string[] | null>(null);
+  const [gatewayDelegateLoading, setGatewayDelegateLoading] = useState(false);
+  const [gatewayDelegateMessage, setGatewayDelegateMessage] = useState("");
+  const [gatewayPreflightLoading, setGatewayPreflightLoading] = useState(false);
+  const [gatewayRefreshMessage, setGatewayRefreshMessage] = useState("");
   const [payrollRecipientCount, setPayrollRecipientCount] = useState<number | null>(null);
   const [payrollRecipientError, setPayrollRecipientError] = useState("");
   const manualMintSupported = gatewayManualMintSupported(previewDestinationChain);
@@ -6414,6 +6478,20 @@ function CommandPreviewCard({
         chain: getChainMeta(previewDestinationChain)?.label ?? previewDestinationChain,
       })
     : t("preview.manualMintUnavailable", { chain: "this destination" });
+  const effectiveGatewaySourceMode =
+    draft.fields.sourceMode === "unified" || gatewayFallbackMode === "unified"
+      ? "unified"
+      : "scoped";
+
+  useEffect(() => {
+    if (
+      gatewayEstimate?.sourceMode === "scoped" &&
+      gatewayEstimate.sufficientGatewayBalance === false &&
+      gatewayEstimate.minimumDepositAmount !== undefined
+    ) {
+      setGatewayDepositAmount(String(gatewayEstimate.minimumDepositAmount));
+    }
+  }, [gatewayEstimate]);
 
   useEffect(() => {
     if (!isBridge) return;
@@ -6568,7 +6646,7 @@ function CommandPreviewCard({
       !hasMintGasChoice ||
       !isActive ||
       !draft.fields.amount ||
-      !previewSourceChain ||
+      (effectiveGatewaySourceMode === "scoped" && !previewSourceChain) ||
       !previewDestinationChain
     ) {
       setGatewayEstimate(null);
@@ -6583,18 +6661,27 @@ function CommandPreviewCard({
     }
 
     let cancelled = false;
-    setGatewayEstimate(null);
     setGatewayEstimateLoading(true);
     setGatewayEstimateError("");
 
     const timer = window.setTimeout(() => {
-      void requestJson("/api/gateway/transfer/estimate", {
+      const estimatePath = draft.command === "pay"
+        ? "/api/payments/pay"
+        : "/api/gateway/transfer/estimate";
+      void requestJson(estimatePath, {
         method: "POST",
         body: JSON.stringify({
           amount: draft.fields.amount,
+          ...(draft.command === "pay"
+            ? { recipient: draft.fields.recipient, estimateOnly: true }
+            : {}),
+          sourceMode: effectiveGatewaySourceMode,
           sourceChain: previewSourceChain,
           destinationChain: previewDestinationChain,
           mintGasMode: selectedMintGasMode,
+          ...(effectiveGatewaySourceMode === "unified"
+            ? gatewaySelectedSourceRequest(selectedGatewaySources)
+            : {}),
         }),
       })
         .then((result) => {
@@ -6602,7 +6689,6 @@ function CommandPreviewCard({
         })
         .catch((error) => {
           if (!cancelled) {
-            setGatewayEstimate(null);
             setGatewayEstimateError(
               error instanceof Error ? error.message : t("preview.gatewayEstimateFailed"),
             );
@@ -6618,7 +6704,10 @@ function CommandPreviewCard({
       window.clearTimeout(timer);
     };
   }, [
+    draft.command,
     draft.fields.amount,
+    draft.fields.recipient,
+    effectiveGatewaySourceMode,
     hasMintGasChoice,
     isActive,
     previewDestinationChain,
@@ -6626,6 +6715,7 @@ function CommandPreviewCard({
     manualMintSupported,
     manualMintUnavailableMessage,
     selectedMintGasMode,
+    selectedGatewaySources,
     t,
   ]);
   const mintGasModeText =
@@ -6642,7 +6732,7 @@ function CommandPreviewCard({
     draft.command === "transfer"
       ? t("transfer.title", {
           amount: draft.fields.amount,
-          source: draft.fields.sourceChain,
+          source: effectiveGatewaySourceMode === "unified" ? "gateway" : draft.fields.sourceChain,
           destination: draft.fields.destinationChain,
         })
       : draft.summary;
@@ -6690,14 +6780,36 @@ function CommandPreviewCard({
         ? {
             ...draft.fields,
             mintGasMode: selectedMintGasMode,
+            sourceMode: effectiveGatewaySourceMode,
+            selectedSourceChains: selectedGatewaySources?.join(",") ?? "",
+            allocationFingerprint: gatewayEstimate?.fingerprint ?? "",
+            allocationGuard: gatewayAllocationGuardDraftField(gatewayEstimate?.allocationGuard),
           }
         : draft.fields,
   };
+  const finalConfirmDraft: ParsedCommand =
+    hasMintGasChoice && gatewayFallbackMode === "deposit"
+      ? {
+          command: "deposit",
+          raw: `/deposit ${gatewayDepositAmount} USDC from ${previewSourceChain}`,
+          fields: {
+            amount: gatewayDepositAmount,
+            token: "USDC",
+            sourceChain: previewSourceChain,
+          },
+          missingFields: [],
+          sample: "/deposit 10 from base",
+          summary: `Deposit ${gatewayDepositAmount} USDC into Gateway on ${previewSourceChain}`,
+          status: "draft_ready",
+        }
+      : confirmedDraft;
   const previewModel = buildTransactionPreviewModel(confirmedDraft);
   const confirmLabel = isPayroll
     ? payrollTotal && payrollRecipientCount
       ? t("preview.confirmPayroll", { total: payrollTotal, token: "USDC", count: payrollRecipientCount })
       : t("preview.confirmPayrollPending")
+    : hasMintGasChoice && gatewayFallbackMode === "deposit"
+      ? t("preview.gatewayConfirmDeposit", { amount: gatewayDepositAmount })
     : previewModel.amount
     ? t("preview.confirmAmount", { amount: previewModel.amount, token: previewModel.token })
     : t("common.confirmCommand");
@@ -6721,12 +6833,107 @@ function CommandPreviewCard({
     !swapEstimate ||
     swapEstimateLoading ||
     Boolean(swapEstimateError);
+  const scopedGatewayInsufficient =
+    gatewayEstimate?.sourceMode === "scoped" &&
+    gatewayEstimate.sufficientGatewayBalance === false;
+  const unifiedDelegateSources = gatewayEstimate?.sourceMode === "unified"
+    ? (gatewayEstimate.allocations ?? []).filter((allocation) => allocation.delegateRequired)
+    : [];
+  const gatewayDepositMinimum = Number(gatewayEstimate?.minimumDepositAmount ?? 0);
+  const gatewayDepositValid =
+    Number(gatewayDepositAmount) > 0 && Number(gatewayDepositAmount) >= gatewayDepositMinimum;
   const gatewayConfirmDisabled =
     !isActive ||
     gatewayEstimateLoading ||
+    gatewayPreflightLoading ||
     !gatewayEstimate ||
     Boolean(gatewayEstimateError) ||
-    (selectedMintGasMode === "manual" && !manualMintSupported);
+    (selectedMintGasMode === "manual" && !manualMintSupported) ||
+    (scopedGatewayInsufficient && gatewayFallbackMode === "none") ||
+    (gatewayFallbackMode === "deposit" && !gatewayDepositValid) ||
+    (effectiveGatewaySourceMode === "unified" && (
+      !gatewayEstimate.fingerprint ||
+      !(gatewayEstimate.allocations?.length) ||
+      unifiedDelegateSources.length > 0
+    ));
+  const authorizeGatewaySources = async () => {
+    if (unifiedDelegateSources.length === 0) return;
+    setGatewayDelegateLoading(true);
+    setGatewayDelegateMessage("");
+    try {
+      const result = await requestJson("/api/gateway/delegate", {
+        method: "POST",
+        body: JSON.stringify({
+          sourceChains: unifiedDelegateSources.map((source) => source.sourceChain),
+        }),
+      });
+      setGatewayDelegateMessage(result?.message ?? t("preview.gatewayDelegatePending"));
+    } catch (error) {
+      setGatewayDelegateMessage(error instanceof Error ? error.message : t("preview.gatewayDelegateFailed"));
+    } finally {
+      setGatewayDelegateLoading(false);
+    }
+  };
+  const confirmWithGatewayPreflight = async () => {
+    if (
+      effectiveGatewaySourceMode !== "unified" ||
+      gatewayFallbackMode === "deposit" ||
+      (draft.command !== "transfer" && draft.command !== "pay")
+    ) {
+      onConfirm(finalConfirmDraft);
+      return;
+    }
+
+    const allocationGuard = parseGatewayAllocationGuardDraftField(
+      finalConfirmDraft.fields.allocationGuard,
+    );
+    if (!allocationGuard || !finalConfirmDraft.fields.allocationFingerprint) {
+      setGatewayRefreshMessage(t("preview.gatewayEstimateFailed"));
+      return;
+    }
+
+    setGatewayPreflightLoading(true);
+    setGatewayRefreshMessage("");
+    try {
+      const common = {
+        amount: finalConfirmDraft.fields.amount,
+        sourceMode: "unified",
+        sourceChain: finalConfirmDraft.fields.sourceChain,
+        destinationChain: finalConfirmDraft.fields.destinationChain,
+        mintGasMode: finalConfirmDraft.fields.mintGasMode ?? "auto_forwarding",
+        selectedSourceChains: finalConfirmDraft.fields.selectedSourceChains
+          ? finalConfirmDraft.fields.selectedSourceChains.split(",").filter(Boolean)
+          : undefined,
+        allocationGuard,
+        allocationFingerprint: finalConfirmDraft.fields.allocationFingerprint,
+        preflightOnly: true,
+      };
+      const path = draft.command === "pay" ? "/api/payments/pay" : "/api/gateway/transfer";
+      const body = draft.command === "pay"
+        ? { ...common, recipient: finalConfirmDraft.fields.recipient }
+        : {
+            ...common,
+            recipientAddress: finalConfirmDraft.fields.recipientAddress || undefined,
+            autoDeposit: false,
+          };
+      await requestJson(path, { method: "POST", body: JSON.stringify(body) });
+      onConfirm(finalConfirmDraft);
+    } catch (error) {
+      const requestError = error as { code?: string; data?: unknown };
+      const data = recordFrom(requestError.data);
+      const refreshedEstimate = recordFrom(data.refreshedEstimate);
+      if (requestError.code === "GATEWAY_QUOTE_CHANGED" && Object.keys(refreshedEstimate).length) {
+        setGatewayEstimate(refreshedEstimate as GatewayTransferEstimateSummary);
+        setGatewayRefreshMessage(t("preview.gatewayQuoteRefreshed"));
+        return;
+      }
+      setGatewayRefreshMessage(
+        error instanceof Error ? error.message : t("preview.gatewayEstimateFailed"),
+      );
+    } finally {
+      setGatewayPreflightLoading(false);
+    }
+  };
   return (
     <div className="min-w-[260px] space-y-3" aria-live="polite">
       <div className="flex items-start justify-between gap-3">
@@ -7082,10 +7289,101 @@ function CommandPreviewCard({
           </div>
         ) : null}
         {hasMintGasChoice ? (
+          <>
+            {scopedGatewayInsufficient ? (
+              <div className="space-y-3 rounded-xl border border-amber-500/35 bg-amber-500/10 p-3 text-xs">
+                <div>
+                  <div className="font-medium text-foreground">{t("preview.gatewayInsufficientTitle")}</div>
+                  <div className="mt-1 text-muted-foreground">
+                    {t("preview.gatewayInsufficientHelp", {
+                      balance: formatDecimalAmount(gatewayEstimate?.readyGatewayBalance),
+                      required: formatDecimalAmount(gatewayEstimate?.requiredGatewayBalance),
+                    })}
+                  </div>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => setGatewayFallbackMode("deposit")}
+                    className={`rounded-md border px-3 py-2 text-left ${gatewayFallbackMode === "deposit" ? "border-amber-500 bg-amber-500/10" : "bg-card hover:border-primary/60"}`}
+                  >
+                    <span className="block font-medium text-foreground">{t("preview.gatewayDepositChoice")}</span>
+                    <span className="mt-1 block text-muted-foreground">
+                      {t("preview.gatewayDepositMinimum", { amount: formatDecimalAmount(gatewayEstimate?.minimumDepositAmount) })}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGatewayFallbackMode("unified");
+                      setSelectedGatewaySources(null);
+                    }}
+                    className={`rounded-md border px-3 py-2 text-left ${gatewayFallbackMode === "unified" ? "border-emerald-500 bg-emerald-500/10" : "bg-card hover:border-primary/60"}`}
+                  >
+                    <span className="block font-medium text-foreground">{t("preview.gatewayUnifiedChoice")}</span>
+                    <span className="mt-1 block text-muted-foreground">{t("preview.gatewayUnifiedChoiceHelp")}</span>
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {gatewayFallbackMode === "deposit" && scopedGatewayInsufficient ? (
+              <div className="space-y-2 rounded-xl border bg-card p-3 text-xs">
+                <label className="block font-medium text-foreground" htmlFor="gateway-deposit-amount">
+                  {t("preview.gatewayDepositAmount")}
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="gateway-deposit-amount"
+                    inputMode="decimal"
+                    value={gatewayDepositAmount}
+                    onChange={(event) => setGatewayDepositAmount(event.target.value)}
+                    className="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 text-sm text-foreground"
+                  />
+                  <span className="font-medium">USDC</span>
+                </div>
+                <div className="text-muted-foreground">{t("preview.gatewayDepositNoAutoPay")}</div>
+              </div>
+            ) : null}
+          </>
+        ) : null}
+        {hasMintGasChoice && effectiveGatewaySourceMode === "unified" ? (
+          <UnifiedGatewaySourceSelector
+            amount={draft.fields.amount}
+            destinationChain={previewDestinationChain}
+            totalEstimatedFee={gatewayEstimate?.totalEstimatedFee ?? gatewayEstimate?.estimatedGatewayFee}
+            totalFeeBuffer={gatewayEstimate?.totalFeeBuffer}
+            maximumGatewayFee={gatewayEstimate?.maximumGatewayFee}
+            maximumDebit={gatewayEstimate?.maximumDebit ?? gatewayEstimate?.requiredGatewayBalance}
+            mintGasMode={selectedMintGasMode}
+            sources={gatewayEstimate?.sourceMode === "unified" ? gatewayEstimate.sources ?? [] : []}
+            allocations={gatewayEstimate?.sourceMode === "unified" ? gatewayEstimate.allocations ?? [] : []}
+            customSourceChains={selectedGatewaySources}
+            quoteLoading={gatewayEstimateLoading}
+            active={isActive}
+            delegateLoading={gatewayDelegateLoading}
+            delegateMessage={gatewayDelegateMessage}
+            onCustomize={() => {
+              setSelectedGatewaySources(recommendedGatewaySourceChains(gatewayEstimate?.allocations ?? []));
+            }}
+            onToggleSource={(sourceChain) => {
+              setSelectedGatewaySources((current) => toggleGatewayCustomSource({
+                currentSourceChains: current ?? recommendedGatewaySourceChains(gatewayEstimate?.allocations ?? []),
+                sourceChain,
+              }));
+            }}
+            onRestoreRecommended={() => setSelectedGatewaySources(null)}
+            onBackToScoped={previewSourceChain ? () => {
+              setGatewayFallbackMode("none");
+              setSelectedGatewaySources(null);
+            } : undefined}
+            onAuthorizeSources={() => void authorizeGatewaySources()}
+          />
+        ) : null}
+        {hasMintGasChoice ? (
           <TransactionPreviewSummary
             title={t("preview.gatewayQuote")}
             subtitle={t("preview.gatewayQuoteHelp")}
-            route={<ChainRoute sourceChain={previewSourceChain} destinationChain={previewDestinationChain} compact />}
+            route={<ChainRoute sourceChain={effectiveGatewaySourceMode === "unified" ? "gateway" : previewSourceChain} destinationChain={previewDestinationChain} compact />}
             loading={gatewayEstimateLoading}
             error={gatewayEstimateError}
             metrics={
@@ -7096,11 +7394,23 @@ function CommandPreviewCard({
                         gatewayEstimate.feeEstimateKind === "max_fee_reserve"
                           ? t("preview.gatewayFeeReserve")
                           : t("preview.gatewayFeeQuote"),
-                      value: `${gatewayEstimate.feeEstimateKind === "max_fee_reserve" ? "≤" : "~"}${formatDecimalAmount(gatewayEstimate.estimatedGatewayFee)} USDC`,
+                      value: `${gatewayEstimate.feeEstimateKind === "max_fee_reserve" ? "≤" : "~"}${formatDecimalAmount(gatewayEstimate.totalEstimatedFee ?? gatewayEstimate.estimatedGatewayFee)} USDC`,
                     },
+                    ...(gatewayEstimate.sourceMode === "unified"
+                      ? [
+                          {
+                            label: t("preview.gatewaySources.feeBuffer"),
+                            value: `${formatDecimalAmount(gatewayEstimate.totalFeeBuffer)} USDC`,
+                          },
+                          {
+                            label: t("preview.gatewaySources.feeLimit"),
+                            value: `≤${formatDecimalAmount(gatewayEstimate.maximumGatewayFee)} USDC`,
+                          },
+                        ]
+                      : []),
                     {
                       label: t("receipt.sourceDebit"),
-                      value: `≤${formatDecimalAmount(gatewayEstimate.requiredGatewayBalance)} USDC`,
+                      value: `≤${formatDecimalAmount(gatewayEstimate.maximumDebit ?? gatewayEstimate.requiredGatewayBalance)} USDC`,
                     },
                     {
                       label: t("preview.destinationGas"),
@@ -7118,18 +7428,28 @@ function CommandPreviewCard({
                   ]
                 : []
             }
-            details={[t("preview.gatewayQuoteExecutionNote")]}
+            details={[
+              t("preview.gatewayQuoteExecutionNote"),
+              ...(gatewayEstimate?.sourceMode === "unified"
+                ? [t("preview.gatewayFeeLimitNote")]
+                : []),
+            ]}
           />
+        ) : null}
+        {gatewayRefreshMessage ? (
+          <div role="status" className="rounded-md border border-info/35 bg-info/10 px-3 py-2 text-[11px] leading-4 text-info-foreground">
+            {gatewayRefreshMessage}
+          </div>
         ) : null}
         {mintGasHelpText ? <div>{mintGasHelpText}</div> : null}
       </div>
       {isActive ? (
         <TransactionConfirmActions
-          confirmLabel={confirmLabel}
+          confirmLabel={gatewayPreflightLoading ? t("preview.gatewayCheckingQuote") : confirmLabel}
           cancelLabel={t("common.cancel")}
           disabled={isBridge ? bridgeConfirmDisabled : isSwap ? swapConfirmDisabled : hasMintGasChoice ? gatewayConfirmDisabled : isPayroll ? payrollRecipientCount === null || payrollRecipientCount === 0 || Boolean(payrollRecipientError) : false}
           onCancel={onCancel}
-          onConfirm={() => onConfirm(confirmedDraft)}
+          onConfirm={() => void confirmWithGatewayPreflight()}
         />
       ) : (
         <Button className="w-full" disabled>

@@ -52,11 +52,11 @@ Payna còn trình bày một total phục vụ visibility rộng hơn. Nó cộn
 
 Nếu RPC hoặc Gateway API thất bại, Payna đánh dấu kết quả partial. Partial total là lower bound, không phải bằng chứng chain bị thiếu có zero. Tương tự, deposit ở giữa on-chain submission và Gateway finality có thể tạm thời vắng ở cả SCA balance đã giảm và Gateway ready response. Hãy dùng transaction state thay vì coi chênh lệch hiển thị tạm thời là mất tiền.
 
-## Tại sao transfer vẫn source-scoped
+## Ưu tiên scoped, dùng unified khi cần
 
-**Current Payna implementation behavior:** `/transfer <amount> from <source> to <destination>` tạo một burn intent với một `sourceDomain`. Payna query ready balance của depositor trên source đó và yêu cầu đủ `amount + estimated fee`. Nó không âm thầm tạo multi-source intent set hoặc tiêu domain khác.
+`/transfer <amount> from <source> to <destination>` bắt đầu bằng một burn intent cho source đã nêu. Payna query ready balance của domain đó và yêu cầu đủ `amount + maxFee`. Nếu thiếu, confirmation bị khóa và preview đưa ra hai lựa chọn rõ ràng: deposit minimum được hiển thị vào source đó, hoặc chuyển sang unified quote bằng `BurnIntentSet`.
 
-Phạm vi này hẹp hơn unified capability của Circle protocol. Đây là product behavior có chủ ý hiện tại: preview, signer authorization, gas check, history và retry command đều giữ source rõ ràng. Thiếu trên Base không được tự bù bằng ready balance trên Arc. Hãy chọn Arc làm source hoặc deposit đủ finalized USDC trên Base.
+`/transfer <amount> from gateway to <destination>` chọn unified path trực tiếp. Payna xếp hạng ready source đủ điều kiện theo quote cost và usable capacity, hiện từng allocation cùng maximum fee reserve, rồi cho user thêm hoặc bỏ source trước confirm. App không tự tiêu domain khác hoặc deposit SCA funds khi user chưa chọn rõ ràng.
 
 ## Ví dụ balance trên hai domain
 
@@ -69,13 +69,13 @@ Giả sử Payna đọc được các giá trị sau cho cùng một SCA deposit
 
 Circle Gateway visibility của depositor là **13 USDC ready**. Visible total rộng hơn trong Payna là **19 + 13 = 32 USDC**. Payna không gọi 19 USDC trong SCA là deposited Gateway liquidity.
 
-Với `/transfer 5 from base to arc`, quote 0.02 USDC làm yêu cầu trên Base thành 5.02 USDC. Tổng Gateway ready là 13, nhưng Base chỉ có 4, vì vậy behavior hiện tại sẽ reject hoặc đề xuất auto-deposit từ Base SCA. Payna không lấy 1.02 còn thiếu từ 9 USDC trên Arc. Transfer dùng Arc làm source có thể qua balance check, nhưng vẫn cần route quote mới và các prerequisite khác.
+Với `/transfer 5 from base to arc`, maximum fee reserve 0.02 USDC làm yêu cầu trên Base thành 5.02 USDC. Base chỉ có 4 nên Payna khóa scoped confirmation và cho chọn deposit tối thiểu 1.02 USDC hoặc mở unified preview. Unified quote có thể allocate từ Arc hoặc kết hợp các source đủ điều kiện nếu đó là fee-aware plan đã chọn. Thay đổi source sẽ tạo quote và fingerprint mới.
 
 ## Checklist state và safety
 
 - Xác nhận địa chỉ nào là SCA depositor và địa chỉ nào chỉ là delegated signer.
 - Xem `submitted` và `pending_gateway_finality` là waiting state, không phải ready balance.
-- Khớp chain sau `from` với domain có đủ ready balance cho `amount + fee`.
+- Với scoped command, chain sau `from` cần đủ ready balance cho `amount + maxFee`; nếu thiếu, review explicit deposit hoặc unified fallback.
 - Đọc partial balance là “ít nhất bằng số này”, rồi retry chain lookup đã fail.
 - Kiểm tra recipient, source, destination, mint mode, estimated fee và required source debit trước confirm.
 - Sau lỗi transfer đã submit, giữ transfer ID và transaction hash; xem status trước retry.

@@ -29,14 +29,14 @@ Contacts resolve identity; `/pay` và payroll chuyển Gateway USDC; request t�
 
 ## `/pay`
 
-- **Mục đích:** Gửi USDC qua Circle Gateway từ source domain bắt buộc tới contact hoặc direct address đã resolve trên destination bắt buộc.
-- **Syntax và variants:** `/pay <amount> [USDC] to <contact-or-address> on <destination> from <source> [manual]`; bỏ mode sẽ chọn auto forwarding.
-- **Ví dụ:** `/pay 25 to Minh on arc from base`; natural language: “Trả Minh 25 USDC từ Base sang Arc.”
-- **Điều kiện:** Có SCA và Gateway signer, recipient hợp lệ, source ready balance đủ amount cộng fee (hoặc auto-deposit hợp lệ), cùng destination gas cho manual mint.
-- **Preview:** Verify amount, hai chain, full recipient, Gateway rail, fee và lựa chọn auto-forwarding/manual gas.
-- **Ranh giới confirm:** Payna confirmation bắt đầu Gateway execution. MetaMask không ký; các vai trò Circle/Gateway wallet ký operation cần thiết.
-- **Kết quả và dữ liệu lưu:** Response gồm recipient resolution, transfer ID, auto-deposit, fee, history ID, destination explorer và optional Arc-proof link, cùng notification.
-- **Lỗi và cách sửa:** **“Contact not found”**: add contact hoặc dùng full address. **`INSUFFICIENT_GATEWAY_BALANCE`/`INSUFFICIENT_USDC`**: fund/deposit đúng source rồi chờ finality. **`INSUFFICIENT_GAS`**: nạp wallet được nêu hoặc chọn forwarding.
+- **Mục đích:** Gửi USDC từ một scoped Gateway domain hoặc unified allocation đã chọn rõ tới contact/address được resolve.
+- **Syntax và variants:** `/pay <amount> [USDC] to <recipient> on <destination> from <source> [manual]`; dùng `from gateway` cho BurnIntentSet allocation.
+- **Ví dụ:** `/pay 25 to Minh on arc from base`; nếu Base thiếu, chọn minimum deposit hoặc bảng unified source. `/pay 25 to Minh on arc from gateway` vào unified ngay.
+- **Điều kiện:** Recipient resolve được, quote hợp lệ, ready capacity sau fee reserve, delegate đã authorize trên selected source và destination gas chỉ khi manual mint.
+- **Preview:** Verify recipient, destination, mint mode, từng source allocation, total estimated fee, maximum reserve/debit, exclusion và quote fingerprint. Không auto-deposit.
+- **Ranh giới confirm:** Deposit và persistent delegate consent là confirmation riêng. Final payment confirmation ký BurnIntent/BurnIntentSet bị giới hạn; MetaMask không ký.
+- **Kết quả và dữ liệu lưu:** Response gồm recipient resolution, một transfer ID, source allocation, settled fee, history ID, destination explorer/proof link và notification.
+- **Lỗi và cách sửa:** **“Contact not found”**: add contact hoặc dùng full address. **`GATEWAY_INSUFFICIENT_SCOPED_BALANCE`**: chọn deposit hoặc unified. **`GATEWAY_DELEGATE_REQUIRED`**: authorize rồi chờ. **`GATEWAY_QUOTE_CHANGED`**: review lại. **`INSUFFICIENT_GAS`**: nạp wallet được nêu hoặc chọn forwarding.
 
 ## `/request`
 

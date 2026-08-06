@@ -52,11 +52,11 @@ Payna also presents a broader visibility total. It adds successful on-chain SCA 
 
 If an RPC or the Gateway API fails, Payna marks the result partial. A partial total is a lower bound, not evidence that the missing chain has zero. Likewise, a deposit between on-chain submission and Gateway finality can temporarily be absent from both the reduced SCA balance and the ready Gateway response. Use transaction state rather than treating a temporary display difference as loss.
 
-## Why transfer remains source-scoped
+## Scoped first, unified when needed
 
-**Current Payna implementation behavior:** `/transfer <amount> from <source> to <destination>` creates one burn intent with one `sourceDomain`. Payna queries the depositor's ready balance on that source and requires it to cover `amount + estimated fee`. It does not silently construct a multi-source intent set or consume another domain.
+`/transfer <amount> from <source> to <destination>` starts with one burn intent for the named source. Payna queries that domain's ready balance and requires it to cover `amount + maxFee`. If it is short, confirmation stays locked and the preview offers two explicit choices: deposit the displayed minimum into that source, or switch to a unified `BurnIntentSet` quote.
 
-This is narrower than the Circle protocol's unified capability. It is deliberate product behavior today: the preview, signer authorization, gas checks, history, and retry command all retain an explicit source. A shortfall on Base is not automatically filled by ready balance on Arc. Choose Arc as the source or deposit enough finalized USDC on Base.
+`/transfer <amount> from gateway to <destination>` selects the unified path directly. Payna ranks eligible ready sources by quote cost and usable capacity, shows every proposed allocation and maximum fee reserve, and lets the user include or exclude sources before confirmation. It never spends another domain or deposits SCA funds without an explicit user action.
 
 ## Example with balances on two domains
 
@@ -69,13 +69,13 @@ Assume Payna can read the following values for the same SCA depositor:
 
 Circle Gateway visibility for the depositor is **13 USDC ready**. Payna's broader visible total is **19 + 13 = 32 USDC**. Payna does not describe the SCA's 19 USDC as deposited Gateway liquidity.
 
-For `/transfer 5 from base to arc`, a quoted 0.02 USDC fee makes the Base requirement 5.02 USDC. The overall Gateway ready total is 13, but Base has only 4, so current Payna behavior rejects or offers an auto-deposit from Base SCA funds. It will not take the missing 1.02 from Arc's 9. A transfer sourced from Arc could pass the balance check, subject to a fresh route quote and other prerequisites.
+For `/transfer 5 from base to arc`, a 0.02 USDC maximum fee reserve makes the Base requirement 5.02 USDC. Base has only 4, so Payna locks scoped confirmation and offers a minimum 1.02 USDC deposit or a unified preview. The unified quote may allocate the transfer from Arc, or combine eligible sources if that produces the selected fee-aware plan. Changing sources creates a fresh quote and fingerprint.
 
 ## State and safety checklist
 
 - Confirm which address is the SCA depositor and which is only the delegated signer.
 - Treat `submitted` and `pending_gateway_finality` as waiting states, not ready balance.
-- Match the command's `from` chain to the domain that has enough ready balance for `amount + fee`.
+- For a scoped command, match the `from` chain to enough ready balance for `amount + maxFee`; otherwise review the explicit deposit or unified fallback.
 - Read a partial balance as “at least this much,” then retry failed chain lookups.
 - Review recipient, source, destination, mint mode, estimated fee, and required source debit before confirmation.
 - After a submitted transfer error, retain the transfer ID and transaction hashes; inspect status before retrying.

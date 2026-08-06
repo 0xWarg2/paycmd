@@ -32,7 +32,11 @@ import {
 import { formatNativeGasBalance } from "@/lib/paycmd/native-gas";
 import { createClient } from "@/lib/supabase/client";
 import { ParsedCommand } from "@/lib/paycmd/commands";
-import { gatewayTransferSubmitted } from "@/lib/paycmd/ui-models";
+import {
+  canSafelyRetryExecutionFailure,
+  gatewayTransferSubmitted,
+  parseGatewayAllocationGuardDraftField,
+} from "@/lib/paycmd/ui-models";
 
 export type ExecutionItem = {
   id: string;
@@ -630,11 +634,17 @@ async function executeServerCommand(draft: ParsedCommand) {
     return requestJson("/api/gateway/transfer", {
       method: "POST",
       body: JSON.stringify({
+        sourceMode: draft.fields.sourceMode ?? "scoped",
         sourceChain: draft.fields.sourceChain,
         destinationChain: draft.fields.destinationChain,
         amount: draft.fields.amount,
-        autoDeposit: true,
+        autoDeposit: false,
         mintGasMode: draft.fields.mintGasMode ?? "auto_forwarding",
+        selectedSourceChains: draft.fields.selectedSourceChains
+          ? draft.fields.selectedSourceChains.split(",").filter(Boolean)
+          : undefined,
+        allocationFingerprint: draft.fields.allocationFingerprint || undefined,
+        allocationGuard: parseGatewayAllocationGuardDraftField(draft.fields.allocationGuard),
       }),
     });
   }
@@ -645,9 +655,15 @@ async function executeServerCommand(draft: ParsedCommand) {
       body: JSON.stringify({
         amount: draft.fields.amount,
         recipient: draft.fields.recipient,
+        sourceMode: draft.fields.sourceMode ?? "scoped",
         sourceChain: draft.fields.sourceChain,
         destinationChain: draft.fields.destinationChain,
         mintGasMode: draft.fields.mintGasMode ?? "auto_forwarding",
+        selectedSourceChains: draft.fields.selectedSourceChains
+          ? draft.fields.selectedSourceChains.split(",").filter(Boolean)
+          : undefined,
+        allocationFingerprint: draft.fields.allocationFingerprint || undefined,
+        allocationGuard: parseGatewayAllocationGuardDraftField(draft.fields.allocationGuard),
       }),
     });
   }
@@ -1098,6 +1114,10 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
         const errorCode = (error as { code?: string })?.code;
         const transferSubmitted = gatewayTransferSubmitted((error as { data?: unknown })?.data);
         const waitingGateway = errorCode === "GATEWAY_FINALITY_PENDING";
+        const safeToRetry = !waitingGateway && canSafelyRetryExecutionFailure({
+          errorCode,
+          transferSubmitted,
+        });
         const localizedMessage = waitingGateway
           ? gatewayFinalityPendingText((error as { data?: unknown })?.data, draft, t)
           : message;
@@ -1105,7 +1125,8 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
           ...execution,
           status: waitingGateway ? ("waiting_gateway" as const) : ("failed" as const),
           error: localizedMessage,
-          ...(transferSubmitted ? { fundsMoved: true, safeToRetry: false } : {}),
+          fundsMoved: transferSubmitted,
+          safeToRetry,
         };
 
         await updateExecutionRecord(failed);

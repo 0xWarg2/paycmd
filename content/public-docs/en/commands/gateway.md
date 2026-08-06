@@ -9,7 +9,7 @@ keywords: ["deposit", "withdraw", "transfer", "gas", "gateway"]
 commands: ["deposit", "withdraw", "transfer", "gas", "gateway"]
 tutorial: true
 aiSummary:
-  - "Gateway commands include /deposit, /withdraw, /transfer, /gas, and /gateway; all money movement uses previews and source-scoped checks."
+  - "Gateway commands include /deposit, /withdraw, /transfer, /gas, and /gateway; transfer is scoped-first and can explicitly fall back to a unified BurnIntentSet."
 ---
 
 ## `/deposit`
@@ -36,14 +36,14 @@ aiSummary:
 
 ## `/transfer`
 
-- **Purpose:** Move source-scoped Gateway USDC across supported domains.
-- **Syntax and variants:** `/transfer <amount> [USDC] from <source> to <destination> [manual]`; omission selects auto forwarding.
-- **Example:** `/transfer 10 from base to arc`; natural language: “Transfer 10 Gateway USDC from Base to Arc.”
-- **Prerequisites:** SCA/depositor and signer, distinct supported chains, source ready balance for `amount + fee`, or eligible SCA funds for auto-deposit.
-- **Preview:** Verify amount, route, current fee estimate or max-fee reserve, required source balance, forwarding state, and destination-gas owner. A failed quote disables confirm.
-- **Confirmation boundary:** Payna confirmation authorizes server-side auto-deposit/delegation, typed burn intent, attestation, and forwarder/manual mint. Manual destination uses SCA or signer gas, not MetaMask.
-- **Success and persisted data:** History stores `transfer`, route, amount, result hash, status, fee, transfer ID, and optional Arc proof.
-- **Named errors and fixes:** **`GATEWAY_FEE_ESTIMATE_UNAVAILABLE`**: retry the read before any mutation. **`INSUFFICIENT_GATEWAY_BALANCE`/`INSUFFICIENT_USDC`**: fund the selected source, not another domain. **`GATEWAY_FORWARDING_FAILED`**: keep transfer ID/hashes and reconcile instead of resending. See [Gateway transfer](/docs/circle/gateway/transfer).
+- **Purpose:** Move scoped Gateway USDC, or explicitly combine ready balances with one BurnIntentSet.
+- **Syntax and variants:** `/transfer <amount> [USDC] from <source> to <destination> [manual]`; `/transfer <amount> from gateway to <destination> [manual]` starts unified mode.
+- **Example:** `/transfer 10 from base to arc`; if Base is short, choose the proposed minimum deposit or **Use Unified Gateway**.
+- **Prerequisites:** SCA/depositor, a valid Circle quote, enough ready capacity after every intent's `maxFee`, and separately confirmed delegates on selected sources.
+- **Preview:** Scoped preview shows ready balance, required maximum debit, and two explicit fallback choices. Unified preview shows checkboxes, allocations, per-source reserves, total fee, maximum debit, mint mode, exclusions, and fingerprint.
+- **Confirmation boundary:** Deposit is a separate command and never auto-sends the original transfer. Persistent delegate authorization is also confirmed separately. Final transfer confirmation signs one EIP-712 BurnIntent or BurnIntentSet; MetaMask does not sign.
+- **Success and persisted data:** Unified history stores `source_mode`, allocation JSON, one transfer ID, settled fee when available, destination hash, and optional Arc proof.
+- **Named errors and fixes:** **`GATEWAY_INSUFFICIENT_SCOPED_BALANCE`**: choose deposit or unified. **`GATEWAY_INSUFFICIENT_UNIFIED_BALANCE`**: select more usable sources or reduce amount. **`GATEWAY_DELEGATE_REQUIRED`**: authorize, wait for finality, and preview again. **`GATEWAY_QUOTE_CHANGED`**: review the refreshed fingerprint. **`GATEWAY_FORWARDING_FAILED`**: reconcile the existing transfer ID. See [Gateway transfer](/docs/circle/gateway/transfer).
 
 ## `/gas`
 

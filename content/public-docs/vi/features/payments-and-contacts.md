@@ -26,9 +26,9 @@ Nếu display name đã tồn tại trong danh bạ, việc add lại sẽ cập
 
 ## Bắt buộc source và destination
 
-Command parser của Payna yêu cầu cả hai đầu payment. Ví dụ: `/pay 25 to Minh on arc from base`. `from base` chọn source-scoped Gateway balance và `on arc` chọn destination network. Thiếu một trong hai thì draft chưa hoàn chỉnh, kể cả khi contact có preferred chain.
+Command parser của Payna yêu cầu destination và một named source hoặc Unified Gateway. Ví dụ, `/pay 25 to Minh on arc from base` chọn source-scoped balance trên Base, còn `/pay 25 to Minh on arc from gateway` mở multi-source preview bằng `BurnIntentSet`. Preferred chain của contact chỉ là routing hint.
 
-Payment này dùng Circle Gateway rail, không phải MetaMask CCTP. Payna có thể auto-deposit nguồn từ SCA wallet đủ điều kiện vào Gateway khi được cấu hình, nhưng không bao giờ coi Circle SCA wallet balance, Gateway balance và MetaMask balance là một.
+Payment này dùng Circle Gateway rail, không phải MetaMask CCTP. Nếu scoped ready balance thiếu, Payna yêu cầu user chọn explicit minimum deposit hoặc unified ready-balance quote. App không auto-deposit và không bao giờ coi Circle SCA wallet balance, Gateway balance và MetaMask balance là một.
 
 ## Preview trước khi confirm
 
@@ -44,7 +44,7 @@ Khi được bật, Payna ghi receipt proof riêng trên Arc Testnet sau payment
 
 ## History và receipt
 
-Receipt trong chat có thể hiện payment route, destination hoặc mint transaction, source auto-deposit transaction nếu có, forwarding transaction và Payna proof tùy chọn. Activity hiển thị transaction type nền, route, amount, state, date, reason và explorer link khi có hash. `/history` mở cùng tập operational record; dùng filter trong Activity để thu hẹp.
+Receipt trong chat có thể hiện payment route, source allocation, destination hoặc mint transaction, explicit deposit transaction nếu user đã yêu cầu, forwarding transaction và Payna proof tùy chọn. Activity hiển thị transaction type nền, route, amount, state, date, reason và explorer link khi có hash. `/history` mở cùng tập operational record; dùng filter trong Activity để thu hẹp.
 
 Submitted transaction có thể còn pending sau chat confirmation. Đối chiếu explorer chain với hash và chờ destination/finality stage liên quan trước khi kết luận người nhận đã được trả. Lưu receipt khi đối soát payment nghiệp vụ.
 

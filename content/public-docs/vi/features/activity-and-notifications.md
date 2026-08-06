@@ -26,7 +26,7 @@ Mỗi row hiển thị action, rail, route, amount, status, date và explorer li
 
 ## Chat receipt và proof link
 
-Command receipt trong chat có thể giàu chi tiết hơn Activity row. CCTP bridge có thể có source-burn link trên source explorer và mint link trên destination explorer. Gateway transfer hoặc payment có thể hiện auto-deposit transaction và destination mint hoặc forwarder transaction. Swap có thể gồm approval và swap detail.
+Command receipt trong chat có thể giàu chi tiết hơn Activity row. CCTP bridge có thể có source-burn link trên source explorer và mint link trên destination explorer. Gateway transfer hoặc payment có thể hiện explicit deposit user đã yêu cầu, source allocation và destination mint hoặc forwarder transaction. Swap có thể gồm approval và swap detail.
 
 Payna cũng có thể hiện “Payna proof” transaction trên Arc Testnet. Đây là application receipt riêng được ghi sau business action; nó không phải Circle attestation, không phải source payment và không thay cho kiểm tra destination delivery. Proof lỗi hoặc không có không được dùng làm lý do tạo duplicate payment.
 

@@ -26,9 +26,9 @@ If a display name already exists in your directory, adding it again updates that
 
 ## Source and destination are required
 
-Payna's command parser requires both sides of the payment. For example: `/pay 25 to Minh on arc from base`. `from base` selects the source-scoped Gateway balance and `on arc` selects the destination network. Omitting either leaves the draft incomplete, even if a contact has a preferred chain.
+Payna's command parser requires a destination and either a named source or Unified Gateway. For example, `/pay 25 to Minh on arc from base` selects the source-scoped Base balance, while `/pay 25 to Minh on arc from gateway` opens a multi-source `BurnIntentSet` preview. A contact's preferred chain is only a routing hint.
 
-This payment uses the Circle Gateway rail, not MetaMask CCTP. Payna may auto-deposit eligible source wallet funds into Gateway when configured, but it never treats Circle SCA wallet balance, Gateway balance, and MetaMask balance as interchangeable.
+This payment uses the Circle Gateway rail, not MetaMask CCTP. If a scoped ready balance is short, Payna asks the user to choose an explicit minimum deposit or a unified ready-balance quote. It never auto-deposits or treats Circle SCA wallet balance, Gateway balance, and MetaMask balance as interchangeable.
 
 ## Preview before confirmation
 
@@ -44,7 +44,7 @@ Where enabled, Payna writes a separate receipt proof on Arc Testnet after the pa
 
 ## History and receipts
 
-The chat receipt can expose the payment route, destination or mint transaction, any source auto-deposit transaction, forwarding transaction, and optional Payna proof. Activity shows the underlying transaction type, route, amount, state, date, reason, and an explorer link when a hash is present. `/history` opens the same operational record set; use Activity filters to narrow it.
+The chat receipt can expose the payment route, source allocations, destination or mint transaction, any explicitly requested deposit transaction, forwarding transaction, and optional Payna proof. Activity shows the underlying transaction type, route, amount, state, date, reason, and an explorer link when a hash is present. `/history` opens the same operational record set; use Activity filters to narrow it.
 
 A submitted transaction can be pending even after chat confirmation. Match the explorer chain to the hash and wait for the relevant destination/finality stage before declaring the recipient paid. Save the receipt when reconciling a business payment.
 

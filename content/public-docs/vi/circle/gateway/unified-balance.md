@@ -9,7 +9,7 @@ keywords: ["Circle Gateway", "unified balance", "SCA", "depositor"]
 tutorial: true
 aiSummary:
   - "Gateway ready balance gồm finalized deposit được ghi nhận cho một depositor và domain; SCA USDC và pending deposit là các phần riêng."
-  - "Payna có thể cộng SCA và Gateway để hiển thị visibility, nhưng transfer hiện tại chỉ debit một Gateway source domain được chọn rõ ràng."
+  - "Payna giữ named source command strict, nhưng explicit unified fallback có thể allocate ready balance qua tối đa 16 intent trong BurnIntentSet."
 ---
 
 Cụm từ “unified balance” mô tả deposited-liquidity model của Circle Gateway. Không nên dùng nó như cách gọi tắt mọi lượng USDC nhìn thấy trong Payna. Cách đọc balance screen an toàn nhất là gắn owner, location, domain và settlement state vào từng con số.
@@ -49,11 +49,11 @@ Primary settlement signal của Payna là signed webhook `gateway.deposit.finali
 
 Sau khi Gateway nhận transfer request, ledger có thể giảm trước khi mọi local display refresh. Không coi source row cũ là fund còn dùng lại được. Hãy dùng transfer ID, forwarding state và destination transaction hash để reconcile submitted work.
 
-## Tại sao transfer vẫn source-scoped
+## Transfer scoped-first và unified execution
 
-**Current Payna implementation behavior:** command phải chỉ rõ một source và Payna tạo một burn intent cho source domain đó. Nó so sánh ready amount của domain với `amount + estimatedGatewayFee`. Payna không cộng nhiều domain để execution dù balance screen có thể cộng chúng cho visibility và Circle protocol có thể biểu diễn multi-source request.
+**Current Payna implementation behavior:** named command vẫn source-scoped. `/transfer 5 from base to arc` tạo một burn intent, so Base ready balance với `amount + maxFee` và không âm thầm tiêu domain khác. `/transfer 5 from gateway to arc`, hoặc explicit fallback **Dùng Unified Gateway**, tạo BurnIntentSet từ selected ready source.
 
-Ranh giới này làm preview auditable. Người dùng thấy chain nào cung cấp liquidity, nơi nào có thể cần signer authorization, source fee đã estimate, auto-deposit có được đề xuất không và retry command nào áp dụng. Unified total không bao giờ là lời hứa rằng mọi source choice đều tiêu được total đó.
+Unified execution vẫn không tiêu mù displayed total. Preview trừ `maxFee` từng intent, exclude source unusable/chưa authorize, hiện mọi allocation và bind confirmation với quote fingerprint. SCA balance và pending deposit vẫn bị loại. Vì thế unified total là visibility; `maximumUsableCapacity` mới gần execution capacity hơn.
 
 ## Ví dụ balance trên hai domain
 
@@ -66,7 +66,7 @@ Giả sử một SCA address có các balance đọc thành công sau:
 
 **Circle Gateway ready total là 14 USDC**. **Payna visible total là 34 USDC**, gồm 20 SCA cộng 14 Gateway. 20 SCA không âm thầm trở thành deposited liquidity.
 
-Xét `/transfer 10 from arc to base`. Nếu quote là 0.03 USDC, Arc cần 10.03 ready. Arc chỉ có 3 nên transfer không thể debit 11 ready trên Base theo behavior hiện tại. Khi auto-deposit bật, Payna có thể xác định Arc SCA đủ để deposit phần thiếu 7.03, submit nó và trả pending-finality response. Người dùng cần chờ đúng deposit đó ready rồi retry. Hoặc chọn Base làm source, tạo route khác và lấy quote mới.
+Xét `/transfer 10 from arc to base`. Nếu maximum reserve là 0.03 USDC, Arc cần 10.03 ready. Arc chỉ có 3 nên scoped confirmation bị khóa. Payna cho chọn explicit minimum deposit 7.03 hoặc unified preview. Unified có thể đề xuất Base cộng Arc sau khi reserve fee từng intent; nó không auto-deposit 20 SCA USDC. Đổi selected source sẽ tạo quote và fingerprint mới.
 
 ## Scope của depositor và signer
 
@@ -79,8 +79,8 @@ Nếu người dùng có nhiều SCA record hoặc deposit cũ từ address khá
 - Label từng amount là SCA, Gateway pending hoặc Gateway ready và giữ chain/domain của nó.
 - Loại pending deposit khỏi spendable Gateway balance.
 - Xem partial read là lower bound; kiểm tra `failedChains` và `gatewayUnavailable`.
-- Với transfer, kiểm tra selected source row thay vì cross-domain display total.
-- Yêu cầu selected row đủ cả amount và current fee estimate.
+- Với scoped transfer, kiểm tra selected source row thay vì cross-domain display total.
+- Với unified transfer, kiểm tra từng allocation, maximum fee reserve, exclusion và `maximumUsableCapacity`.
 - Giữ transaction hash và transfer ID đến khi history và balance view đồng thuận.
 - Không dán private key, Circle API key hoặc private RPC URL vào support message.
 

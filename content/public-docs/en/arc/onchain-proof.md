@@ -27,7 +27,7 @@ The command ID is hashed from an explicit identifier or stable action/route fiel
 
 A mined proof establishes that an authorized recorder submitted this exact receipt payload to the configured registry at a specific Arc block. Anyone can independently compare its event fields with the hashes, addresses, chain IDs, amount, and metadata supplied by Payna. Because the contract only emits an immutable event, it provides a public timestamped linkage among the Payna action, source transaction, destination or mint transaction, and receipt metadata commitment.
 
-For a swap, both hashes normally point to the same Arc transaction. For CCTP, they can represent source burn and destination mint. For Gateway transfer/pay, source may be auto-deposit while destination identifies mint or forwarding. A zero hash only means that side was not supplied.
+For a swap, both hashes normally point to the same Arc transaction. For CCTP, they can represent source burn and destination mint. For Gateway transfer/pay, source may be an explicitly requested deposit while destination identifies mint or forwarding. A zero hash only means that side was not supplied.
 
 ## What it does not establish
 

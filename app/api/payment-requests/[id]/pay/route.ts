@@ -74,7 +74,7 @@ export async function POST(
       destinationChain: paymentRequest.destination_chain,
       amount: String(paymentRequest.amount),
       recipientAddress: paymentRequest.recipient_address,
-      autoDeposit: true,
+      autoDeposit: false,
       mintGasMode: body.mintGasMode ?? "manual",
     });
 

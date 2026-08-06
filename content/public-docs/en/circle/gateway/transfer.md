@@ -1,104 +1,94 @@
 ---
 slug: "circle/gateway/transfer"
 title: "Gateway transfer"
-description: "Move USDC cross-chain from one explicitly selected source domain."
+description: "Use a scoped source first, then explicitly deposit or allocate a BurnIntentSet across Gateway sources."
 section: "circle.gateway"
 order: 23
 lastUpdated: "2026-08-05"
-keywords: ["transfer", "burn intent", "mint", "source-scoped", "fee"]
+keywords: ["transfer", "burn intent set", "unified gateway", "source allocation", "fee"]
 tutorial: true
 aiSummary:
-  - "Payna estimates first, then requires amount plus fee on the named source domain before authorizing and signing one burn intent."
-  - "For example, `/transfer 5 from base to arc` spends only ready balance on Base; auto forwarding and manual mint produce different destination results, and status must be checked before retrying."
+  - "`/transfer 5 from base to arc` remains source-scoped. If that ready balance is short, Payna offers an explicit minimum deposit or a unified BurnIntentSet; it never auto-deposits."
+  - "A unified preview shows every allocation, maximum fee reserve and maximum debit, then binds confirmation to a fresh quote fingerprint."
 ---
 
-## Command syntax and source selection
+## Scoped-first command model
 
-Use `/transfer 10 from base to arc`. The required fields are a positive USDC amount, an explicit source chain after `from`, and an explicit destination after `to`. USDC supports at most six decimal places. Payna defaults to `auto_forwarding`; add `manual`, `manual gas`, `no forwarding`, or `without forwarding` to request manual mint mode.
+Use `/transfer 10 from base to arc` for a strict Base source. It signs one `BurnIntent` and never spends another Gateway domain silently. Use `/transfer 10 from gateway to arc` to request unified allocation immediately. `/pay 10 to Minh on arc from gateway` uses the same transfer engine after Payna resolves the recipient.
 
-**Current Payna implementation behavior is source-scoped.** The `from` chain becomes the single `sourceDomain` in one burn intent. Payna does not silently aggregate ready balances from multiple domains, even though Circle Gateway's protocol can accept multiple burn intents and provide a unified cross-chain balance. `/transfer 5 from base to arc` therefore spends only the SCA depositor's ready Gateway balance on Base.
+This feature does not mean that Circle supports exactly “16 chains.” Circle's EVM `BurnIntentSet` format accepts **at most 16 intents in one transfer**. Payna currently discovers eligible sources from its supported testnet Gateway matrix; the product is deployed on Arc Testnet, but a source intent may belong to another supported Gateway testnet domain.
 
-The destination may equal the source at API level, but users who want USDC returned to their own SCA should use `/withdraw`, which provides a constrained same-domain flow and clearer receipt.
+## What happens when the scoped source is short
 
-## Estimate before mutation
+The scoped preview compares the source's ready Gateway balance with `amount + maximum fee reserve`. If it is short, normal transfer confirmation is disabled and Payna shows two choices:
 
-Payna constructs a read-only burn-intent preview and calls Circle's `/v1/estimate` endpoint before creating a Gateway signer, authorizing a delegate, auto-depositing, or signing a burn intent. Fee calculation does not depend on the signer address, so the existing SCA address can be used as a placeholder during estimation. If Circle cannot return a usable quote, Payna stops with `GATEWAY_FEE_ESTIMATE_UNAVAILABLE`; it does not mutate wallet or balance state.
+1. **Deposit into this source.** Payna proposes the exact minimum shortfall. The amount is editable but cannot be lower than that minimum. Confirming creates a `/deposit` action only. After Gateway finality, preview the transfer again; Payna does not send the payment automatically.
+2. **Use Unified Gateway.** Payna obtains a multi-source quote and opens a source-selection table. This path uses only ready Gateway balance and never auto-deposits from an SCA.
 
-For auto forwarding, the request includes `enableForwarder=true`. In either mint mode, Payna's shared response parser prefers Circle's decimal `fees.total` as the quoted total. If that field is unusable and the first returned burn intent contains a positive atomic `maxFee`, the parser accepts it as a reserve. The parser itself does not enforce a mode for this fallback. The preview exposes `feeEstimateKind` as `quoted_total` or `max_fee_reserve` so callers do not mislabel a reserve as a settled charge. Circle documents the estimate request in the [Gateway API reference](https://developers.circle.com/api-reference/gateway/all/estimate-transfer).
+The deposit panel identifies the source, minimum amount, SCA funding requirement, source gas requirement, and finality boundary. During **pending finality**, the deposit must be reconciled instead of duplicated.
 
-## Preview and confirmation
+## Unified allocation table
 
-Before confirming, review:
+Each selectable row shows the source chain, ready balance, proposed amount, per-intent maximum fee reserve, maximum debit, delegate status, and priority reason. Changing a checkbox requests a fresh estimate.
 
-- `amount`, `sourceChain`, and `destinationChain`;
-- the destination `recipient`, especially when it is not the user's SCA;
-- `estimatedGatewayFee` and `requiredGatewayBalance`;
-- `feeEstimateKind`, `mintGasMode`, and whether `forwarding` is enabled;
-- any proposed auto-deposit amount and the wallet that must pay source gas;
-- manual-mode destination gas requirements.
+Payna orders candidates using current quote data:
 
-The source requirement is **`amount + estimated fee`**, not merely the displayed transfer amount. A preview is a point-in-time estimate. It is not a promise of a permanently fixed fee, and execution must not proceed with a missing or malformed quote.
+1. lower quoted per-source cost;
+2. for a tie, larger usable capacity (`ready balance - maxFee`) so fewer intents are needed;
+3. deterministic source order for a stable result.
 
-Confirmation authorizes the next stateful steps. Re-check the full external address character by character or use a trusted contact. A valid EVM-shaped address can still be the wrong recipient, and a destination mint is not reversible by Payna.
+Allocation is greedy after sorting. An intent can contribute at most `balance - maxFee`; the reserve is never treated as transferable value. Payna emits no more than 16 intents. If the set cannot cover the amount, `GATEWAY_INSUFFICIENT_UNIFIED_BALANCE` reports ready balance, maximum usable capacity, shortfall, and excluded sources. It does not create deposits.
 
-## Balance, signer, and gas preflight
+## Estimate, fees, and fingerprint
 
-After a valid estimate, Payna finds or creates the source-chain Gateway signer. It reads the SCA depositor's Gateway entry for exactly the selected source domain and compares it with `amount + fee`.
+Preview is read-only. Payna may use the existing multichain Gateway signer address, or the SCA address as a fee-only placeholder. It does not create a wallet, add a delegate, deposit, sign, or submit a transfer while estimating.
 
-With auto-deposit enabled, a shortfall may be filled from the same-chain SCA USDC. Payna first detects existing deposits in finality so it does not submit another one. If no deposit is already pending, it checks SCA USDC and source native gas, submits only the missing amount, records the hash as `pending_gateway_finality`, and usually returns a retry instruction. A transfer cannot burn the new amount until it is ready.
+For a set, Payna sends one partial object containing `intents[]` to Circle's [`/v1/estimate`](https://developers.circle.com/api-reference/gateway/all/estimate-transfer). Circle returns a `burnIntentSet.intents[]` with a `maxBlockHeight` and `maxFee` for every intent. Payna displays:
 
-Manual mode performs destination gas preflight before burning. When sending to the user's own wallet, the SCA will execute the mint; for an external recipient, Payna's destination Gateway signer executes it. The relevant wallet must have native gas and the current Circle Wallet SDK must support that destination. Auto forwarding avoids user-supplied destination gas, but source-side delegate or auto-deposit transactions can still need native gas.
+- `fees.total` as the point-in-time estimated total fee when Circle supplies it;
+- each intent's `maxFee` as its signed maximum reserve;
+- the sum of `maxFee` values as the maximum fee reserve, not the expected charge;
+- `amount + sum(maxFee)` as maximum debit.
 
-## Burn intent and Gateway acceptance
+Do not hard-code a fee table. Base, transfer, forwarding, and destination execution conditions can change. A preview fingerprint covers amount, destination, mint mode, source allocations, values, and maximum fees. Execution quotes again; a changed economic allocation returns `GATEWAY_QUOTE_CHANGED` and requires another review. Fresh `maxBlockHeight` constraints are used for execution without causing a false mismatch merely because blocks advanced.
 
-Payna checks whether the EOA signer is authorized for the SCA depositor's token balance. If it is not authorized, the SCA submits an `addDelegate` transaction with a zero deposit amount and Payna returns `pending_gateway_finality`; retry only after that authorization is visible. If the authorization read fails, Payna may attempt the burn and handle Circle's explicit not-authorized result.
+## Persistent delegate consent
 
-The signer then signs EIP-712 data containing source and destination domains, source depositor, signer, recipient, token contracts, transfer amount, maximum fee, salt, and other constraints. Payna sets the quote as `maxFee`, submits the signed request to `/v1/transfer`, and receives a transfer ID plus either attestation data or forwarding state. Circle's [technical guide](https://developers.circle.com/gateway/references/technical-guide#instant-transfer) explains the burn-intent and attestation protocol.
+All intents in a set use the same multichain EOA `sourceSigner` and one common EIP-712 signature. That signer must be authorized for the SCA depositor's USDC balance on every selected source.
 
-Gateway acceptance is a state-change boundary. Once a transfer ID exists, do not treat a later network error as proof that nothing happened.
+`addDelegate` is a persistent permission, so Payna asks separately the first time. The **Authorize selected sources** action may create the signer only after a valid quote, checks source gas, submits zero-value delegate transactions in deterministic source order, and returns `pending_gateway_finality`. It does not burn any part of the set. Preview again after authorization becomes visible.
 
-## Destination mint and forwarding result
+An already-authorized source can remain usable even when the current Circle Wallet SDK cannot submit a new delegate transaction for that chain. A source that is not authorized and cannot be authorized by the current SDK is excluded with an explanation; Payna never silently counts that balance.
 
-In default `auto_forwarding` mode, Circle's Forwarding Service handles the destination mint. Payna polls `/v1/transfer/{transferId}` until status is `confirmed` or `finalized`; it treats `failed` and `expired` as terminal errors. A successful settled response must include a valid destination transaction hash under `forwardingDetails.transactionHash`. Payna returns the forwarding details, settled fees when present, and normalizes that hash as `destinationTxHash`. Circle's official [Forwarding Service how-to](https://developers.circle.com/gateway/howtos/forwarding-service) documents this poll-to-settlement flow.
+## EIP-712 BurnIntentSet and one transfer ID
 
-In `manual` mode, Payna waits for the attestation and signature, then calls `gatewayMint` on the destination. The resulting Circle transaction provides `mintTxHash`, which also becomes the normalized `destinationTxHash`. For the user's own recipient, the SCA submits the mint; for an external recipient, the user's Gateway signer wallet submits it. This transaction submitter is not the recipient and does not take ownership of the minted USDC.
+After final confirmation, Payna creates fresh salts, signs one EIP-712 `BurnIntentSet`, and submits:
 
-## Receipt and history fields
+```json
+[{ "burnIntentSet": { "intents": ["..."] }, "signature": "0x..." }]
+```
 
-The successful API result can include `transferId`, `fees`, `actualGatewayFee`, `actualSourceDebit`, `estimatedGatewayFee`, `requiredGatewayBalance`, `feeEstimateKind`, `forwarding`, `mintGasMode`, `forwardingDetails`, `mintTxHash`, `destinationTxHash`, auto-deposit fields, source, destination, amount, recipient, and the source SCA address.
+Each intent constrains its source domain, depositor, token, value, destination, recipient, signer, `maxBlockHeight`, and `maxFee`. The common signature proves that the signer approved the entire set as one structured message; changing any signed field invalidates it.
 
-When Circle returns settled `fees.total`, Payna reports the actual Gateway fee and computes `actualSourceDebit = amount + actual fee`. The initial estimate remains useful for comparison but must not be presented as actual. In history, Payna records the source chain, destination chain, amount, success state, and normalized destination hash. It may also record RA proof metadata; proof failure is reported separately and does not reverse the already completed Gateway transfer.
+Circle returns one `transferId`. The same attestation bytes support either manual `gatewayMint` or the Forwarding Service. Settlement and polling remain keyed by that single ID even when several source domains funded the transfer.
 
-Auto forwarding often has no Payna-submitted `mintTxHash`; the destination evidence is the forwarded hash. Manual mint has `mintTxHash` and may have no forwarding details. A UI must not require both.
+## Manual mint and forwarding
 
-## External recipient checks
+Mint capability is destination-side. Auto forwarding uses `enableForwarder=true`; Circle draws forwarding cost from available `maxFee` headroom in intent order and can continue into later intents. Payna polls the one transfer ID and requires a valid forwarded destination transaction hash.
 
-Before transferring to an external address:
+Manual mode uses the returned attestation and signature in `gatewayMint` and requires destination native gas from the designated SCA or signer. If the current Circle Wallet SDK does not support manual mint on the destination, Payna offers only forwarding. A source chain's manual-mint limitation does not by itself invalidate already-authorized source balance because minting occurs at the destination.
 
-1. Confirm the destination chain supports the intended Payna operation, not merely Gateway listing.
-2. Verify the recipient is an address for that destination and not a source-chain contract copied by mistake.
-3. Decide who will execute the mint. Manual external mint uses the Gateway signer and needs destination native gas; auto forwarding does not.
-4. Confirm the recipient can use USDC on that network.
-5. Run a small test amount when operational risk justifies it, remembering that each attempt has its own fee.
+## Receipt, history, and retry safety
 
-Payna currently targets EVM chains in its generated matrix. Do not infer Solana recipient setup behavior from Circle's broader protocol documentation.
+A unified result includes `sourceMode: unified`, `sourceAllocations`, total estimated fee, maximum fee reserve, actual fee when Circle settles it, one transfer ID, and the mode-appropriate destination hash. History stores `chain: gateway`, `source_mode: unified`, and the allocation JSON. The Activity UI expands the contributing sources.
 
-## Common failures
+Before any transfer ID exists, refresh a changed quote or complete the requested deposit/delegate action. Once a transfer ID exists, inspect Circle status before retrying. A timeout after submission is not proof that no burn occurred, and Payna never falls back automatically from forwarding to manual mint.
 
-**Insufficient Gateway balance:** the selected source entry does not cover `amount + fee`. Wait for an existing deposit, allow a same-source auto-deposit, reduce the amount, or explicitly choose another funded source.
+Common responses are:
 
-**Quote failure:** Circle returned an error or no usable `fees.total`/reserve. No signer creation or balance mutation should have happened. Wait and request a fresh preview.
-
-**Source gas failure:** the SCA cannot authorize a signer or auto-deposit. Fund native gas on the source wallet named in the response.
-
-**Destination gas failure:** manual mint cannot be safely attempted. Fund the SCA or Gateway signer specified by the preflight, or obtain a new auto-forwarding preview.
-
-**Pending finality:** a deposit or delegate transaction has been submitted but is not usable. Preserve its hash and run the provided retry command only after readiness.
-
-**Forwarding settlement failure:** Circle already accepted the forwarded request, but Payna did not observe a successful destination result. This is not a safe point for blind re-submission.
-
-## Retry safety
-
-Before a quote or before any transaction hash/transfer ID exists, correcting input and retrying is generally safe. After an auto-deposit or delegate hash exists, reconcile that transaction and wait for finality instead of repeating it. After a transfer ID exists, inspect `/v1/transfer/{id}`, `forwardingDetails.failureReason`, and any destination hash.
-
-Payna intentionally does not auto-fallback from failed forwarding to manual mint and does not automatically retry a submitted transfer. Either could duplicate delivery if the first request later settles. Retain the original source, destination, recipient, amount, mint mode, quote, transfer ID, and hashes when escalating. Never include private keys or API secrets.
+- `GATEWAY_INSUFFICIENT_SCOPED_BALANCE`: choose deposit or unified allocation.
+- `GATEWAY_INSUFFICIENT_UNIFIED_BALANCE`: reduce the amount or select more usable sources; no deposit was created.
+- `GATEWAY_DELEGATE_REQUIRED`: explicitly authorize the listed persistent delegates; no partial burn was submitted.
+- `GATEWAY_QUOTE_CHANGED`: review the refreshed allocation and fingerprint.
+- `GATEWAY_FEE_ESTIMATE_UNAVAILABLE`: Circle did not return a safe quote; preview caused no wallet or balance mutation.
+- `GATEWAY_FORWARDING_FAILED`: preserve the transfer ID and reconcile settlement before retrying.

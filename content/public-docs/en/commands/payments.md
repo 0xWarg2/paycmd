@@ -29,14 +29,14 @@ Contacts resolve identity; `/pay` and payroll move Gateway USDC; a request creat
 
 ## `/pay`
 
-- **Purpose:** Send USDC through Circle Gateway from one required source domain to a resolved contact or direct address on a required destination.
-- **Syntax and variants:** `/pay <amount> [USDC] to <contact-or-address> on <destination> from <source> [manual]`; omission selects auto forwarding.
-- **Example:** `/pay 25 to Minh on arc from base`; natural language: “Pay Minh 25 USDC on Arc using my Base Gateway balance.”
-- **Prerequisites:** SCA and Gateway signer, valid recipient, source ready balance for amount plus fee (or eligible auto-deposit), and destination gas for manual mint.
-- **Preview:** Verify amount, USDC, both chains, resolved full recipient, Gateway rail, fee requirement, and auto-forwarding/manual destination-gas choice.
-- **Confirmation boundary:** Payna confirmation starts server-side Gateway execution. MetaMask does not sign this command; Payna's Circle/Gateway wallet roles sign required operations.
-- **Success and persisted data:** Response includes recipient resolution, transfer ID, auto-deposit, fees, history ID, destination explorer and optional Arc-proof links, and notifications.
-- **Named errors and fixes:** **“Contact not found”**: add the contact or use a full address. **`INSUFFICIENT_GATEWAY_BALANCE`/`INSUFFICIENT_USDC`**: fund/deposit the named source and wait for finality. **`INSUFFICIENT_GAS`**: fund the wallet named in the error or select forwarding.
+- **Purpose:** Send USDC from one scoped Gateway domain or an explicitly selected unified allocation to a resolved contact/address.
+- **Syntax and variants:** `/pay <amount> [USDC] to <recipient> on <destination> from <source> [manual]`; use `from gateway` for BurnIntentSet allocation.
+- **Example:** `/pay 25 to Minh on arc from base`; if Base is short, choose a minimum deposit or the unified source table. `/pay 25 to Minh on arc from gateway` starts unified.
+- **Prerequisites:** Resolvable recipient, valid quote, ready capacity after fee reserves, delegate authorization on selected sources, and destination gas only for manual mint.
+- **Preview:** Verify recipient, destination, mint mode, each source allocation, total estimated fee, maximum reserve/debit, exclusions, and quote fingerprint. No auto-deposit occurs.
+- **Confirmation boundary:** Deposit and persistent delegate consent are separate confirmations. Final payment confirmation signs the bounded BurnIntent/BurnIntentSet; MetaMask does not sign.
+- **Success and persisted data:** Response includes recipient resolution, one transfer ID, source allocations, settled fees, history ID, destination explorer/proof links, and notifications.
+- **Named errors and fixes:** **“Contact not found”**: add the contact or use a full address. **`GATEWAY_INSUFFICIENT_SCOPED_BALANCE`**: choose deposit or unified. **`GATEWAY_DELEGATE_REQUIRED`**: authorize and wait. **`GATEWAY_QUOTE_CHANGED`**: review again. **`INSUFFICIENT_GAS`**: fund the named wallet or select forwarding.
 
 ## `/request`
 

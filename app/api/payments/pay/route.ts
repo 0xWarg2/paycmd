@@ -6,6 +6,10 @@ import {
   requirePaymentChains,
 } from "@/lib/paycmd/payment-chains";
 import { resolveInternalWalletOwner, resolveRecipient } from "@/lib/paycmd/recipients";
+import {
+  gatewayPaymentEstimateFields,
+  gatewayUnifiedRequestFields,
+} from "@/lib/paycmd/gateway-transfer-request";
 import { recordRaReceipt, updateRaProofColumns } from "@/lib/ra/receipt-registry";
 import { createClient } from "@/lib/supabase/server";
 
@@ -111,10 +115,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { sourceChain, destinationChain } = requirePaymentChains({
+    const paymentChains = requirePaymentChains({
+      sourceMode: body.sourceMode,
       sourceChain: body.sourceChain,
       destinationChain: body.destinationChain,
     });
+    const { sourceChain, destinationChain } = paymentChains;
+    const sourceMode = "sourceMode" in paymentChains ? paymentChains.sourceMode : "scoped";
 
     const recipient = await resolveRecipient(
       supabase,
@@ -123,6 +130,20 @@ export async function POST(req: NextRequest) {
       destinationChain,
       locale,
     );
+
+    if (body.estimateOnly === true) {
+      const estimateResponse = await fetch(new URL("/api/gateway/transfer/estimate", req.url), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          cookie: req.headers.get("cookie") ?? "",
+        },
+        body: JSON.stringify(gatewayPaymentEstimateFields(body, recipient.address)),
+      });
+      const estimate = await estimateResponse.json().catch(() => ({}));
+      return NextResponse.json(estimate, { status: estimateResponse.status });
+    }
+
     const directRecipientUserId =
       recipient.contactUserId ||
       (recipient.resolution === "direct"
@@ -130,14 +151,21 @@ export async function POST(req: NextRequest) {
         : null);
 
     const transfer = await callGatewayTransfer(req, {
+      sourceMode,
       sourceChain,
       destinationChain: recipient.destinationChain,
       amount,
       recipientAddress: recipient.address,
-      autoDeposit: true,
+      autoDeposit: false,
       mintGasMode: body.mintGasMode ?? "auto_forwarding",
+      selectedSourceChains: body.selectedSourceChains,
+      ...gatewayUnifiedRequestFields(body),
       skipReceipt: true,
     });
+
+    if (body.preflightOnly === true && transfer.valid === true) {
+      return NextResponse.json(transfer);
+    }
 
     let proof:
       | Awaited<ReturnType<typeof recordRaReceipt>>
@@ -152,7 +180,7 @@ export async function POST(req: NextRequest) {
           userAddress: typeof transfer.sourceWalletAddress === "string" ? transfer.sourceWalletAddress : undefined,
           recipientAddress: recipient.address,
           amount,
-          sourceChain,
+          sourceChain: sourceChain ?? "gateway",
           destinationChain: recipient.destinationChain,
           sourceTxHash: typeof transfer.autoDepositTxHash === "string" ? transfer.autoDepositTxHash : undefined,
           destinationTxHash:
@@ -220,6 +248,7 @@ export async function POST(req: NextRequest) {
         amount: Number(amount),
         token: "USDC",
         sourceChain,
+        sourceMode,
         destinationChain: recipient.destinationChain,
         recipient,
       },

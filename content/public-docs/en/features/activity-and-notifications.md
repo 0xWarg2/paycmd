@@ -26,7 +26,7 @@ Each row shows action, Payna rail, source/destination route, amount, status, dat
 
 ## Chat receipts and proof links
 
-The richer command receipt in chat can expose more than the Activity row. A CCTP bridge may have a source-burn link on the source explorer and a mint link on the destination explorer. Gateway transfer or payment may show an auto-deposit transaction and a destination mint or forwarder transaction. A swap can include approval and swap details.
+The richer command receipt in chat can expose more than the Activity row. A CCTP bridge may have a source-burn link on the source explorer and a mint link on the destination explorer. Gateway transfer or payment may show an explicitly requested deposit, source allocations, and a destination mint or forwarder transaction. A swap can include approval and swap details.
 
 Payna may also show a “Payna proof” transaction on Arc Testnet. This is a separate application receipt written after the business action; it is not Circle attestation, not the source payment, and not a substitute for checking destination delivery. Proof failure or absence must not trigger a duplicate payment.
 

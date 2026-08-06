@@ -16,11 +16,14 @@ import {
   gatewayForwardingSettlementFrom,
   gatewayForwardingTransferId,
   gatewayForwardedMintReceiptMatches,
+  gatewayBurnIntentSetTransferPayload,
   gatewayMintGasModeFrom,
   gatewayTransferAmounts,
   gatewayTransferExecutionPlan,
   parseGatewayFeeEstimate,
+  parseGatewayFeeEstimateSet,
   requestGatewayFeeEstimate,
+  requestGatewayFeeEstimateSet,
   usdcAmountToAtomic,
 } from "./gateway-transfer.ts";
 
@@ -256,6 +259,87 @@ test("requests a forwarding quote without sending the caller's maxFee", async ()
     feeEstimateKind: "quoted_total",
     feeBreakdown: { totalAtomic: 17_598n },
   });
+});
+
+test("parses every returned BurnIntentSet reserve and the aggregate Circle fee", () => {
+  const estimate = parseGatewayFeeEstimateSet({
+    body: [{
+      burnIntentSet: {
+        intents: [
+          { maxBlockHeight: "100", maxFee: "7000", spec: { sourceDomain: 0, value: "3000000" } },
+          { maxBlockHeight: "101", maxFee: "9000", spec: { sourceDomain: 6, value: "2000000" } },
+        ],
+      },
+    }],
+    fees: {
+      token: "USDC",
+      total: "0.014",
+      forwardingFee: "0.004",
+      perIntent: [
+        { baseFee: "0.001", transferFee: "0.004" },
+        { baseFee: "0.001", transferFee: "0.004" },
+      ],
+    },
+  }, { enableForwarder: true });
+
+  assert.equal(estimate.atomicFee, 14_000n);
+  assert.equal(estimate.maxFeeAtomic, 16_000n);
+  assert.deepEqual(estimate.intents.map((intent) => ({
+    sourceDomain: intent.sourceDomain,
+    maxBlockHeight: intent.maxBlockHeight,
+    maxFeeAtomic: intent.maxFeeAtomic,
+    estimatedFeeAtomic: intent.estimatedFeeAtomic,
+  })), [
+    { sourceDomain: 0, maxBlockHeight: 100n, maxFeeAtomic: 7_000n, estimatedFeeAtomic: 5_000n },
+    { sourceDomain: 6, maxBlockHeight: 101n, maxFeeAtomic: 9_000n, estimatedFeeAtomic: 5_000n },
+  ]);
+});
+
+test("requests a partial BurnIntentSet and omits every caller maxFee", async () => {
+  let requestedBody: unknown;
+  const fetchImpl = async (_input: string | URL | Request, init?: RequestInit) => {
+    requestedBody = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify({
+      body: [{
+        burnIntentSet: {
+          intents: [
+            { maxBlockHeight: "100", maxFee: "7000", spec: { sourceDomain: 0, value: "3000000" } },
+            { maxBlockHeight: "101", maxFee: "9000", spec: { sourceDomain: 6, value: "2000000" } },
+          ],
+        },
+      }],
+      fees: { token: "USDC", total: "0.014" },
+    }), { status: 200 });
+  };
+
+  const estimate = await requestGatewayFeeEstimateSet([
+    { maxBlockHeight: 100n, maxFee: 123n, spec: { sourceDomain: 0, value: 3_000_000n } },
+    { maxBlockHeight: 101n, maxFee: 456n, spec: { sourceDomain: 6, value: 2_000_000n } },
+  ], { enableForwarder: true, fetchImpl: fetchImpl as typeof fetch });
+
+  assert.deepEqual(requestedBody, [{
+    intents: [
+      { maxBlockHeight: "100", spec: { sourceDomain: 0, value: "3000000" } },
+      { maxBlockHeight: "101", spec: { sourceDomain: 6, value: "2000000" } },
+    ],
+  }]);
+  assert.equal(estimate.intents.length, 2);
+  assert.equal(estimate.maxFeeAtomic, 16_000n);
+});
+
+test("serializes one signed BurnIntentSet transfer with a shared signature", () => {
+  assert.deepEqual(gatewayBurnIntentSetTransferPayload([
+    { maxBlockHeight: 100n, maxFee: 7_000n, spec: { sourceDomain: 0, value: 3_000_000n } },
+    { maxBlockHeight: 101n, maxFee: 9_000n, spec: { sourceDomain: 6, value: 2_000_000n } },
+  ], "0x1234"), [{
+    burnIntentSet: {
+      intents: [
+        { maxBlockHeight: "100", maxFee: "7000", spec: { sourceDomain: 0, value: "3000000" } },
+        { maxBlockHeight: "101", maxFee: "9000", spec: { sourceDomain: 6, value: "2000000" } },
+      ],
+    },
+    signature: "0x1234",
+  }]);
 });
 
 test("fails closed when Circle Gateway estimate returns an error", async () => {

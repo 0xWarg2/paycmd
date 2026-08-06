@@ -6,6 +6,8 @@ import {
   buildTransactionPreviewModel,
   executionStepsForStatus,
   canSafelyRetryExecutionFailure,
+  gatewayAllocationGuardDraftField,
+  parseGatewayAllocationGuardDraftField,
   gatewayTransferSubmitted,
   navigationFor,
 } from "./ui-models.ts";
@@ -123,6 +125,39 @@ test("only a conclusively rejected wallet request is safe to retry", () => {
   assert.equal(canSafelyRetryExecutionFailure({ errorCode: 4001 }), true);
   assert.equal(canSafelyRetryExecutionFailure({ errorCode: -32002 }), false);
   assert.equal(canSafelyRetryExecutionFailure({ errorCode: 4001, fundsMoved: true }), false);
+});
+
+test("a pre-submit Gateway quote refresh is safe to review and retry", () => {
+  assert.equal(canSafelyRetryExecutionFailure({ errorCode: "GATEWAY_QUOTE_CHANGED" }), true);
+  assert.equal(canSafelyRetryExecutionFailure({
+    errorCode: "GATEWAY_QUOTE_CHANGED",
+    fundsMoved: true,
+  }), false);
+  assert.equal(canSafelyRetryExecutionFailure({
+    errorCode: "GATEWAY_QUOTE_CHANGED",
+    transferSubmitted: true,
+  }), false);
+});
+
+test("round-trips allocation guard atomic strings through draft fields without precision loss", () => {
+  const guard = {
+    amountAtomic: "900719925474099312345678",
+    destinationChain: "baseSepolia",
+    recipientAddress: "0x1234567890abcdef1234567890abcdef12345678",
+    mintGasMode: "auto_forwarding" as const,
+    allocations: [{
+      sourceChain: "arcTestnet",
+      valueAtomic: "900719925474099312345678",
+      quotedMaxFeeAtomic: "54118",
+      approvedMaxFeeAtomic: "63000",
+    }],
+  };
+
+  const field = gatewayAllocationGuardDraftField(guard);
+  assert.deepEqual(parseGatewayAllocationGuardDraftField(field), guard);
+  assert.equal(parseGatewayAllocationGuardDraftField(field)?.amountAtomic, guard.amountAtomic);
+  assert.equal(parseGatewayAllocationGuardDraftField("{broken"), undefined);
+  assert.equal(parseGatewayAllocationGuardDraftField("[]"), undefined);
 });
 
 test("a submitted Circle forwarding transfer is never safe to retry", () => {
