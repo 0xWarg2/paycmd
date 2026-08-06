@@ -16,6 +16,41 @@ export type ContactDeletionHttpResult = {
   body: { deleted: true; id: string } | { error: string };
 };
 
+type ContactDeletionSingleResult = {
+  data: { id: string } | null;
+  error: { message: string } | null;
+};
+
+type ContactDeletionSingleQuery = {
+  maybeSingle: () => PromiseLike<ContactDeletionSingleResult>;
+};
+
+type ContactDeletionFilterQuery = {
+  eq: (column: string, value: string) => ContactDeletionFilterQuery;
+  select: (columns: string) => ContactDeletionSingleQuery;
+};
+
+export type ContactDeletionQuery = {
+  delete: () => ContactDeletionFilterQuery;
+};
+
+export async function deleteOwnedContactWithSupabase(
+  query: ContactDeletionQuery,
+  contactId: string,
+  userId: string,
+): Promise<ContactDeletionStoreResult> {
+  const { data, error } = await query
+    .delete()
+    .eq("id", contactId)
+    .eq("user_id", userId)
+    .select("id")
+    .maybeSingle();
+
+  if (error) return { kind: "error", message: error.message };
+  if (!data) return { kind: "not_found" };
+  return { kind: "deleted", id: data.id };
+}
+
 export async function handleContactDeletion(
   contactId: string,
   dependencies: ContactDeletionDependencies,

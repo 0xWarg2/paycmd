@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { handleContactDeletion } from "./contact-deletion.ts";
+import {
+  deleteOwnedContactWithSupabase,
+  handleContactDeletion,
+} from "./contact-deletion.ts";
 
 type StoredContact = { id: string; userId: string };
 
@@ -61,4 +64,34 @@ test("maps a contact-store failure to a server error", async () => {
     deleteOwnedContact: async () => ({ kind: "error", message: "database unavailable" }),
   });
   assert.deepEqual(result, { status: 500, body: { error: "database unavailable" } });
+});
+
+test("the Supabase adapter scopes deletion by contact id and authenticated user id", async () => {
+  const filters: Array<[column: string, value: string]> = [];
+  const selections: string[] = [];
+  const query = {
+    delete() {
+      return this;
+    },
+    eq(column: string, value: string) {
+      filters.push([column, value]);
+      return this;
+    },
+    select(columns: string) {
+      selections.push(columns);
+      return this;
+    },
+    async maybeSingle() {
+      return { data: { id: "contact-1" }, error: null };
+    },
+  };
+
+  const result = await deleteOwnedContactWithSupabase(query, "contact-1", "user-a");
+
+  assert.deepEqual(filters, [
+    ["id", "contact-1"],
+    ["user_id", "user-a"],
+  ]);
+  assert.deepEqual(selections, ["id"]);
+  assert.deepEqual(result, { kind: "deleted", id: "contact-1" });
 });

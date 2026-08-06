@@ -1,7 +1,7 @@
 "use client";
 
 import { Contact, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +30,12 @@ export function ContactsList({ initialContacts }: { initialContacts: ContactList
   const [contacts, setContacts] = useState(initialContacts);
   const [selectedContact, setSelectedContact] = useState<ContactListItem | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const deleteButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const emptyStateRef = useRef<HTMLDivElement | null>(null);
+  const focusAfterCloseRef = useRef<
+    { kind: "trigger" } | { kind: "contact"; id: string } | { kind: "empty" }
+  >({ kind: "trigger" });
 
   async function deleteSelectedContact() {
     if (!selectedContact || deleting) return;
@@ -45,6 +51,11 @@ export function ContactsList({ initialContacts }: { initialContacts: ContactList
       }
       const deletedName = selectedContact.display_name;
       const deletedId = selectedContact.id;
+      const deletedIndex = contacts.findIndex((contact) => contact.id === deletedId);
+      const adjacentContact = contacts[deletedIndex + 1] ?? contacts[deletedIndex - 1];
+      focusAfterCloseRef.current = adjacentContact
+        ? { kind: "contact", id: adjacentContact.id }
+        : { kind: "empty" };
       setContacts((current) => current.filter((contact) => contact.id !== deletedId));
       setSelectedContact(null);
       toast.success(t("contacts.deleteSuccess", { name: deletedName }));
@@ -79,7 +90,15 @@ export function ContactsList({ initialContacts }: { initialContacts: ContactList
                 className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:text-destructive"
                 aria-label={t("contacts.deleteLabel", { name: contact.display_name })}
                 aria-haspopup="dialog"
-                onClick={() => setSelectedContact(contact)}
+                ref={(element) => {
+                  if (element) deleteButtonRefs.current.set(contact.id, element);
+                  else deleteButtonRefs.current.delete(contact.id);
+                }}
+                onClick={(event) => {
+                  triggerRef.current = event.currentTarget;
+                  focusAfterCloseRef.current = { kind: "trigger" };
+                  setSelectedContact(contact);
+                }}
               >
                 <Trash2 aria-hidden="true" />
               </Button>
@@ -87,7 +106,13 @@ export function ContactsList({ initialContacts }: { initialContacts: ContactList
           </article>
         ))}
         {contacts.length === 0 ? (
-          <div className="p-8 text-center text-sm text-muted-foreground">{t("pages.contacts.empty")}</div>
+          <div
+            ref={emptyStateRef}
+            tabIndex={-1}
+            className="p-8 text-center text-sm text-muted-foreground"
+          >
+            {t("pages.contacts.empty")}
+          </div>
         ) : null}
       </div>
 
@@ -97,7 +122,22 @@ export function ContactsList({ initialContacts }: { initialContacts: ContactList
           if (!open && !deleting) setSelectedContact(null);
         }}
       >
-        <DialogContent showCloseButton={!deleting}>
+        <DialogContent
+          showCloseButton={false}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            window.requestAnimationFrame(() => {
+              const target = focusAfterCloseRef.current;
+              if (target.kind === "contact") {
+                deleteButtonRefs.current.get(target.id)?.focus();
+              } else if (target.kind === "empty") {
+                emptyStateRef.current?.focus();
+              } else {
+                triggerRef.current?.focus();
+              }
+            });
+          }}
+        >
           <DialogHeader>
             <DialogTitle>{t("contacts.deleteTitle")}</DialogTitle>
             <DialogDescription>

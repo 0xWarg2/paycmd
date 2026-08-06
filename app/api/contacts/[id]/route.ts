@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 
-import { handleContactDeletion } from "@/lib/paycmd/contact-deletion";
+import {
+  deleteOwnedContactWithSupabase,
+  handleContactDeletion,
+} from "@/lib/paycmd/contact-deletion";
 import { createClient } from "@/lib/supabase/server";
 
 export async function DELETE(
@@ -17,17 +20,11 @@ export async function DELETE(
       return user?.id ?? null;
     },
     deleteOwnedContact: async (requestedContactId, userId) => {
-      const { data, error } = await supabase
-        .from("contacts")
-        .delete()
-        .eq("id", requestedContactId)
-        .eq("user_id", userId)
-        .select("id")
-        .maybeSingle();
-
-      if (error) return { kind: "error" as const, message: error.message };
-      if (!data) return { kind: "not_found" as const };
-      return { kind: "deleted" as const, id: data.id };
+      return deleteOwnedContactWithSupabase(
+        supabase.from("contacts"),
+        requestedContactId,
+        userId,
+      );
     },
   });
 

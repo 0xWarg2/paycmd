@@ -9,16 +9,19 @@ test("requires confirmation before deleting the selected contact", async ({ page
   });
   await page.goto("/dev/contacts-preview");
 
-  await page.getByRole("button", { name: "Xoá contact Minh" }).click();
+  const deleteMinhButton = page.getByRole("button", { name: "Xoá contact Minh" });
+  await deleteMinhButton.click();
   await expect(page.getByRole("dialog")).toContainText("Minh");
   await page.getByRole("button", { name: "Hủy" }).click();
   expect(deleteRequests).toBe(0);
   await expect(page.getByText("Minh", { exact: true })).toBeVisible();
+  await expect(deleteMinhButton).toBeFocused();
 
-  await page.getByRole("button", { name: "Xoá contact Minh" }).click();
+  await deleteMinhButton.click();
   await page.getByRole("button", { name: "Xoá contact", exact: true }).click();
   await expect(page.getByText("Minh", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Đã xoá contact Minh.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Xoá contact Lan" })).toBeFocused();
   expect(deleteRequests).toBe(1);
 });
 
@@ -29,7 +32,9 @@ test("shows the empty state after deleting the final contact", async ({ page }) 
   await page.goto("/dev/contacts-preview?single=1");
   await page.getByRole("button", { name: "Xoá contact Minh" }).click();
   await page.getByRole("button", { name: "Xoá contact", exact: true }).click();
-  await expect(page.getByText(/Chưa có contact\./)).toBeVisible();
+  const emptyState = page.getByText(/Chưa có contact\./);
+  await expect(emptyState).toBeVisible();
+  await expect(emptyState).toBeFocused();
 });
 
 test("disables the destructive action while deletion is pending", async ({ page }) => {
