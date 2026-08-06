@@ -5,8 +5,15 @@ import {
   applyModePolicy,
   normalizeIntentDecision,
   questionSignals,
+  submissionRoute,
   type IntentDecision,
 } from "./intent-policy.ts";
+
+test("routes every AskPayna submission away from the command parser", () => {
+  assert.equal(submissionRoute("asksurf", "/pay 50 USDC to Minh on arc from base"), "askpayna");
+  assert.equal(submissionRoute("asksurf", "Gửi 50 USDC cho Minh"), "askpayna");
+  assert.equal(submissionRoute("paycmd", "/pay 50 USDC to Minh on arc from base"), "payna_slash");
+});
 
 test("keeps Vietnamese transfer questions non-transactional in AskPayna", () => {
   const decision = normalizeIntentDecision(

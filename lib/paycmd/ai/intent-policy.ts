@@ -50,6 +50,11 @@ export function questionSignals(input: string): boolean {
   return QUESTION_SIGNAL.test(input);
 }
 
+export function submissionRoute(mode: ChatMode, input: string) {
+  if (mode === "asksurf") return "askpayna" as const;
+  return input.trim().startsWith("/") ? "payna_slash" as const : "command_router" as const;
+}
+
 function ambiguousIntentDecision(): IntentDecision {
   return { speechAct: "ambiguous", confidence: "low", reasonCode: "conflicting_signals" };
 }

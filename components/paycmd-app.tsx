@@ -88,6 +88,11 @@ import {
 } from "@/lib/paycmd/ai/quota-onboarding";
 import { AI_QUOTA_X_PROFILE_URL, shouldShowQuotaContactCta } from "@/lib/paycmd/ai/quota-contact";
 import {
+  applyModePolicy,
+  submissionRoute,
+  type IntentDecision,
+} from "@/lib/paycmd/ai/intent-policy";
+import {
   balanceRequestBody,
   executionBalanceChainFilter,
 } from "@/lib/paycmd/balance-scope";
@@ -165,6 +170,11 @@ type ChatCitation = {
 };
 
 type AssistantAction =
+  | {
+      kind: "switch_to_paycmd";
+      label: string;
+      query: string;
+    }
   | {
       kind: "switch_to_asksurf";
       label: string;
@@ -246,6 +256,7 @@ type AiCommandResult = {
   missingFields: string[];
   suggestions: string[];
   parsedCommand: ParsedCommand | null;
+  decision: IntentDecision;
   modelProfile?: string;
   // Always absent in practice: the router runs with thinking off so its token budget goes entirely
   // to the JSON it has to return. Typed anyway because the route does forward it if enabled.
@@ -432,6 +443,19 @@ function normalizeAssistantActions(value: unknown): AssistantAction[] | undefine
         ];
       }
 
+      if (item.kind === "switch_to_paycmd" && typeof item.query === "string" && item.query.trim()) {
+        return [
+          {
+            kind: "switch_to_paycmd" as const,
+            label:
+              typeof item.label === "string" && item.label.trim()
+                ? item.label.trim()
+                : translateClient("mode.switchToPayna"),
+            query: item.query.trim(),
+          },
+        ];
+      }
+
       if (item.kind !== "switch_to_asksurf" || typeof item.query !== "string" || !item.query.trim()) {
         return [];
       }
@@ -442,7 +466,7 @@ function normalizeAssistantActions(value: unknown): AssistantAction[] | undefine
           label:
             typeof item.label === "string" && item.label.trim()
               ? item.label.trim()
-              : translateClient("asksurf.askButton"),
+              : translateClient("mode.switchToAskPayna"),
           query: item.query.trim(),
           surfMode: item.surfMode === "instant" || item.surfMode === "research" ? item.surfMode : "research",
           effort: normalizeSurfEffort(item.effort),
@@ -2782,10 +2806,21 @@ export function PayCmdApp() {
   async function askCryptoResearch(
     value: string,
     recentMessages: { role: string; text: string }[],
-    options?: { surfMode?: SurfMode; effort?: SurfEffort },
+    options?: { surfMode?: SurfMode; effort?: SurfEffort; offerPaynaSwitch?: boolean },
   ) {
     const surfMode = options?.surfMode ?? "research";
     const effort = surfMode === "instant" ? "standard" : options?.effort ?? "standard";
+    const paynaSwitchActions: AssistantAction[] | undefined = options?.offerPaynaSwitch
+      ? [
+          {
+            kind: "switch_to_paycmd",
+            label: t("mode.switchToPayna"),
+            query: value,
+          },
+        ]
+      : undefined;
+    const withAskPaynaSafetyCopy = (text: string) =>
+      options?.offerPaynaSwitch ? `${text.trim()}\n\n${t("mode.askPaynaNeverExecutes")}` : text;
     setActiveAiProvider("asksurf");
     setActiveAskSurfMode(surfMode);
     setActiveAskSurfEffort(effort);
@@ -2816,7 +2851,7 @@ export function PayCmdApp() {
 
       await saveMessage({
         role: "assistant",
-        text: result.assistantText,
+        text: withAskPaynaSafetyCopy(result.assistantText),
         provider: "asksurf",
         citations: result.citations ?? [],
         model: result.model,
@@ -2827,16 +2862,20 @@ export function PayCmdApp() {
         quota: result.quota,
         groundingStatus: result.groundingStatus,
         knowledgeSources: result.knowledgeSources,
+        actions: paynaSwitchActions,
       });
     } catch (error) {
       if ((error as { name?: string })?.name === "AbortError") {
         if (timedOut) {
           await saveMessage({
             role: "assistant",
-            text: `Research timed out after ${Math.round(surfClientTimeoutMs(surfMode) / 1000)} seconds.`,
+            text: withAskPaynaSafetyCopy(
+              `Research timed out after ${Math.round(surfClientTimeoutMs(surfMode) / 1000)} seconds.`,
+            ),
             provider: "asksurf",
             surfMode,
             effort,
+            actions: paynaSwitchActions,
           });
         }
         return;
@@ -2846,12 +2885,15 @@ export function PayCmdApp() {
       const quotaExhausted = (error as { code?: string })?.code === "AI_QUOTA_EXHAUSTED";
       await saveMessage({
         role: "assistant",
-        text: quotaExhausted ? t("ai.quotaExhausted") : t("asksurf.failed", { message }),
+        text: withAskPaynaSafetyCopy(
+          quotaExhausted ? t("ai.quotaExhausted") : t("asksurf.failed", { message }),
+        ),
         provider: "asksurf",
         surfMode,
         effort,
         quota: normalizeAiQuota((error as { data?: { quota?: unknown } })?.data?.quota),
         quotaContactCta: quotaExhausted,
+        actions: paynaSwitchActions,
       });
     } finally {
       window.clearTimeout(timeout);
@@ -2864,7 +2906,7 @@ export function PayCmdApp() {
     }
   }
 
-  async function askAiForCommand(value: string) {
+  async function askAiForCommand(value: string, mode: ChatMode) {
     setIsAiThinking(true);
     setActiveAiProvider("openai");
     setAiLoadingStep(0);
@@ -2881,17 +2923,47 @@ export function PayCmdApp() {
         body: JSON.stringify({
           input: value,
           recentMessages,
+          chatMode: mode,
         }),
       })) as AiCommandResult;
 
       setSuggestionChips((result.suggestions ?? []).slice(0, 4));
 
-      if (result.intent === "crypto_research") {
-        await askCryptoResearch(value, recentMessages, { surfMode: "research", effort: "standard" });
+      const modeAction = applyModePolicy(mode, result.decision);
+      if (modeAction === "offer_askpayna" || result.intent === "crypto_research") {
+        await saveMessage({
+          role: "assistant",
+          text: t("mode.questionFitsAskPayna"),
+          provider: "openai",
+          model: result.modelProfile,
+          reasoning: result.reasoning,
+          quota: result.quota,
+          actions: [
+            {
+              kind: "switch_to_asksurf",
+              label: t("mode.switchToAskPayna"),
+              query: value,
+              surfMode: selectedSurfMode,
+              effort: selectedSurfEffort,
+            },
+          ],
+        });
         return;
       }
 
-      if (result.intent === "command" && result.parsedCommand) {
+      if (modeAction === "clarify") {
+        await saveMessage({
+          role: "assistant",
+          text: t("mode.intentAmbiguous"),
+          provider: "openai",
+          model: result.modelProfile,
+          reasoning: result.reasoning,
+          quota: result.quota,
+        });
+        return;
+      }
+
+      if (modeAction === "run_payna_action" && result.intent === "command" && result.parsedCommand) {
         if (!requiresConfirmation(result.parsedCommand)) {
           await runCommand(result.parsedCommand);
           return;
@@ -3621,32 +3693,7 @@ export function PayCmdApp() {
     );
   }
 
-  async function submitValue(value: string, options?: { forceAskSurf?: boolean }) {
-    shouldAutoScrollRef.current = true;
-    await saveMessage({ role: "user", text: value });
-    setInput("");
-    setHistoryIndex(null);
-    draftInputBeforeHistoryRef.current = "";
-    setSuggestionChips([]);
-
-    const recentMessages = messages.slice(-8).map((message) => ({
-      role: message.role,
-      text: message.text,
-    }));
-
-    if (!value.startsWith("/") && (options?.forceAskSurf || (chatMode === "asksurf" && !looksLikePayCmdAction(value)))) {
-      await askCryptoResearch(value, recentMessages, {
-        surfMode: selectedSurfMode,
-        effort: selectedSurfEffort,
-      });
-      return;
-    }
-
-    if (!value.startsWith("/")) {
-      await askAiForCommand(value);
-      return;
-    }
-
+  async function submitPaynaSlashCommand(value: string) {
     const parsed = parsePayCmd(value, locale);
 
     if (parsed.missingFields.length) {
@@ -3686,6 +3733,37 @@ export function PayCmdApp() {
     setActiveDraftId(previewMessage?.id ?? null);
   }
 
+  async function submitValue(value: string, selectedMode: ChatMode = chatMode) {
+    shouldAutoScrollRef.current = true;
+    await saveMessage({ role: "user", text: value });
+    setInput("");
+    setHistoryIndex(null);
+    draftInputBeforeHistoryRef.current = "";
+    setSuggestionChips([]);
+
+    const recentMessages = messages.slice(-8).map((message) => ({
+      role: message.role,
+      text: message.text,
+    }));
+
+    const route = submissionRoute(selectedMode, value);
+    if (route === "askpayna") {
+      await askCryptoResearch(value, recentMessages, {
+        surfMode: selectedSurfMode,
+        effort: selectedSurfEffort,
+        offerPaynaSwitch: looksLikePayCmdAction(value) || value.startsWith("/"),
+      });
+      return;
+    }
+
+    if (route === "payna_slash") {
+      await submitPaynaSlashCommand(value);
+      return;
+    }
+
+    await askAiForCommand(value, "paycmd");
+  }
+
   async function submitCommand(event: FormEvent) {
     event.preventDefault();
     if (submitLockRef.current) return;
@@ -3714,7 +3792,7 @@ export function PayCmdApp() {
       setChatMode("asksurf");
 
       try {
-        await submitValue(value, { forceAskSurf: true });
+        await submitValue(value, "asksurf");
       } finally {
         submitLockRef.current = false;
         setIsSubmitting(false);
@@ -3738,7 +3816,7 @@ export function PayCmdApp() {
       setChatMode("paycmd");
 
       try {
-        await submitValue(value);
+        await submitValue(value, "paycmd");
       } finally {
         submitLockRef.current = false;
         setIsSubmitting(false);
@@ -3762,6 +3840,11 @@ export function PayCmdApp() {
         setIsSubmitting(false);
       }
     })();
+  }
+
+  function switchToPayCmd(query: string) {
+    setChatMode("paycmd");
+    setInput(query);
   }
 
   function selectCommand(sample: string) {
@@ -4170,6 +4253,7 @@ export function PayCmdApp() {
                       onConfirm={confirmDraft}
                       onCancel={cancelDraft}
                       onRelatedQuestion={submitRelatedQuestion}
+                      onSwitchToPayCmd={switchToPayCmd}
                       onRetryCommand={retryCommand}
                       onSuggestedCommand={submitSuggestedCommand}
                     />
@@ -4771,6 +4855,7 @@ function MessageBubble({
   onConfirm,
   onCancel,
   onRelatedQuestion,
+  onSwitchToPayCmd,
   onRetryCommand,
   onSuggestedCommand,
 }: {
@@ -4784,6 +4869,7 @@ function MessageBubble({
   onConfirm: (messageId: string, draft: ParsedCommand) => void;
   onCancel: (messageId: string, options?: { cancellationReason?: "expired" }) => void;
   onRelatedQuestion: (question: string) => void;
+  onSwitchToPayCmd: (query: string) => void;
   onRetryCommand: (draft: ParsedCommand) => void;
   onSuggestedCommand: (command: string) => void;
 }) {
@@ -4874,6 +4960,7 @@ function MessageBubble({
               <AssistantActionBar
                 actions={message.actions}
                 onAskSurf={onRelatedQuestion}
+                onPayCmd={onSwitchToPayCmd}
                 onRetry={onRetryCommand}
               />
             ) : null}
@@ -4904,10 +4991,12 @@ function executionStatusTone(execution: ExecutionItem, isLatest: boolean) {
 function AssistantActionBar({
   actions,
   onAskSurf,
+  onPayCmd,
   onRetry,
 }: {
   actions: AssistantAction[];
   onAskSurf: (question: string) => void;
+  onPayCmd: (query: string) => void;
   onRetry: (draft: ParsedCommand) => void;
 }) {
   return (
@@ -4923,6 +5012,18 @@ function AssistantActionBar({
             onClick={() => onRetry(action.draft)}
           >
             <RotateCcw className="h-3.5 w-3.5" />
+            {action.label}
+          </Button>
+        ) : action.kind === "switch_to_paycmd" ? (
+          <Button
+            key={`${action.kind}_${action.query}`}
+            type="button"
+            size="sm"
+            variant="outline"
+            className="border-primary/50 bg-primary/10 text-primary hover:bg-primary/15"
+            onClick={() => onPayCmd(action.query)}
+          >
+            <Bot className="h-3.5 w-3.5" />
             {action.label}
           </Button>
         ) : (
