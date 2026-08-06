@@ -75,10 +75,12 @@ The estimate response returns an `allocationGuard` containing atomic strings:
 type GatewayAllocationGuard = {
   amountAtomic: string;
   destinationChain: SupportedChain;
+  recipientAddress: Address;
   mintGasMode: GatewayMintGasMode;
   allocations: Array<{
     sourceChain: SupportedChain;
     valueAtomic: string;
+    quotedMaxFeeAtomic: string;
     approvedMaxFeeAtomic: string;
   }>;
 };
@@ -86,18 +88,20 @@ type GatewayAllocationGuard = {
 
 The existing fingerprint is computed over this guard. The confirmed draft carries both the guard and fingerprint.
 
-The guard is not authorization. The authenticated execution route treats it only as the user's requested fee ceiling and validates every field against current server state and the bounded fee policy. A modified guard cannot bypass balance, delegate, fee, amount, destination, recipient, source-count, or source-support checks.
+`quotedMaxFeeAtomic` is the Circle requirement used to derive the approved ceiling. The server requires `approvedMaxFeeAtomic === gatewayApprovedMaxFee(quotedMaxFeeAtomic)` and separately requires the fresh Circle requirement to fit under that approved ceiling. Keeping both values prevents a client from inventing a larger policy ceiling and avoids rejecting an otherwise safe transfer merely because Circle's fresh fee decreased after preview.
+
+The guard is not authorization. Its SHA-256 fingerprint detects stale client state but is not a signature or MAC. The authenticated execution route therefore treats the guard only as the user's requested allocation and fee ceiling and validates every field—including the bound recipient address—against the command, current server state, and bounded fee policy. A modified guard cannot bypass balance, delegate, fee, amount, destination, recipient, source-count, or source-support checks.
 
 ## Pre-sign Revalidation
 
 On Confirm, the execution route:
 
-1. Parses the guard and verifies that its fingerprint, amount, destination, mint mode, source count, source chains, and allocation sum are valid.
+1. Parses the guard and verifies that its fingerprint, amount, destination, recipient, mint mode, source count, source chains, quoted/approved fee relationship, and allocation sum are valid.
 2. Fetches fresh Gateway balances and authorization state.
 3. Re-estimates the exact guarded intent values with Circle.
 4. Verifies each source can cover `value + approvedMaxFee`.
 5. Verifies every intent's base and transfer fee fits its ceiling and the total fresh fee, including forwarding, fits the sum of ceilings.
-6. Verifies each ceiling remains within the server policy bound: no more than `0.051 USDC` above the fresh required per-intent fee, allowing the final rounding step.
+6. Verifies each ceiling exactly matches the bounded policy applied to its guarded quoted fee; a lower fresh fee does not invalidate an already approved ceiling.
 7. Uses fresh `maxBlockHeight` values and the already approved `maxFee` ceilings when constructing the EIP-712 BurnIntentSet.
 8. Signs and submits only after all checks pass.
 
