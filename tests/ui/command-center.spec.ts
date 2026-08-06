@@ -24,6 +24,30 @@ test("expires a transaction preview after fifteen seconds", async ({ page }) => 
 
   await expect(page.getByRole("button", { name: /Confirm 50 USDC/i })).toBeDisabled();
   await expect(page.getByText(/Preview expired/i)).toBeVisible();
+  await expect(page.getByTestId("preview-lease-metadata")).toHaveText("cancelled:expired:1");
+});
+
+test("cancels an already expired persisted preview through the production card", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-08-07T00:00:00.000Z") });
+  await page.addInitScript(() => window.localStorage.setItem("paycmd_locale", "en"));
+  await page.goto("/dev/ui-preview?previewLease=expired");
+
+  await expect(page.getByText(/Preview expired/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /Confirm 50 USDC/i })).toBeDisabled();
+  await expect(page.getByTestId("preview-lease-metadata")).toHaveText("cancelled:expired:1");
+
+  await page.clock.fastForward(60_000);
+  await expect(page.getByTestId("preview-lease-metadata")).toHaveText("cancelled:expired:1");
+});
+
+test("fails closed for a legacy active preview without an expiry", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-08-07T00:00:00.000Z") });
+  await page.addInitScript(() => window.localStorage.setItem("paycmd_locale", "en"));
+  await page.goto("/dev/ui-preview?previewLease=legacy");
+
+  await expect(page.getByText(/Preview expired/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /Confirm 50 USDC/i })).toBeDisabled();
+  await expect(page.getByTestId("preview-lease-metadata")).toHaveText("cancelled:expired:1");
 });
 
 test("keeps mobile navigation to four primary destinations without overflow", async ({ page }, testInfo) => {

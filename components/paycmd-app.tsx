@@ -121,7 +121,7 @@ import {
 } from "@/lib/paycmd/gateway-source-selection";
 import { formatNativeGasBalance } from "@/lib/paycmd/native-gas";
 import { isNearViewportBottom, jumpToLatestMessage } from "@/lib/paycmd/chat-scroll";
-import { createPreviewExpiresAt, previewCanConfirm } from "@/lib/paycmd/preview-lease";
+import { createPreviewExpiresAt, previewCanConfirm, previewLeaseState } from "@/lib/paycmd/preview-lease";
 import { web3Chains } from "@/lib/paycmd/web3-chains";
 import {
   getSwapAdapterAddress,
@@ -4782,7 +4782,7 @@ function MessageBubble({
   // do not pile up under every past transaction.
   isLastMessage: boolean;
   onConfirm: (messageId: string, draft: ParsedCommand) => void;
-  onCancel: (messageId: string) => void;
+  onCancel: (messageId: string, options?: { cancellationReason?: "expired" }) => void;
   onRelatedQuestion: (question: string) => void;
   onRetryCommand: (draft: ParsedCommand) => void;
   onSuggestedCommand: (command: string) => void;
@@ -6428,7 +6428,7 @@ function TransactionPreviewSummary({
   );
 }
 
-function CommandPreviewCard({
+export function CommandPreviewCard({
   draft,
   state,
   isActive,
@@ -6446,16 +6446,21 @@ function CommandPreviewCard({
   onCancel: (cancellationReason?: "expired") => void;
 }) {
   const { t } = useI18n();
-  const hasActiveLease =
-    state === "active" &&
-    isActive &&
+  const expiryCancellationSent = useRef(false);
+  const isPersistedActive = state === "active";
+  const persistedPreviewIsExpired =
+    isPersistedActive &&
+    (!previewExpiresAt || previewLeaseState(previewExpiresAt).expired);
+  const canConfirmLease =
+    isPersistedActive &&
     previewCanConfirm({ draftState: "active", previewExpiresAt });
+  const showExpired = cancellationReason === "expired" || persistedPreviewIsExpired;
 
   useEffect(() => {
-    if (state === "active" && !previewExpiresAt) {
-      onCancel("expired");
-    }
-  }, [onCancel, previewExpiresAt, state]);
+    if (!persistedPreviewIsExpired || expiryCancellationSent.current) return;
+    expiryCancellationSent.current = true;
+    onCancel("expired");
+  }, [onCancel, persistedPreviewIsExpired]);
 
   const previewStatusLabel =
     state === "cancelled"
@@ -7485,19 +7490,19 @@ function CommandPreviewCard({
         ) : null}
         {mintGasHelpText ? <div>{mintGasHelpText}</div> : null}
       </div>
-      {isActive ? (
+      {showExpired ? (
+        <div role="status" className="rounded-md border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
+          <div className="font-medium">{t("preview.expired")}</div>
+          <div className="mt-1 text-xs">{t("preview.resubmit")}</div>
+        </div>
+      ) : null}
+      {isActive && !showExpired ? (
         <>
-          {hasActiveLease ? <PreviewLeaseTimer expiresAt={previewExpiresAt!} onExpire={() => onCancel("expired")} /> : null}
-          {cancellationReason === "expired" || (state === "active" && !previewExpiresAt) ? (
-            <div role="status" className="rounded-md border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
-              <div className="font-medium">{t("preview.expired")}</div>
-              <div className="mt-1 text-xs">{t("preview.resubmit")}</div>
-            </div>
-          ) : null}
+          <PreviewLeaseTimer expiresAt={previewExpiresAt!} onExpire={() => onCancel("expired")} />
           <TransactionConfirmActions
             confirmLabel={gatewayPreflightLoading ? t("preview.gatewayCheckingQuote") : confirmLabel}
             cancelLabel={t("common.cancel")}
-            disabled={!hasActiveLease || (isBridge ? bridgeConfirmDisabled : isSwap ? swapConfirmDisabled : hasMintGasChoice ? gatewayConfirmDisabled : isPayroll ? payrollRecipientCount === null || payrollRecipientCount === 0 || Boolean(payrollRecipientError) : false)}
+            disabled={!canConfirmLease || (isBridge ? bridgeConfirmDisabled : isSwap ? swapConfirmDisabled : hasMintGasChoice ? gatewayConfirmDisabled : isPayroll ? payrollRecipientCount === null || payrollRecipientCount === 0 || Boolean(payrollRecipientError) : false)}
             onCancel={() => onCancel()}
             onConfirm={() => void confirmWithGatewayPreflight()}
           />
@@ -7505,7 +7510,7 @@ function CommandPreviewCard({
       ) : (
         <Button className="w-full" disabled>
           <Check className="h-4 w-4" />
-          {previewStatusLabel}
+          {showExpired ? confirmLabel : previewStatusLabel}
         </Button>
       )}
     </div>
