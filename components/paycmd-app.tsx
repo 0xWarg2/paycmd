@@ -53,6 +53,7 @@ import {
   getChainMeta,
 } from "@/components/chain-identity";
 import { PayCmdShell } from "@/components/paycmd-shell";
+import { PreviewLeaseTimer } from "@/components/paycmd/preview-lease-timer";
 import { UnifiedGatewaySourceSelector } from "@/components/unified-gateway-source-selector";
 import {
   ExecutionTimeline,
@@ -120,6 +121,7 @@ import {
 } from "@/lib/paycmd/gateway-source-selection";
 import { formatNativeGasBalance } from "@/lib/paycmd/native-gas";
 import { isNearViewportBottom, jumpToLatestMessage } from "@/lib/paycmd/chat-scroll";
+import { createPreviewExpiresAt, previewCanConfirm } from "@/lib/paycmd/preview-lease";
 import { web3Chains } from "@/lib/paycmd/web3-chains";
 import {
   getSwapAdapterAddress,
@@ -188,6 +190,8 @@ type ChatMessage = {
   kind?: "text" | "preview" | "status" | "onboarding";
   draft?: ParsedCommand;
   draftState?: DraftState;
+  previewExpiresAt?: string;
+  cancellationReason?: "expired";
   execution?: ExecutionItem;
   createdAt?: string;
   provider?: AiProvider;
@@ -2441,6 +2445,8 @@ function mapRowToMessage(row: ChatMessageRow): ChatMessage {
       metadata.draftState === "confirmed"
         ? metadata.draftState
         : undefined,
+    previewExpiresAt: typeof metadata.previewExpiresAt === "string" ? metadata.previewExpiresAt : undefined,
+    cancellationReason: metadata.cancellationReason === "expired" ? "expired" : undefined,
     execution: metadata.execution as ExecutionItem | undefined,
     createdAt: row.created_at,
     provider: normalizeAiProvider(metadata.provider),
@@ -2634,6 +2640,8 @@ export function PayCmdApp() {
     const metadata = {
       draft: message.draft ?? null,
       draftState: message.draftState ?? null,
+      previewExpiresAt: message.previewExpiresAt ?? null,
+      cancellationReason: message.cancellationReason ?? null,
       execution: message.execution ?? null,
       provider: message.provider ?? null,
       citations: message.citations ?? null,
@@ -2682,13 +2690,18 @@ export function PayCmdApp() {
     await saveMessage({ role: "system", text, kind: "status", execution, actions });
   }
 
-  async function updateDraftState(messageId: string, draftState: DraftState) {
+  async function updateDraftState(
+    messageId: string,
+    draftState: DraftState,
+    options?: { cancellationReason?: "expired" },
+  ) {
     const target = messages.find((message) => message.id === messageId);
     if (!target?.draft) return;
+    const cancellationReason = options?.cancellationReason ?? target.cancellationReason;
 
     setMessages((current) =>
       current.map((message) =>
-        message.id === messageId ? { ...message, draftState } : message,
+        message.id === messageId ? { ...message, draftState, cancellationReason } : message,
       ),
     );
 
@@ -2705,6 +2718,8 @@ export function PayCmdApp() {
         metadata: {
           draft: target.draft,
           draftState,
+          previewExpiresAt: target.previewExpiresAt ?? null,
+          cancellationReason: cancellationReason ?? null,
           execution: target.execution ?? null,
           provider: target.provider ?? null,
           citations: target.citations ?? null,
@@ -2730,8 +2745,8 @@ export function PayCmdApp() {
     }
   }
 
-  async function cancelDraft(messageId: string) {
-    await updateDraftState(messageId, "cancelled");
+  async function cancelDraft(messageId: string, options?: { cancellationReason?: "expired" }) {
+    await updateDraftState(messageId, "cancelled", options);
   }
 
   function cancelActiveInteraction() {
@@ -2886,12 +2901,14 @@ export function PayCmdApp() {
           await updateDraftState(activeDraftId, "cancelled");
         }
 
+        const previewExpiresAt = createPreviewExpiresAt();
         const previewMessage = await saveMessage({
           role: "assistant",
           text: result.assistantText || result.parsedCommand.summary,
           kind: "preview",
           draft: result.parsedCommand,
           draftState: "active",
+          previewExpiresAt,
           provider: "openai",
           model: result.modelProfile,
           reasoning: result.reasoning,
@@ -3656,12 +3673,14 @@ export function PayCmdApp() {
       await updateDraftState(activeDraftId, "cancelled");
     }
 
+    const previewExpiresAt = createPreviewExpiresAt();
     const previewMessage = await saveMessage({
       role: "assistant",
       text: parsed.summary,
       kind: "preview",
       draft: parsed,
       draftState: "active",
+      previewExpiresAt,
       provider: "paycmd",
     });
     setActiveDraftId(previewMessage?.id ?? null);
@@ -3806,6 +3825,12 @@ export function PayCmdApp() {
   }
 
   function confirmDraft(messageId: string, draft: ParsedCommand) {
+    const target = messages.find((message) => message.id === messageId);
+    if (!target || !previewCanConfirm(target)) {
+      void updateDraftState(messageId, "cancelled", { cancellationReason: "expired" });
+      return;
+    }
+
     void (async () => {
       await updateDraftState(messageId, "confirmed");
       await runCommand(draft);
@@ -4809,8 +4834,10 @@ function MessageBubble({
               (activeDraftId === message.id ? "active" : "closed")
             }
             isActive={activeDraftId === message.id && message.draftState === "active"}
+            previewExpiresAt={message.previewExpiresAt}
+            cancellationReason={message.cancellationReason}
             onConfirm={(confirmedDraft) => onConfirm(message.id, confirmedDraft)}
-            onCancel={() => onCancel(message.id)}
+            onCancel={(cancellationReason) => onCancel(message.id, { cancellationReason })}
           />
         ) : message.kind === "status" && message.execution ? (
           <ExecutionStatus
@@ -6405,16 +6432,31 @@ function CommandPreviewCard({
   draft,
   state,
   isActive,
+  previewExpiresAt,
+  cancellationReason,
   onConfirm,
   onCancel,
 }: {
   draft: ParsedCommand;
   state: PreviewDisplayState;
   isActive: boolean;
+  previewExpiresAt?: string;
+  cancellationReason?: "expired";
   onConfirm: (draft: ParsedCommand) => void;
-  onCancel: () => void;
+  onCancel: (cancellationReason?: "expired") => void;
 }) {
   const { t } = useI18n();
+  const hasActiveLease =
+    state === "active" &&
+    isActive &&
+    previewCanConfirm({ draftState: "active", previewExpiresAt });
+
+  useEffect(() => {
+    if (state === "active" && !previewExpiresAt) {
+      onCancel("expired");
+    }
+  }, [onCancel, previewExpiresAt, state]);
+
   const previewStatusLabel =
     state === "cancelled"
       ? t("status.cancelled")
@@ -7444,13 +7486,22 @@ function CommandPreviewCard({
         {mintGasHelpText ? <div>{mintGasHelpText}</div> : null}
       </div>
       {isActive ? (
-        <TransactionConfirmActions
-          confirmLabel={gatewayPreflightLoading ? t("preview.gatewayCheckingQuote") : confirmLabel}
-          cancelLabel={t("common.cancel")}
-          disabled={isBridge ? bridgeConfirmDisabled : isSwap ? swapConfirmDisabled : hasMintGasChoice ? gatewayConfirmDisabled : isPayroll ? payrollRecipientCount === null || payrollRecipientCount === 0 || Boolean(payrollRecipientError) : false}
-          onCancel={onCancel}
-          onConfirm={() => void confirmWithGatewayPreflight()}
-        />
+        <>
+          {hasActiveLease ? <PreviewLeaseTimer expiresAt={previewExpiresAt!} onExpire={() => onCancel("expired")} /> : null}
+          {cancellationReason === "expired" || (state === "active" && !previewExpiresAt) ? (
+            <div role="status" className="rounded-md border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
+              <div className="font-medium">{t("preview.expired")}</div>
+              <div className="mt-1 text-xs">{t("preview.resubmit")}</div>
+            </div>
+          ) : null}
+          <TransactionConfirmActions
+            confirmLabel={gatewayPreflightLoading ? t("preview.gatewayCheckingQuote") : confirmLabel}
+            cancelLabel={t("common.cancel")}
+            disabled={!hasActiveLease || (isBridge ? bridgeConfirmDisabled : isSwap ? swapConfirmDisabled : hasMintGasChoice ? gatewayConfirmDisabled : isPayroll ? payrollRecipientCount === null || payrollRecipientCount === 0 || Boolean(payrollRecipientError) : false)}
+            onCancel={() => onCancel()}
+            onConfirm={() => void confirmWithGatewayPreflight()}
+          />
+        </>
       ) : (
         <Button className="w-full" disabled>
           <Check className="h-4 w-4" />

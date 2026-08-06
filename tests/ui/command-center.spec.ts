@@ -14,6 +14,18 @@ test("renders the command center state catalog with safe transaction copy", asyn
   ).toBeVisible();
 });
 
+test("expires a transaction preview after fifteen seconds", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-08-07T00:00:00.000Z") });
+  await page.addInitScript(() => window.localStorage.setItem("paycmd_locale", "en"));
+  await page.goto("/dev/ui-preview");
+
+  await expect(page.getByRole("timer")).toHaveText("00:15");
+  await page.clock.fastForward(15_000);
+
+  await expect(page.getByRole("button", { name: /Confirm 50 USDC/i })).toBeDisabled();
+  await expect(page.getByText(/Preview expired/i)).toBeVisible();
+});
+
 test("keeps mobile navigation to four primary destinations without overflow", async ({ page }, testInfo) => {
   test.skip(!/mobile|tablet/.test(testInfo.project.name), "mobile-only navigation assertion");
   await page.goto("/dev/ui-preview");

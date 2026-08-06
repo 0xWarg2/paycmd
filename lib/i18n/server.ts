@@ -5,6 +5,10 @@ type Params = Record<string, string | number | undefined | null>;
 const messages: Record<PayCmdLocale, Record<string, string>> = {
   vi: {
     "profile.websiteUrl": "Website phải là URL hợp lệ.",
+    "preview.confirmWithin": "Xác nhận trong vòng mười lăm giây",
+    "preview.expired": "Preview đã hết hạn",
+    "preview.resubmit": "Gửi lại lệnh để tạo preview mới.",
+    "preview.timeRemaining": "Còn {time}",
     "profile.avatarUrl": "Avatar URL phải là URL hợp lệ.",
     "profile.displayName": "Display name không được để trống.",
     "profile.handle": "Handle chỉ gồm chữ thường, số, _ hoặc -, dài 3-32 ký tự.",
@@ -102,6 +106,10 @@ const messages: Record<PayCmdLocale, Record<string, string>> = {
   },
   en: {
     "profile.websiteUrl": "Website must be a valid URL.",
+    "preview.confirmWithin": "Confirm within fifteen seconds",
+    "preview.expired": "Preview expired",
+    "preview.resubmit": "Submit the command again to create a new preview.",
+    "preview.timeRemaining": "{time} remaining",
     "profile.avatarUrl": "Avatar URL must be a valid URL.",
     "profile.displayName": "Display name cannot be empty.",
     "profile.handle": "Handle can only contain lowercase letters, numbers, _ or -, and must be 3-32 characters.",

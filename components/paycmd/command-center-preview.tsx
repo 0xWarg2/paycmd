@@ -18,6 +18,9 @@ import {
   TransactionPreviewFields,
   TransactionSafetyHeader,
 } from "@/components/paycmd/transaction-safety";
+import { PreviewLeaseTimer } from "@/components/paycmd/preview-lease-timer";
+import { useI18n } from "@/lib/i18n";
+import { createPreviewExpiresAt } from "@/lib/paycmd/preview-lease";
 import { buildTransactionPreviewModel } from "@/lib/paycmd/ui-models";
 
 const preview = buildTransactionPreviewModel({
@@ -50,7 +53,10 @@ const previewTransactions: Transaction[] = [
 ];
 
 export function CommandCenterPreview() {
+  const { t } = useI18n();
   const [paletteInput, setPaletteInput] = useState("/balance a");
+  const [previewExpiresAt] = useState(() => createPreviewExpiresAt());
+  const [previewExpired, setPreviewExpired] = useState(false);
 
   return (
     <main className="command-center-canvas min-h-dvh text-foreground">
@@ -122,7 +128,15 @@ export function CommandCenterPreview() {
                   <div className="rounded-xl border border-info/30 bg-info/8 px-3 py-2 text-xs leading-5 text-info-foreground">
                     MetaMask will request approval on Base Sepolia. Destination gas is handled by forwarding.
                   </div>
-                  <TransactionConfirmActions confirmLabel={preview.confirmLabel} />
+                  {!previewExpired ? (
+                    <PreviewLeaseTimer expiresAt={previewExpiresAt} onExpire={() => setPreviewExpired(true)} />
+                  ) : (
+                    <div role="status" className="rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
+                      <div className="font-medium">{t("preview.expired")}</div>
+                      <div className="mt-1 text-xs">{t("preview.resubmit")}</div>
+                    </div>
+                  )}
+                  <TransactionConfirmActions confirmLabel={preview.confirmLabel} disabled={previewExpired} />
                 </CardContent>
               </Card>
 

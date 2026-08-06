@@ -458,6 +458,10 @@ const dictionaries: Record<Locale, TranslationMap> = {
     "receipt.copyFailed": "Không thể copy transaction hash",
 
     "preview.closed": "Đã đóng",
+    "preview.confirmWithin": "Xác nhận trong vòng mười lăm giây",
+    "preview.expired": "Preview đã hết hạn",
+    "preview.resubmit": "Gửi lại lệnh để tạo preview mới.",
+    "preview.timeRemaining": "Còn {time}",
     "preview.ready": "Sẵn sàng",
     "preview.confirmAmount": "Xác nhận {amount} {token}",
     "preview.confirmPayroll": "Xác nhận {total} {token} cho {count} người nhận",
@@ -1090,6 +1094,10 @@ const dictionaries: Record<Locale, TranslationMap> = {
     "receipt.copyFailed": "Could not copy transaction hash",
 
     "preview.closed": "Closed",
+    "preview.confirmWithin": "Confirm within fifteen seconds",
+    "preview.expired": "Preview expired",
+    "preview.resubmit": "Submit the command again to create a new preview.",
+    "preview.timeRemaining": "{time} remaining",
     "preview.ready": "Ready",
     "preview.confirmAmount": "Confirm {amount} {token}",
     "preview.confirmPayroll": "Confirm {total} {token} for {count} recipients",
