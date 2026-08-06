@@ -45,9 +45,18 @@ export function walletContextRelevant(input: string): boolean {
   const normalized = normalizeForMatch(input);
   const walletOrAsset = /\b(?:usdc|wallet|vi|metamask|circle|sca|gateway|gas)\b/u.test(normalized);
   const action = /\b(?:gui|send|transfer|chuyen|pay|thanh toan|nap|deposit|fund|rut|withdraw|bridge|swap)\b/u.test(normalized);
-  const accountState = /\b(?:my|mine|cua toi|balance|so du|available|ready|pending|spendable|du gas|enough gas|bao nhieu usdc)\b/u.test(normalized);
+  const firstPerson = /\b(?:i|me|my|mine|toi|minh|cua toi|cua minh)\b/u.test(normalized);
+  const possession = /\b(?:my|mine|cua toi|cua minh|do i have|how much .+ do i have|toi co|minh co)\b/u.test(normalized);
+  const accountState = /\b(?:balance|so du|available|ready|pending|spendable|gas)\b/u.test(normalized);
+  const affordability = /\b(?:can i afford|could i afford|do i have enough|have i got enough|toi co du|minh co du)\b/u.test(normalized);
+  const concreteAmount = /\b\d+(?:[.,]\d+)?(?:\s*usdc)?\b/u.test(normalized);
+  const conceptual = /\b(?:what does .+ mean|how (?:do|does) .+ work|explain|understand|nghia la gi|hoat dong the nao)\b/u.test(normalized);
 
-  return accountState || (walletOrAsset && action);
+  if (conceptual) return false;
+
+  return (walletOrAsset && affordability) ||
+    (accountState && possession) ||
+    (walletOrAsset && action && (firstPerson || concreteAmount));
 }
 
 export async function buildWalletContext(

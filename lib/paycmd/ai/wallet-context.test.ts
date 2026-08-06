@@ -7,10 +7,50 @@ import {
   walletContextRelevant,
 } from "./wallet-context.ts";
 import {
+  createServerWalletContextDependencies,
   loadExternalWalletObservations,
   loadGatewayBalanceResponse,
   loadGatewayWalletObservations,
 } from "./wallet-context-server.ts";
+
+type QueryCall = {
+  table: string;
+  filters: Array<[column: string, value: unknown]>;
+};
+
+function createSupabaseFixture(rows: {
+  wallets?: unknown[];
+  user_external_wallets?: unknown[];
+}) {
+  const calls: QueryCall[] = [];
+  const client = {
+    from(table: string) {
+      const call: QueryCall = { table, filters: [] };
+      calls.push(call);
+      const builder: any = {
+        select() {
+          return builder;
+        },
+        eq(column: string, value: unknown) {
+          call.filters.push([column, value]);
+          return builder;
+        },
+        order() {
+          return builder;
+        },
+        limit() {
+          return builder;
+        },
+        then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
+          const data = rows[table as keyof typeof rows] ?? [];
+          return Promise.resolve({ data, error: null }).then(onFulfilled, onRejected);
+        },
+      };
+      return builder;
+    },
+  };
+  return { client, calls };
+}
 
 test("keeps spendability domains separate", async () => {
   const context = await buildWalletContext("user-1", {
@@ -49,9 +89,132 @@ test("marks partial reads without converting failures to zero", async () => {
   assert.match(formatWalletContext(context), /Gateway balance unavailable/);
 });
 
-test("loads context only for operational wallet questions", () => {
+test("loads context for operational wallet questions", () => {
   assert.equal(walletContextRelevant("Làm sao gửi 50 USDC sang Arc nhanh nhất?"), true);
+  assert.equal(walletContextRelevant("Can I afford 50 USDC?"), true);
+  assert.equal(walletContextRelevant("Tôi có đủ 50 USDC không?"), true);
+  assert.equal(walletContextRelevant("What is my USDC balance?"), true);
+  assert.equal(walletContextRelevant("Số dư USDC của tôi là gì?"), true);
+});
+
+test("does not load authenticated context for conceptual questions", () => {
   assert.equal(walletContextRelevant("Arc consensus hoạt động thế nào?"), false);
+  assert.equal(walletContextRelevant("What does balance mean in crypto?"), false);
+  assert.equal(walletContextRelevant("How do pending transactions work?"), false);
+  assert.equal(walletContextRelevant("What does available balance mean?"), false);
+  assert.equal(walletContextRelevant("USDC là gì?"), false);
+});
+
+test("scopes server wallet sources to the authenticated user and configured chains", async () => {
+  const scaAddress = "0x11111111111111111111111111111111111111AA";
+  const externalAddress = "0x22222222222222222222222222222222222222BB";
+  const supabase = createSupabaseFixture({
+    wallets: [{ address: scaAddress, wallet_address: scaAddress }],
+    user_external_wallets: [{ wallet_type: "metamask", wallet_address: externalAddress }],
+  });
+  const circleReads: Array<[string, string]> = [];
+  const externalReads: Array<[string, string]> = [];
+  const dependencies = createServerWalletContextDependencies({
+    getSupabase: async () => supabase.client,
+    gatewayReaders: {
+      fetchReady: async () => ({ token: "USDC", balances: [] }),
+      fetchPending: async () => ({ token: "USDC", deposits: [] }),
+      chainByDomain: {},
+    },
+    readUsdcBalance: async (address, chain) => {
+      circleReads.push([address, chain]);
+      return chain === "baseSepolia" ? 25_000_000n : 5_000_000n;
+    },
+    readChainBalance: async (address, chain) => {
+      externalReads.push([address, chain]);
+      return {
+        nativeBalance: chain === "baseSepolia" ? 10_000_000_000_000_000n : 20_000_000_000_000_000n,
+        usdc: chain === "baseSepolia" ? 30_000_000n : 40_000_000n,
+      };
+    },
+    chains: ["baseSepolia", "sepolia"],
+  });
+
+  const context = await buildWalletContext("auth-user", dependencies);
+
+  assert.equal(context.status, "verified");
+  assert.deepEqual(supabase.calls.map((call) => call.table).sort(), [
+    "user_external_wallets",
+    "wallets",
+    "wallets",
+  ]);
+  assert.equal(supabase.calls.every((call) =>
+    call.filters.some(([column, value]) => column === "user_id" && value === "auth-user")), true);
+  assert.deepEqual(circleReads, [
+    [scaAddress.toLowerCase(), "baseSepolia"],
+    [scaAddress.toLowerCase(), "sepolia"],
+  ]);
+  assert.deepEqual(externalReads, [
+    [externalAddress.toLowerCase(), "baseSepolia"],
+    [externalAddress.toLowerCase(), "sepolia"],
+  ]);
+  assert.deepEqual(context.circleSca, [
+    { chain: "baseSepolia", address: scaAddress, usdc: "25" },
+    { chain: "sepolia", address: scaAddress, usdc: "5" },
+  ]);
+  assert.deepEqual(context.externalWallets, [
+    {
+      provider: "metamask",
+      address: externalAddress,
+      chain: "baseSepolia",
+      nativeBalance: "0.01",
+      usdc: "30",
+    },
+    {
+      provider: "metamask",
+      address: externalAddress,
+      chain: "sepolia",
+      nativeBalance: "0.02",
+      usdc: "40",
+    },
+  ]);
+});
+
+test("marks a server source unavailable at the eight-second family deadline", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const scaAddress = "0x3333333333333333333333333333333333333333";
+  const supabase = createSupabaseFixture({
+    wallets: [{ address: scaAddress, wallet_address: scaAddress }],
+    user_external_wallets: [],
+  });
+  const never = new Promise<never>(() => {});
+  const dependencies = createServerWalletContextDependencies({
+    getSupabase: async () => supabase.client,
+    gatewayReaders: {
+      fetchReady: async () => never,
+      fetchPending: async () => ({ token: "USDC", deposits: [] }),
+      chainByDomain: {},
+    },
+    readUsdcBalance: async () => 0n,
+    readChainBalance: async () => ({ nativeBalance: 0n, usdc: 0n }),
+    chains: ["baseSepolia"],
+  });
+  let settled = false;
+  const contextPromise = buildWalletContext("auth-user", dependencies).then((context) => {
+    settled = true;
+    return context;
+  });
+
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  t.mock.timers.tick(7_999);
+  await Promise.resolve();
+  assert.equal(settled, false);
+
+  t.mock.timers.tick(1);
+  const context = await contextPromise;
+  assert.equal(context.status, "partial");
+  assert.deepEqual(context.unavailable, ["gateway"]);
+  assert.deepEqual(context.gateway, []);
+  assert.deepEqual(context.circleSca, [{
+    chain: "baseSepolia",
+    address: scaAddress,
+    usdc: "0",
+  }]);
 });
 
 test("keeps ready and pending Gateway observations separate", async () => {
