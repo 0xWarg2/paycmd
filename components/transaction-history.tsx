@@ -71,6 +71,13 @@ export interface Transaction {
   status: TransactionStatus;
   reason: string | null;
   created_at: string;
+  source_mode?: "scoped" | "unified";
+  source_allocations?: Array<{
+    sourceChain: string;
+    amount: number;
+    maximumFeeReserve: number;
+    maximumDebit: number;
+  }> | null;
 }
 
 const transactionTypeLabels: Record<TransactionType, string> = {
@@ -213,6 +220,8 @@ export function TransactionHistory({
         tx.tx_type,
         tx.status,
         tx.reason,
+        tx.source_mode,
+        JSON.stringify(tx.source_allocations ?? []),
       ]
         .filter(Boolean)
         .join(" ")
@@ -362,7 +371,18 @@ export function TransactionHistory({
                             </div>
                           </TableCell>
                           <TableCell>
-                            <ChainRoute sourceChain={tx.chain} destinationChain={tx.destination_chain} />
+                            {tx.source_mode === "unified" ? (
+                              <div className="space-y-1">
+                                <div className="font-medium">Unified Gateway ({tx.source_allocations?.length ?? 0} sources)</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {(tx.source_allocations ?? []).map((allocation) =>
+                                    `${getChainMeta(allocation.sourceChain)?.shortLabel ?? allocation.sourceChain}: ${formatAmount(allocation.amount)}`).join(" · ")}
+                                </div>
+                                <ChainRoute sourceChain="gateway" destinationChain={tx.destination_chain} />
+                              </div>
+                            ) : (
+                              <ChainRoute sourceChain={tx.chain} destinationChain={tx.destination_chain} />
+                            )}
                           </TableCell>
                           <TableCell className="font-mono">{formatTransactionAmount(tx)}</TableCell>
                           <TableCell>
@@ -430,7 +450,18 @@ export function TransactionHistory({
                         {getStatusBadge(tx.status)}
                       </div>
                       <div className="mt-4 rounded-xl border border-border/55 bg-muted/25 p-3">
-                        <ChainRoute sourceChain={tx.chain} destinationChain={tx.destination_chain} />
+                        {tx.source_mode === "unified" ? (
+                          <div className="space-y-1">
+                            <div className="text-xs font-medium">Unified Gateway ({tx.source_allocations?.length ?? 0} sources)</div>
+                            <div className="text-xs text-muted-foreground">
+                              {(tx.source_allocations ?? []).map((allocation) =>
+                                `${getChainMeta(allocation.sourceChain)?.shortLabel ?? allocation.sourceChain}: ${formatAmount(allocation.amount)}`).join(" · ")}
+                            </div>
+                            <ChainRoute sourceChain="gateway" destinationChain={tx.destination_chain} />
+                          </div>
+                        ) : (
+                          <ChainRoute sourceChain={tx.chain} destinationChain={tx.destination_chain} />
+                        )}
                         <div className="mt-3 break-words font-mono text-sm font-semibold">
                           {formatTransactionAmount(tx)}
                         </div>

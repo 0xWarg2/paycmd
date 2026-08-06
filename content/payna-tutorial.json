@@ -1,141 +1,729 @@
 {
   "version": "1.0.0",
-  "updatedAt": "2026-08-04",
+  "updatedAt": "2026-08-05",
   "product": "Hey Payna",
   "locales": {
-    "en": {
-      "sections": [
-        {
-          "id": "overview",
-          "title": "What Hey Payna does",
-          "keywords": ["payna", "overview", "wallet", "payment", "usdc"],
-          "content": [
-            "Hey Payna is a chat-first stablecoin copilot for testnet USDC payments, wallet actions, cross-chain transfers, swaps, transaction history, and grounded Web3 research.",
-            "Use Payna mode for actions. Use AskPayna for Web3, crypto, L1/L2, Circle, and Arc knowledge questions."
-          ]
-        },
-        {
-          "id": "funding",
-          "title": "Connect and fund wallets",
-          "keywords": ["connect", "metamask", "wallet", "fund", "faucet", "balance"],
-          "content": [
-            "Sign in with MetaMask and run /link metamask to link the external wallet.",
-            "Run /wallet create to create the Circle wallet and Gateway signer when needed.",
-            "Use Circle Faucet for testnet USDC, then run /fund 10 from metamask on base.",
-            "Run /wallet balance arc for the Circle SCA balance on Arc or /balance for the supported unified balance view."
-          ]
-        },
-        {
-          "id": "commands",
-          "title": "Payments, transfers, bridges, and swaps",
-          "keywords": ["pay", "transfer", "bridge", "swap", "base", "arc", "cctp", "commands"],
-          "content": [
-            "Use /pay 5 to Minh on arc to prepare a payment preview for a contact or address.",
-            "Use /transfer 5 from base to arc to move Circle wallet or Gateway USDC across supported chains.",
-            "Use /bridge 5 usdc from base to arc on my metamask for a MetaMask CCTP v2 bridge.",
-            "Use /swap 1 USDC to EURC for a MetaMask-signed Arc Testnet swap.",
-            "Every money-moving command requires a preview and explicit confirmation."
-          ],
-          "items": [
-            ["/wallet create", "Create the Circle wallet and Gateway signer when needed."],
-            ["/wallet balance arc", "Check Circle SCA wallet USDC on Arc Testnet."],
-            ["/balance", "Check the supported unified USDC balance view."],
-            ["/fund 10 from metamask on base", "Move testnet USDC from MetaMask into the Circle wallet."],
-            ["/pay 5 to Minh on arc", "Prepare a payment preview for a contact or address."],
-            ["/transfer 5 from base to arc", "Move Circle wallet or Gateway USDC across supported chains."],
-            ["/bridge 5 usdc from base to arc on my metamask", "Bridge with MetaMask through CCTP v2."],
-            ["/swap 1 USDC to EURC", "Swap on Arc Testnet with MetaMask confirmation."],
-            ["Monad la gi?", "Switch to AskPayna for grounded Web3 research."]
-          ]
-        },
-        {
-          "id": "askpayna",
-          "title": "AskPayna Web3 research",
-          "keywords": ["askpayna", "research", "web3", "crypto", "circle", "arc", "tavily", "deepseek", "sources"],
-          "content": [
-            "AskPayna uses this versioned tutorial for Hey Payna usage questions.",
-            "It uses Circle MCP for Circle products, Arc MCP for Arc chain documentation, and Tavily for broader or time-sensitive Web3 research.",
-            "DeepSeek synthesizes the retrieved evidence and may cite only URLs returned by those retrieval sources.",
-            "If a source is unavailable, AskPayna marks the answer as partial or unavailable instead of inventing a reference."
-          ]
-        },
-        {
-          "id": "safety",
-          "title": "Safety and limitations",
-          "keywords": ["safety", "private key", "seed phrase", "testnet", "financial advice", "confirm"],
-          "content": [
-            "Never paste a seed phrase or private key into Payna or AskPayna.",
-            "Natural language can prepare an action but cannot bypass transaction confirmation.",
-            "Current wallet, faucet, bridge, swap, and proof workflows are testnet-oriented and are not financial advice."
-          ]
-        }
-      ]
-    },
     "vi": {
       "sections": [
         {
           "id": "overview",
-          "title": "Hey Payna làm gì",
-          "keywords": ["payna", "tổng quan", "ví", "thanh toán", "usdc"],
-          "content": [
-            "Hey Payna là stablecoin copilot dạng chat dành cho thanh toán USDC testnet, thao tác ví, chuyển tiền cross-chain, swap, lịch sử giao dịch và nghiên cứu Web3 có nguồn.",
-            "Dùng Payna mode cho hành động. Dùng AskPayna để hỏi kiến thức Web3, crypto, L1/L2, Circle và Arc."
-          ]
-        },
-        {
-          "id": "funding",
-          "title": "Kết nối và nạp tiền vào ví",
-          "keywords": ["kết nối", "metamask", "ví", "nạp", "fund", "faucet", "balance"],
-          "content": [
-            "Đăng nhập bằng MetaMask rồi chạy /link metamask để liên kết ví ngoài.",
-            "Chạy /wallet create để tạo Circle wallet và Gateway signer khi cần.",
-            "Dùng Circle Faucet để nhận testnet USDC, sau đó chạy /fund 10 from metamask on base.",
-            "Chạy /wallet balance arc để xem Circle SCA balance trên Arc hoặc /balance để xem unified balance được hỗ trợ."
-          ]
-        },
-        {
-          "id": "commands",
-          "title": "Thanh toán, transfer, bridge và swap",
-          "keywords": ["pay", "thanh toán", "chuyển", "transfer", "bridge", "swap", "base", "arc", "cctp", "lệnh"],
-          "content": [
-            "Dùng /pay 5 to Minh on arc để tạo preview thanh toán cho contact hoặc địa chỉ ví.",
-            "Dùng /transfer 5 from base to arc để chuyển USDC của Circle wallet hoặc Gateway giữa các chain được hỗ trợ.",
-            "Dùng /bridge 5 usdc from base to arc on my metamask để bridge bằng MetaMask qua CCTP v2.",
-            "Dùng /swap 1 USDC to EURC để swap trên Arc Testnet bằng chữ ký MetaMask.",
-            "Mọi lệnh chuyển tiền đều cần preview và xác nhận rõ ràng của người dùng."
+          "title": "Tài liệu Hey Payna",
+          "keywords": [
+            "Payna",
+            "USDC",
+            "Circle",
+            "Arc"
           ],
-          "items": [
-            ["/wallet create", "Tạo Circle wallet và Gateway signer khi cần."],
-            ["/wallet balance arc", "Xem USDC trong Circle SCA wallet trên Arc Testnet."],
-            ["/balance", "Xem unified USDC balance được hỗ trợ."],
-            ["/fund 10 from metamask on base", "Chuyển testnet USDC từ MetaMask vào Circle wallet."],
-            ["/pay 5 to Minh on arc", "Tạo preview thanh toán cho contact hoặc địa chỉ ví."],
-            ["/transfer 5 from base to arc", "Chuyển USDC của Circle wallet hoặc Gateway giữa các chain."],
-            ["/bridge 5 usdc from base to arc on my metamask", "Bridge bằng MetaMask qua CCTP v2."],
-            ["/swap 1 USDC to EURC", "Swap trên Arc Testnet với bước xác nhận MetaMask."],
-            ["Monad la gi?", "Chuyển sang AskPayna để research Web3 có nguồn."]
-          ]
+          "content": [
+            "Hey Payna là stablecoin copilot dạng chat dành cho thao tác USDC testnet, thanh toán, chuyển tiền cross-chain, swap và nghiên cứu Web3 có nguồn."
+          ],
+          "url": "https://heypayna.xyz/docs"
         },
         {
-          "id": "askpayna",
-          "title": "AskPayna nghiên cứu Web3",
-          "keywords": ["askpayna", "research", "nghiên cứu", "web3", "crypto", "circle", "arc", "tavily", "deepseek", "nguồn"],
+          "id": "getting-started/quickstart",
+          "title": "Bắt đầu nhanh",
+          "keywords": [
+            "quickstart",
+            "MetaMask",
+            "Circle wallet",
+            "USDC"
+          ],
           "content": [
-            "AskPayna dùng tutorial có version này cho các câu hỏi hướng dẫn Hey Payna.",
-            "Hệ thống dùng Circle MCP cho sản phẩm Circle, Arc MCP cho tài liệu blockchain Arc và Tavily cho kiến thức Web3 rộng hoặc dữ liệu cần tính thời sự.",
-            "DeepSeek tổng hợp bằng chứng đã truy xuất và chỉ được citation URL do các nguồn retrieval trả về.",
-            "Nếu nguồn lỗi, AskPayna đánh dấu câu trả lời partial hoặc unavailable thay vì tạo nguồn giả."
-          ]
+            "Đăng nhập bằng MetaMask, link ví ngoài, tạo Circle wallet, nạp testnet USDC rồi chạy command có preview và confirm."
+          ],
+          "url": "https://heypayna.xyz/docs/getting-started/quickstart"
         },
         {
-          "id": "safety",
-          "title": "An toàn và giới hạn",
-          "keywords": ["an toàn", "private key", "seed phrase", "testnet", "lời khuyên tài chính", "xác nhận"],
+          "id": "getting-started/account-and-wallets",
+          "title": "Tài khoản và các loại ví",
+          "keywords": [
+            "account",
+            "MetaMask",
+            "SCA",
+            "Gateway signer"
+          ],
           "content": [
-            "Không bao giờ nhập seed phrase hoặc private key vào Payna hay AskPayna.",
-            "Ngôn ngữ tự nhiên có thể chuẩn bị hành động nhưng không thể bỏ qua bước xác nhận transaction.",
-            "Các luồng wallet, faucet, bridge, swap và proof hiện dành cho testnet và không phải lời khuyên tài chính."
-          ]
+            "Một tài khoản Payna có thể liên kết MetaMask, Circle SCA wallet và Gateway signer; mỗi ví có vai trò và balance riêng."
+          ],
+          "url": "https://heypayna.xyz/docs/getting-started/account-and-wallets"
+        },
+        {
+          "id": "circle/gateway/overview",
+          "title": "Circle Gateway trong Payna",
+          "keywords": [
+            "Circle Gateway",
+            "SCA",
+            "signer",
+            "depositor",
+            "unified"
+          ],
+          "content": [
+            "Payna tách ba vai trò: Circle SCA giữ USDC on-chain, depositor sở hữu balance theo domain trong Gateway, còn EOA được delegate ký burn intent.",
+            "Gateway có thể biểu diễn unified cross-chain balance, nhưng lệnh transfer hiện tại của Payna chỉ tiêu từ source domain được chọn rõ ràng."
+          ],
+          "url": "https://heypayna.xyz/docs/circle/gateway/overview"
+        },
+        {
+          "id": "circle/gateway/unified-balance",
+          "title": "Circle Gateway unified balance",
+          "keywords": [
+            "Circle Gateway",
+            "unified balance",
+            "SCA",
+            "depositor"
+          ],
+          "content": [
+            "Gateway ready balance gồm finalized deposit được ghi nhận cho một depositor và domain; SCA USDC và pending deposit là các phần riêng.",
+            "Payna giữ named source command strict, nhưng explicit unified fallback có thể allocate ready balance qua tối đa 16 intent trong BurnIntentSet."
+          ],
+          "url": "https://heypayna.xyz/docs/circle/gateway/unified-balance"
+        },
+        {
+          "id": "circle/gateway/deposit-and-finality",
+          "title": "Deposit và Gateway finality",
+          "keywords": [
+            "deposit",
+            "finality",
+            "pending",
+            "webhook",
+            "sync"
+          ],
+          "content": [
+            "Lệnh /deposit của Payna approve USDC rồi gọi Gateway từ SCA; transaction đã confirm vẫn pending đến khi Circle finalize và process.",
+            "Signed webhook là finality signal chính, còn idempotent sync reconcile processed height với pending-deposit list của Circle."
+          ],
+          "url": "https://heypayna.xyz/docs/circle/gateway/deposit-and-finality"
+        },
+        {
+          "id": "circle/gateway/transfer",
+          "title": "Gateway transfer",
+          "keywords": [
+            "transfer",
+            "burn intent set",
+            "unified gateway",
+            "source allocation",
+            "fee"
+          ],
+          "content": [
+            "`/transfer 5 from base to arc` vẫn source-scoped. Nếu ready balance thiếu, Payna cho chọn minimum deposit hoặc unified BurnIntentSet; không auto-deposit.",
+            "Unified preview hiện từng allocation, maximum fee reserve và maximum debit, rồi bind confirmation với fingerprint của quote mới nhất."
+          ],
+          "url": "https://heypayna.xyz/docs/circle/gateway/transfer"
+        },
+        {
+          "id": "circle/gateway/withdraw",
+          "title": "Withdraw từ Gateway",
+          "keywords": [
+            "withdraw",
+            "Gateway",
+            "SCA",
+            "same domain"
+          ],
+          "content": [
+            "Lệnh /withdraw của Payna burn ready Gateway balance và mint về SCA của người dùng trên same domain, cần amount cộng fee và gas cho SCA mint.",
+            "Application path này khác delayed trustless withdrawal mechanism ở protocol level của Gateway."
+          ],
+          "url": "https://heypayna.xyz/docs/circle/gateway/withdraw"
+        },
+        {
+          "id": "circle/gateway/fees-gas-and-forwarding",
+          "title": "Gateway fee, gas và forwarding",
+          "keywords": [
+            "fee",
+            "gas",
+            "auto forwarding",
+            "manual mint"
+          ],
+          "content": [
+            "`fees.total` là current estimated/settled charge; `maxFee` từng intent là signed cap, và tổng cap là maximum reserve chứ không phải expected fee.",
+            "Unified allocation trừ maxFee từng intent khỏi usable balance; deposit và persistent delegate authorization là confirmation riêng."
+          ],
+          "url": "https://heypayna.xyz/docs/circle/gateway/fees-gas-and-forwarding"
+        },
+        {
+          "id": "circle/cctp-bridge",
+          "title": "CCTP v2 bridge bằng MetaMask",
+          "keywords": [
+            "CCTP v2",
+            "bridge",
+            "burn",
+            "mint",
+            "MetaMask"
+          ],
+          "content": [
+            "Dùng /bridge cho USDC trong MetaMask: kiểm tra route và fee, ký CCTP v2 source burn, chờ attestation rồi hoàn tất destination mint.",
+            "Không lặp lại một source burn đã được ghi nhận; dùng hash của nó để chẩn đoán hoặc khôi phục mint đang chờ."
+          ],
+          "url": "https://heypayna.xyz/docs/circle/cctp-bridge"
+        },
+        {
+          "id": "features/askpayna",
+          "title": "AskPayna research",
+          "keywords": [
+            "AskPayna",
+            "Circle MCP",
+            "Arc MCP",
+            "Tavily",
+            "DeepSeek"
+          ],
+          "content": [
+            "AskPayna route Payna tutorial, Circle MCP, Arc MCP và Tavily cho câu hỏi Web3 rộng hoặc live, rồi yêu cầu DeepSeek chỉ tổng hợp evidence đã retrieval.",
+            "Reference phải đến từ retrieval; thiếu nguồn sẽ trả grounding partial hoặc unavailable, không tạo citation giả."
+          ],
+          "url": "https://heypayna.xyz/docs/features/askpayna"
+        },
+        {
+          "id": "features/payments-and-contacts",
+          "title": "Pay và contacts",
+          "keywords": [
+            "pay",
+            "contacts",
+            "recipient",
+            "preview"
+          ],
+          "content": [
+            "Payment Payna cần amount, recipient, source chain và destination chain, rồi resolve người nhận và hiện confirmation preview trước khi chạy Gateway.",
+            "Contact chỉ lưu identity và routing hint, không có quyền ký; luôn kiểm tra địa chỉ đã resolve và destination."
+          ],
+          "url": "https://heypayna.xyz/docs/features/payments-and-contacts"
+        },
+        {
+          "id": "features/payment-requests-and-payroll",
+          "title": "Payment requests và payroll",
+          "keywords": [
+            "request",
+            "payment link",
+            "payroll",
+            "batch"
+          ],
+          "content": [
+            "Payment request tạo inbound link hoặc QR ở trạng thái pending; payroll tạo và confirm outbound Gateway payments cho tối đa 25 active contacts.",
+            "Payroll hiện recipient count và aggregate amount trước execution, rồi giữ success hoặc failure theo từng item và toàn batch."
+          ],
+          "url": "https://heypayna.xyz/docs/features/payment-requests-and-payroll"
+        },
+        {
+          "id": "features/budgets-and-schedules",
+          "title": "Budgets và schedules",
+          "keywords": [
+            "budget",
+            "schedule",
+            "automation",
+            "limit"
+          ],
+          "content": [
+            "Budgets hiện là dashboard read-only cho spending trong 30 ngày; enforcement và editing control chưa hoạt động.",
+            "Schedules hiển thị recurring-payment row đã lưu trong demo scope manual-first và không tự ký hoặc di chuyển funds."
+          ],
+          "url": "https://heypayna.xyz/docs/features/budgets-and-schedules"
+        },
+        {
+          "id": "features/activity-and-notifications",
+          "title": "Activity, history và notifications",
+          "keywords": [
+            "activity",
+            "history",
+            "notification",
+            "status"
+          ],
+          "content": [
+            "Activity tách transaction history khỏi notifications; dùng receipt và explorer link đúng chain để đối soát từng stage.",
+            "Gateway finality notification chỉ được tạo sau khi settlement evidence đã xác minh cập nhật pending deposit; unread state hiện chỉ mang tính thông tin."
+          ],
+          "url": "https://heypayna.xyz/docs/features/activity-and-notifications"
+        },
+        {
+          "id": "arc/overview-and-swap",
+          "title": "Arc Testnet và swap",
+          "keywords": [
+            "Arc",
+            "swap",
+            "USDC",
+            "EURC",
+            "cirBTC"
+          ],
+          "content": [
+            "Payna swap trên Arc Testnet dùng MetaMask, hỗ trợ USDC/EURC/cirBTC, direct route cho USDC pair và route qua USDC cho cặp còn lại."
+          ],
+          "url": "https://heypayna.xyz/docs/arc/overview-and-swap"
+        },
+        {
+          "id": "arc/onchain-proof",
+          "title": "Payna onchain proof",
+          "keywords": [
+            "Arc",
+            "proof",
+            "receipt",
+            "contract",
+            "ArcScan"
+          ],
+          "content": [
+            "Payna proof contract trên Arc chỉ emit receipt event liên kết command, amount và tx hashes; contract không giữ hoặc chuyển tiền."
+          ],
+          "url": "https://heypayna.xyz/docs/arc/onchain-proof"
+        },
+        {
+          "id": "commands/wallet-and-balance",
+          "title": "Wallet và balance commands",
+          "keywords": [
+            "wallet",
+            "link",
+            "fund",
+            "balance"
+          ],
+          "content": [
+            "Nhóm wallet gồm /wallet, /link, /fund và /balance; /fund chỉ nạp SCA còn /balance tổng hợp SCA và Gateway."
+          ],
+          "url": "https://heypayna.xyz/docs/commands/wallet-and-balance"
+        },
+        {
+          "id": "commands/gateway",
+          "title": "Circle Gateway commands",
+          "keywords": [
+            "deposit",
+            "withdraw",
+            "transfer",
+            "gas",
+            "gateway"
+          ],
+          "content": [
+            "Gateway command gồm /deposit, /withdraw, /transfer, /gas và /gateway; transfer scoped-first và có explicit fallback sang unified BurnIntentSet."
+          ],
+          "url": "https://heypayna.xyz/docs/commands/gateway"
+        },
+        {
+          "id": "commands/payments",
+          "title": "Payment commands",
+          "keywords": [
+            "pay",
+            "request",
+            "payroll",
+            "contacts"
+          ],
+          "content": [
+            "Payment commands gồm /pay, /request, /payroll và /contacts; Payna resolve recipient rồi yêu cầu preview/confirm trước execution."
+          ],
+          "url": "https://heypayna.xyz/docs/commands/payments"
+        },
+        {
+          "id": "commands/metamask-and-data",
+          "title": "Bridge, swap và history commands",
+          "keywords": [
+            "bridge",
+            "swap",
+            "history",
+            "MetaMask"
+          ],
+          "content": [
+            "Nhóm MetaMask/data gồm /bridge, /swap và /history; bridge và swap cần chữ ký MetaMask, history chỉ đọc dữ liệu đã lưu."
+          ],
+          "url": "https://heypayna.xyz/docs/commands/metamask-and-data"
+        },
+        {
+          "id": "safety-and-support/security",
+          "title": "Mô hình an toàn",
+          "keywords": [
+            "security",
+            "seed phrase",
+            "confirmation",
+            "testnet"
+          ],
+          "content": [
+            "Payna hướng tới testnet: không chia sẻ secret ví, kiểm tra mọi preview và signature, rồi kiểm tra giao dịch đã submit trước khi retry."
+          ],
+          "url": "https://heypayna.xyz/docs/safety-and-support/security"
+        },
+        {
+          "id": "safety-and-support/troubleshooting",
+          "title": "Troubleshooting",
+          "keywords": [
+            "troubleshooting",
+            "gas",
+            "pending",
+            "MetaMask",
+            "Gateway"
+          ],
+          "content": [
+            "Ghép symptom với bước cuối đã xác nhận, chỉ sửa lỗi trước submission, và đối soát mọi hash hoặc transfer ID trước khi retry."
+          ],
+          "url": "https://heypayna.xyz/docs/safety-and-support/troubleshooting"
+        },
+        {
+          "id": "safety-and-support/faq",
+          "title": "Câu hỏi thường gặp",
+          "keywords": [
+            "FAQ",
+            "Payna",
+            "Gateway",
+            "Arc",
+            "AskPayna"
+          ],
+          "content": [
+            "Docs testnet public và versioned của Payna giải thích ranh giới wallet/rail; hash và citation hỗ trợ điều tra, không thay secret sharing hay duplicate retry."
+          ],
+          "url": "https://heypayna.xyz/docs/safety-and-support/faq"
+        }
+      ]
+    },
+    "en": {
+      "sections": [
+        {
+          "id": "overview",
+          "title": "Hey Payna documentation",
+          "keywords": [
+            "Payna",
+            "USDC",
+            "Circle",
+            "Arc"
+          ],
+          "content": [
+            "Hey Payna is a chat-first stablecoin copilot for testnet USDC wallet actions, payments, cross-chain transfers, swaps, and grounded Web3 research."
+          ],
+          "url": "https://heypayna.xyz/docs"
+        },
+        {
+          "id": "getting-started/quickstart",
+          "title": "Quickstart",
+          "keywords": [
+            "quickstart",
+            "MetaMask",
+            "Circle wallet",
+            "USDC"
+          ],
+          "content": [
+            "Sign in with MetaMask, link the external wallet, create a Circle wallet, fund testnet USDC, and run commands through preview and confirmation."
+          ],
+          "url": "https://heypayna.xyz/docs/getting-started/quickstart"
+        },
+        {
+          "id": "getting-started/account-and-wallets",
+          "title": "Accounts and wallet roles",
+          "keywords": [
+            "account",
+            "MetaMask",
+            "SCA",
+            "Gateway signer"
+          ],
+          "content": [
+            "A Payna account can link MetaMask, a Circle SCA wallet, and a Gateway signer; each wallet has a separate role and balance."
+          ],
+          "url": "https://heypayna.xyz/docs/getting-started/account-and-wallets"
+        },
+        {
+          "id": "circle/gateway/overview",
+          "title": "Circle Gateway in Payna",
+          "keywords": [
+            "Circle Gateway",
+            "SCA",
+            "signer",
+            "depositor",
+            "unified"
+          ],
+          "content": [
+            "Payna keeps three roles distinct: the Circle SCA holds on-chain USDC, the depositor owns domain balances inside Gateway, and a delegated EOA signs burn intents.",
+            "Gateway can represent a unified cross-chain balance, while Payna's current transfer command spends only the explicitly selected source domain."
+          ],
+          "url": "https://heypayna.xyz/docs/circle/gateway/overview"
+        },
+        {
+          "id": "circle/gateway/unified-balance",
+          "title": "Circle Gateway unified balance",
+          "keywords": [
+            "Circle Gateway",
+            "unified balance",
+            "SCA",
+            "depositor"
+          ],
+          "content": [
+            "Gateway ready balance includes finalized deposits recorded for a depositor and domain; SCA USDC and pending deposits are separate.",
+            "Payna keeps scoped commands strict, but an explicit unified fallback can allocate ready balance across up to 16 BurnIntentSet intents."
+          ],
+          "url": "https://heypayna.xyz/docs/circle/gateway/unified-balance"
+        },
+        {
+          "id": "circle/gateway/deposit-and-finality",
+          "title": "Deposit and Gateway finality",
+          "keywords": [
+            "deposit",
+            "finality",
+            "pending",
+            "webhook",
+            "sync"
+          ],
+          "content": [
+            "Payna's /deposit approves USDC and calls Gateway from the SCA; the confirmed transaction remains pending until Circle finalizes and processes it.",
+            "A signed webhook is the primary finality signal, while idempotent sync reconciles processed height and Circle's pending-deposit list."
+          ],
+          "url": "https://heypayna.xyz/docs/circle/gateway/deposit-and-finality"
+        },
+        {
+          "id": "circle/gateway/transfer",
+          "title": "Gateway transfer",
+          "keywords": [
+            "transfer",
+            "burn intent set",
+            "unified gateway",
+            "source allocation",
+            "fee"
+          ],
+          "content": [
+            "`/transfer 5 from base to arc` remains source-scoped. If that ready balance is short, Payna offers an explicit minimum deposit or a unified BurnIntentSet; it never auto-deposits.",
+            "A unified preview shows every allocation, maximum fee reserve and maximum debit, then binds confirmation to a fresh quote fingerprint."
+          ],
+          "url": "https://heypayna.xyz/docs/circle/gateway/transfer"
+        },
+        {
+          "id": "circle/gateway/withdraw",
+          "title": "Withdraw from Gateway",
+          "keywords": [
+            "withdraw",
+            "Gateway",
+            "SCA",
+            "same domain"
+          ],
+          "content": [
+            "Payna's /withdraw burns ready Gateway balance and mints it to the user's own SCA on the same domain, requiring amount plus fee and SCA mint gas.",
+            "This application path is distinct from Gateway's protocol-level delayed trustless withdrawal mechanism."
+          ],
+          "url": "https://heypayna.xyz/docs/circle/gateway/withdraw"
+        },
+        {
+          "id": "circle/gateway/fees-gas-and-forwarding",
+          "title": "Gateway fees, gas, and forwarding",
+          "keywords": [
+            "fee",
+            "gas",
+            "auto forwarding",
+            "manual mint"
+          ],
+          "content": [
+            "`fees.total` is the current estimated/settled charge; per-intent `maxFee` is a signed cap, and their sum is maximum reserve rather than expected fee.",
+            "Unified allocation subtracts each maxFee from usable balance; deposit and persistent delegate authorization are separate confirmations."
+          ],
+          "url": "https://heypayna.xyz/docs/circle/gateway/fees-gas-and-forwarding"
+        },
+        {
+          "id": "circle/cctp-bridge",
+          "title": "CCTP v2 bridge with MetaMask",
+          "keywords": [
+            "CCTP v2",
+            "bridge",
+            "burn",
+            "mint",
+            "MetaMask"
+          ],
+          "content": [
+            "Use /bridge for MetaMask-held USDC: review the route and fees, sign the CCTP v2 source burn, wait for attestation, and complete the destination mint.",
+            "A recorded source burn is not safe to repeat; use its hash to diagnose or recover a pending mint."
+          ],
+          "url": "https://heypayna.xyz/docs/circle/cctp-bridge"
+        },
+        {
+          "id": "features/askpayna",
+          "title": "AskPayna research",
+          "keywords": [
+            "AskPayna",
+            "Circle MCP",
+            "Arc MCP",
+            "Tavily",
+            "DeepSeek"
+          ],
+          "content": [
+            "AskPayna routes Payna tutorial, Circle MCP, Arc MCP, and Tavily for broad or live Web3 questions, then asks DeepSeek to synthesize only the retrieved evidence.",
+            "References come from retrieval; missing sources produce partial or unavailable grounding, never invented citations."
+          ],
+          "url": "https://heypayna.xyz/docs/features/askpayna"
+        },
+        {
+          "id": "features/payments-and-contacts",
+          "title": "Payments and contacts",
+          "keywords": [
+            "pay",
+            "contacts",
+            "recipient",
+            "preview"
+          ],
+          "content": [
+            "A Payna payment requires amount, recipient, source chain, and destination chain, then resolves the recipient and shows a confirmation preview before Gateway execution.",
+            "Contacts store identity and routing hints, never signing authority; verify the resolved address and destination every time."
+          ],
+          "url": "https://heypayna.xyz/docs/features/payments-and-contacts"
+        },
+        {
+          "id": "features/payment-requests-and-payroll",
+          "title": "Payment requests and payroll",
+          "keywords": [
+            "request",
+            "payment link",
+            "payroll",
+            "batch"
+          ],
+          "content": [
+            "A payment request creates a pending inbound link or QR; payroll creates and confirms outbound Gateway payments for up to 25 active contacts.",
+            "Payroll exposes recipient count and aggregate amount before execution, then preserves success or failure per item and at batch level."
+          ],
+          "url": "https://heypayna.xyz/docs/features/payment-requests-and-payroll"
+        },
+        {
+          "id": "features/budgets-and-schedules",
+          "title": "Budgets and schedules",
+          "keywords": [
+            "budget",
+            "schedule",
+            "automation",
+            "limit"
+          ],
+          "content": [
+            "Budgets currently provide a read-only 30-day spending dashboard; enforcement and editing controls are not yet active.",
+            "Schedules display stored recurring-payment rows in manual-first demo scope and do not autonomously sign or move funds."
+          ],
+          "url": "https://heypayna.xyz/docs/features/budgets-and-schedules"
+        },
+        {
+          "id": "features/activity-and-notifications",
+          "title": "Activity, history, and notifications",
+          "keywords": [
+            "activity",
+            "history",
+            "notification",
+            "status"
+          ],
+          "content": [
+            "Activity separates transaction history from notifications; use receipts and chain-correct explorer links to reconcile every stage.",
+            "Gateway finality notifications are created only after verified settlement evidence updates a pending deposit; unread state is informational in the current UI."
+          ],
+          "url": "https://heypayna.xyz/docs/features/activity-and-notifications"
+        },
+        {
+          "id": "arc/overview-and-swap",
+          "title": "Arc Testnet and swaps",
+          "keywords": [
+            "Arc",
+            "swap",
+            "USDC",
+            "EURC",
+            "cirBTC"
+          ],
+          "content": [
+            "Payna swaps on Arc Testnet use MetaMask, support USDC/EURC/cirBTC, route USDC pairs directly, and route the remaining pair through USDC."
+          ],
+          "url": "https://heypayna.xyz/docs/arc/overview-and-swap"
+        },
+        {
+          "id": "arc/onchain-proof",
+          "title": "Payna onchain proof",
+          "keywords": [
+            "Arc",
+            "proof",
+            "receipt",
+            "contract",
+            "ArcScan"
+          ],
+          "content": [
+            "Payna's Arc proof contract only emits a receipt linking a command, amount, and transaction hashes; it neither holds nor moves funds."
+          ],
+          "url": "https://heypayna.xyz/docs/arc/onchain-proof"
+        },
+        {
+          "id": "commands/wallet-and-balance",
+          "title": "Wallet and balance commands",
+          "keywords": [
+            "wallet",
+            "link",
+            "fund",
+            "balance"
+          ],
+          "content": [
+            "Wallet commands include /wallet, /link, /fund, and /balance; /fund only funds the SCA while /balance combines SCA and Gateway visibility."
+          ],
+          "url": "https://heypayna.xyz/docs/commands/wallet-and-balance"
+        },
+        {
+          "id": "commands/gateway",
+          "title": "Circle Gateway commands",
+          "keywords": [
+            "deposit",
+            "withdraw",
+            "transfer",
+            "gas",
+            "gateway"
+          ],
+          "content": [
+            "Gateway commands include /deposit, /withdraw, /transfer, /gas, and /gateway; transfer is scoped-first and can explicitly fall back to a unified BurnIntentSet."
+          ],
+          "url": "https://heypayna.xyz/docs/commands/gateway"
+        },
+        {
+          "id": "commands/payments",
+          "title": "Payment commands",
+          "keywords": [
+            "pay",
+            "request",
+            "payroll",
+            "contacts"
+          ],
+          "content": [
+            "Payment commands include /pay, /request, /payroll, and /contacts; Payna resolves recipients and requires preview plus confirmation before execution."
+          ],
+          "url": "https://heypayna.xyz/docs/commands/payments"
+        },
+        {
+          "id": "commands/metamask-and-data",
+          "title": "Bridge, swap, and history commands",
+          "keywords": [
+            "bridge",
+            "swap",
+            "history",
+            "MetaMask"
+          ],
+          "content": [
+            "MetaMask and data commands include /bridge, /swap, and /history; bridge and swap need MetaMask signatures while history only reads stored data."
+          ],
+          "url": "https://heypayna.xyz/docs/commands/metamask-and-data"
+        },
+        {
+          "id": "safety-and-support/security",
+          "title": "Safety model",
+          "keywords": [
+            "security",
+            "seed phrase",
+            "confirmation",
+            "testnet"
+          ],
+          "content": [
+            "Payna is testnet-oriented: never share wallet secrets, verify every preview and signature, and inspect submitted work before retrying."
+          ],
+          "url": "https://heypayna.xyz/docs/safety-and-support/security"
+        },
+        {
+          "id": "safety-and-support/troubleshooting",
+          "title": "Troubleshooting",
+          "keywords": [
+            "troubleshooting",
+            "gas",
+            "pending",
+            "MetaMask",
+            "Gateway"
+          ],
+          "content": [
+            "Match the symptom to its last confirmed stage, correct only pre-submission errors, and reconcile any existing hash or transfer ID before retrying."
+          ],
+          "url": "https://heypayna.xyz/docs/safety-and-support/troubleshooting"
+        },
+        {
+          "id": "safety-and-support/faq",
+          "title": "Frequently asked questions",
+          "keywords": [
+            "FAQ",
+            "Payna",
+            "Gateway",
+            "Arc",
+            "AskPayna"
+          ],
+          "content": [
+            "Payna's public, versioned testnet docs explain its wallet and rail boundaries; hashes and citations support investigation, not secret sharing or duplicate retries."
+          ],
+          "url": "https://heypayna.xyz/docs/safety-and-support/faq"
         }
       ]
     }

@@ -17,32 +17,59 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { randomBytes } from "node:crypto";
 import {
   transferGatewayBalanceWithEOA,
+  transferGatewayBurnIntentSetWithEOA,
   executeMintCircle,
   fetchGatewayBalance,
   getUsdcBalance,
   initiateDepositFromCustodialWallet,
   checkWalletGasBalance,
-  estimateGatewayTransferFeeAtomic,
+  buildGatewayBurnIntentPreview,
+  estimateGatewayTransferFee,
+  GatewayForwardingSettlementError,
   isGatewaySignerAuthorized,
   type SupportedChain,
   CIRCLE_CHAIN_NAMES,
   CHAIN_BY_DOMAIN,
-  DOMAIN_IDS,
   GATEWAY_CHAIN_CONFIGS,
-  GATEWAY_MINTER_ADDRESS,
-  GATEWAY_WALLET_ADDRESS,
-  USDC_ADDRESSES,
   supportedGatewayChains,
 } from "@/lib/circle/gateway-sdk";
 import { createClient } from "@/lib/supabase/server";
-import { maxUint256, type Address } from "viem";
+import { type Address } from "viem";
 import { Transaction } from "@circle-fin/developer-controlled-wallets";
 import { circleDeveloperSdk } from "@/lib/circle/sdk";
 import { chainCommandAlias } from "@/lib/paycmd/chains";
+import { isSupportedChain } from "@/lib/paycmd/chains";
 import { requestLocale, tr, type PayCmdLocale } from "@/lib/i18n/server";
 import { recordRaReceipt, updateRaProofColumns } from "@/lib/ra/receipt-registry";
+import {
+  GatewayManualMintUnsupportedError,
+  gatewayActualTransferAmounts,
+  gatewayDestinationTxHash,
+  gatewayFeeBreakdownToDecimal,
+  gatewayForwardingFailureMessage,
+  gatewayForwardingTransferId,
+  gatewayTransferExecutionPlan,
+  gatewayManualMintSupported,
+  gatewaySupportedMintGasModes,
+  gatewayTransferPreflight,
+  usdcAmountToAtomic,
+} from "@/lib/paycmd/gateway-transfer";
+import {
+  quoteUnifiedGatewayTransfer,
+  revalidateUnifiedGatewayTransfer,
+  type UnifiedGatewayQuote,
+} from "@/lib/paycmd/gateway-unified-server";
+import { GatewayUnifiedInsufficientBalanceError } from "@/lib/paycmd/gateway-allocation";
+import {
+  gatewayAllocationGuardFingerprint,
+  parseGatewayAllocationGuard,
+} from "@/lib/paycmd/gateway-allocation-guard";
+import { gatewayUnifiedEstimateResponse } from "@/lib/paycmd/gateway-unified-response";
+import { gatewayUnifiedRequestFields } from "@/lib/paycmd/gateway-transfer-request";
+import { GatewayQuoteChangedError } from "@/lib/paycmd/gateway-unified-revalidation";
 
 function decimalUsdcToAtomic(value: string | number) {
   const [wholeRaw, fractionRaw = ""] = String(value).split(".");
@@ -71,40 +98,6 @@ async function getSourceGatewayBalance(address: Address, sourceChain: SupportedC
   );
 
   return decimalUsdcToAtomic(sourceBalance?.balance ?? "0");
-}
-
-function buildBurnIntentPreview(params: {
-  amount: bigint;
-  sourceChain: SupportedChain;
-  destinationChain: SupportedChain;
-  recipient: Address;
-  sourceDepositor: Address;
-  sourceSigner: Address;
-}) {
-  const maxFee = params.amount > BigInt(10_000_000)
-    ? BigInt(2_010_000)
-    : params.amount / BigInt(10);
-
-  return {
-    maxBlockHeight: maxUint256,
-    maxFee,
-    spec: {
-      version: 1,
-      sourceDomain: DOMAIN_IDS[params.sourceChain],
-      destinationDomain: DOMAIN_IDS[params.destinationChain],
-      sourceContract: GATEWAY_WALLET_ADDRESS as Address,
-      destinationContract: GATEWAY_MINTER_ADDRESS as Address,
-      sourceToken: USDC_ADDRESSES[params.sourceChain] as Address,
-      destinationToken: USDC_ADDRESSES[params.destinationChain] as Address,
-      sourceDepositor: params.sourceDepositor,
-      destinationRecipient: params.recipient,
-      sourceSigner: params.sourceSigner,
-      destinationCaller: "0x0000000000000000000000000000000000000000" as Address,
-      value: params.amount,
-      salt: "0x0000000000000000000000000000000000000000000000000000000000000001" as `0x${string}`,
-      hookData: "0x" as `0x${string}`,
-    },
-  };
 }
 
 function finalityHint(chain: SupportedChain, locale: PayCmdLocale) {
@@ -269,23 +262,33 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const requestBody = await req.json();
   const {
+    sourceMode = "scoped",
     sourceChain,
     destinationChain,
     amount,
     recipientAddress,
-    autoDeposit = true,
+    autoDeposit = false,
     mintGasMode = "auto_forwarding",
     skipReceipt = false,
-  } =
-    await req.json();
+    selectedSourceChains,
+  } = requestBody;
+  const {
+    allocationGuard,
+    allocationFingerprint,
+    preflightOnly,
+  } = gatewayUnifiedRequestFields(requestBody);
 
   try {
-    if (!sourceChain || !destinationChain || !amount) {
+    const unifiedSource = sourceMode === "unified";
+    if ((!unifiedSource && !sourceChain) || !destinationChain || !amount) {
       return NextResponse.json(
         {
           error:
-            "Missing required fields: sourceChain, destinationChain, amount",
+            unifiedSource
+              ? "Missing required fields: destinationChain, amount"
+              : "Missing required fields: sourceChain, destinationChain, amount",
         },
         { status: 400 }
       );
@@ -294,7 +297,7 @@ export async function POST(req: NextRequest) {
     // Validate chains
     const validChains = supportedGatewayChains;
     if (
-      !validChains.includes(sourceChain) ||
+      (!unifiedSource && !validChains.includes(sourceChain)) ||
       !validChains.includes(destinationChain)
     ) {
       return NextResponse.json(
@@ -306,21 +309,23 @@ export async function POST(req: NextRequest) {
     // Same-chain transfers are allowed (withdrawal from Gateway to wallet)
     // Cross-chain transfers will go through Gateway's burn/mint process
 
-    const amountInAtomicUnits = BigInt(Math.floor(parseFloat(amount) * 1_000_000));
+    const amountInAtomicUnits = usdcAmountToAtomic(amount);
     const sourceChainKey = sourceChain as SupportedChain;
     const destinationChainKey = destinationChain as SupportedChain;
-    const isCrossChain = sourceChainKey !== destinationChainKey;
-    const effectiveMintGasMode =
-      mintGasMode === "manual" || !isCrossChain ? "manual" : "auto_forwarding";
-    const useForwarding = effectiveMintGasMode === "auto_forwarding";
+    const executionPlan = gatewayTransferExecutionPlan({
+      sourceChain: sourceChainKey,
+      destinationChain: destinationChainKey,
+      mintGasMode,
+    });
+    const effectiveMintGasMode = executionPlan.mintGasMode;
+    const useForwarding = executionPlan.forwarding;
 
     // Get the user's multichain SCA wallet
     const { data: wallets, error: walletError } = await supabase
       .from("wallets")
-      .select("circle_wallet_id, address")
+      .select("circle_wallet_id, address, type")
       .eq("user_id", user.id)
-      .eq("type", "sca")
-      .limit(1);
+      .in("type", ["sca", "gateway_signer"]);
 
     if (walletError) {
       console.error("Database error fetching wallets:", walletError);
@@ -330,7 +335,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!wallets || wallets.length === 0 || !wallets[0]?.circle_wallet_id) {
+    const scaWallet = wallets?.find((candidate) => candidate.type === "sca");
+    const existingSignerWallet = wallets?.find((candidate) => candidate.type === "gateway_signer");
+    if (!scaWallet?.circle_wallet_id) {
       console.log(`No SCA wallet found for user ${user.id}`);
       return NextResponse.json(
         { error: "No Circle wallet found. Please ensure wallet is created during signup." },
@@ -338,51 +345,191 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const wallet = wallets[0];
+    const wallet = scaWallet;
     const walletId = wallet.circle_wallet_id;
     const walletAddress = wallet.address as Address;
     const recipient = recipientAddress || walletAddress;
     let autoDepositTxHash: string | undefined;
     let autoDepositedAmount = 0;
-    let sourceSignerAddress: Address | undefined;
-    const fallbackGatewayFee = amountInAtomicUnits / BigInt(1000);
-    let estimatedGatewayFee = fallbackGatewayFee;
+    let sourceSignerAddress = existingSignerWallet?.address as Address | undefined;
+    let unifiedQuote: UnifiedGatewayQuote | undefined;
+    let estimatedGatewayFee: bigint;
+    let maximumGatewayFee: bigint;
+    let requiredGatewayBalance: bigint;
+    let feeEstimateKind: "quoted_total" | "max_fee_reserve";
+    let feeBreakdown: ReturnType<typeof gatewayFeeBreakdownToDecimal>;
 
     // Determine if we're using external recipient
     const isExternalRecipient = recipientAddress && recipientAddress.toLowerCase() !== walletAddress.toLowerCase();
 
-    if (!sourceSignerAddress) {
+    try {
+      if (unifiedSource) {
+        const normalizedSelectedSources = Array.isArray(selectedSourceChains)
+          ? selectedSourceChains.filter((chain): chain is SupportedChain =>
+              typeof chain === "string" && isSupportedChain(chain))
+          : undefined;
+        let parsedGuard;
+        try {
+          parsedGuard = parseGatewayAllocationGuard(allocationGuard);
+          if (
+            !allocationFingerprint ||
+            allocationFingerprint !== gatewayAllocationGuardFingerprint(parsedGuard) ||
+            parsedGuard.amountAtomic !== amountInAtomicUnits.toString() ||
+            parsedGuard.destinationChain !== destinationChainKey ||
+            parsedGuard.recipientAddress !== String(recipient).toLowerCase() ||
+            parsedGuard.mintGasMode !== effectiveMintGasMode
+          ) {
+            throw new GatewayQuoteChangedError("allocation_invalid");
+          }
+        } catch (error) {
+          const reason = error instanceof GatewayQuoteChangedError
+            ? error.reason
+            : "allocation_invalid";
+          const refreshed = await quoteUnifiedGatewayTransfer({
+            amountAtomic: amountInAtomicUnits,
+            destinationChain: destinationChainKey,
+            recipient: recipient as Address,
+            sourceDepositor: walletAddress,
+            sourceSigner: sourceSignerAddress,
+            mintGasMode: effectiveMintGasMode,
+            selectedSourceChains: normalizedSelectedSources,
+          });
+          return NextResponse.json({
+            error: "GATEWAY_QUOTE_CHANGED",
+            reason,
+            message: tr(locale, "preview.gatewayQuoteRefreshed"),
+            refreshedEstimate: gatewayUnifiedEstimateResponse(refreshed),
+            partialBurnSubmitted: false,
+            fundsMoved: false,
+            transferSubmitted: false,
+          }, { status: 409 });
+        }
+
+        if (!sourceSignerAddress) {
+          return NextResponse.json({
+            error: "GATEWAY_DELEGATE_REQUIRED",
+            message: "Initialize the persistent Gateway signer, authorize it on every selected source, then wait for finality and preview again.",
+            status: "pending_gateway_authorization",
+            sources: parsedGuard.allocations.map((allocation) => ({
+              sourceChain: allocation.sourceChain,
+              authorizationSupported: Boolean(
+                GATEWAY_CHAIN_CONFIGS[allocation.sourceChain as SupportedChain].circleBlockchain,
+              ),
+              action: GATEWAY_CHAIN_CONFIGS[allocation.sourceChain as SupportedChain].circleBlockchain
+                ? "authorize_delegate"
+                : "exclude_source",
+            })),
+            delegateEndpoint: "/api/gateway/delegate",
+            partialBurnSubmitted: false,
+          }, { status: 409 });
+        }
+
+        try {
+          unifiedQuote = await revalidateUnifiedGatewayTransfer({
+            guard: parsedGuard,
+            amountAtomic: amountInAtomicUnits,
+            destinationChain: destinationChainKey,
+            recipient: recipient as Address,
+            sourceDepositor: walletAddress,
+            sourceSigner: sourceSignerAddress,
+            mintGasMode: effectiveMintGasMode,
+          });
+        } catch (error) {
+          if (!(error instanceof GatewayQuoteChangedError)) throw error;
+          const refreshed = await quoteUnifiedGatewayTransfer({
+            amountAtomic: amountInAtomicUnits,
+            destinationChain: destinationChainKey,
+            recipient: recipient as Address,
+            sourceDepositor: walletAddress,
+            sourceSigner: sourceSignerAddress,
+            mintGasMode: effectiveMintGasMode,
+            selectedSourceChains: parsedGuard.allocations.map(
+              (allocation) => allocation.sourceChain as SupportedChain,
+            ),
+          });
+          return NextResponse.json({
+            error: error.code,
+            reason: error.reason,
+            message: tr(locale, "preview.gatewayQuoteRefreshed"),
+            refreshedEstimate: gatewayUnifiedEstimateResponse(refreshed),
+            partialBurnSubmitted: false,
+            fundsMoved: false,
+            transferSubmitted: false,
+          }, { status: 409 });
+        }
+        estimatedGatewayFee = unifiedQuote.quote.atomicFee;
+        maximumGatewayFee = unifiedQuote.quote.maxFeeAtomic;
+        requiredGatewayBalance = amountInAtomicUnits + maximumGatewayFee;
+        feeEstimateKind = unifiedQuote.quote.feeEstimateKind;
+        feeBreakdown = gatewayFeeBreakdownToDecimal(unifiedQuote.quote.feeBreakdown);
+      } else {
+        const burnIntentPreview = buildGatewayBurnIntentPreview({
+          amount: amountInAtomicUnits,
+          sourceChain: sourceChainKey,
+          destinationChain: destinationChainKey,
+          recipient: recipient as Address,
+          sourceDepositor: walletAddress,
+          // Fee calculation does not depend on the signer address. Use the existing SCA as a
+          // read-only placeholder so an unavailable estimate can never create a signer wallet.
+          sourceSigner: walletAddress,
+        });
+        const preflight = await gatewayTransferPreflight(
+          {
+            amountAtomic: amountInAtomicUnits,
+            sourceChain: sourceChainKey,
+            destinationChain: destinationChainKey,
+            mintGasMode: effectiveMintGasMode,
+          },
+          {
+            estimate: ({ forwarding }) => estimateGatewayTransferFee(
+              burnIntentPreview,
+              { enableForwarder: forwarding },
+            ),
+          },
+        );
+        const gatewayFeeEstimate = preflight.estimate;
+        const feeAmounts = preflight.amounts;
+        estimatedGatewayFee = feeAmounts.estimatedFeeAtomic;
+        maximumGatewayFee = feeAmounts.maxFeeAtomic;
+        requiredGatewayBalance = feeAmounts.requiredGatewayBalanceAtomic;
+        feeEstimateKind = gatewayFeeEstimate.feeEstimateKind;
+        feeBreakdown = gatewayFeeBreakdownToDecimal(gatewayFeeEstimate.feeBreakdown);
+      }
+    } catch (feeEstimateError) {
+      if (feeEstimateError instanceof GatewayUnifiedInsufficientBalanceError) {
+        return NextResponse.json({
+          error: feeEstimateError.code,
+          message: feeEstimateError.message,
+          readyBalance: atomicUsdcToDecimal(feeEstimateError.readyBalanceAtomic),
+          maximumUsableCapacity: atomicUsdcToDecimal(feeEstimateError.maximumUsableCapacityAtomic),
+          shortfall: atomicUsdcToDecimal(feeEstimateError.shortfallAtomic),
+          exclusions: feeEstimateError.exclusions,
+          autoDeposit: false,
+        }, { status: 400 });
+      }
+      const message = feeEstimateError instanceof Error ? feeEstimateError.message : "Gateway fee estimate failed";
+      return NextResponse.json(
+        {
+          error: "GATEWAY_FEE_ESTIMATE_UNAVAILABLE",
+          message,
+          sourceChain,
+          destinationChain,
+          mintGasMode: effectiveMintGasMode,
+        },
+        { status: 503 },
+      );
+    }
+
+    if (!sourceSignerAddress && !unifiedSource) {
       const { getOrCreateGatewayEOAWallet } = await import("@/lib/circle/create-gateway-eoa-wallets");
-      const { address: eoaAddress } = await getOrCreateGatewayEOAWallet(user.id, sourceChain);
+      const { address: eoaAddress } = await getOrCreateGatewayEOAWallet(
+        user.id,
+        unifiedSource ? "MULTICHAIN" : sourceChain,
+      );
       sourceSignerAddress = eoaAddress as Address;
     }
 
-    try {
-      const burnIntentPreview = buildBurnIntentPreview({
-        amount: amountInAtomicUnits,
-        sourceChain: sourceChainKey,
-        destinationChain: destinationChainKey,
-        recipient: recipient as Address,
-        sourceDepositor: walletAddress,
-        sourceSigner: sourceSignerAddress,
-      });
-      if (useForwarding && burnIntentPreview.maxFee < BigInt(1_000_000)) {
-        burnIntentPreview.maxFee = BigInt(1_000_000);
-      }
-
-      const gatewayFeeEstimate = await estimateGatewayTransferFeeAtomic(
-        burnIntentPreview,
-        { enableForwarder: useForwarding },
-      );
-      estimatedGatewayFee =
-        gatewayFeeEstimate > fallbackGatewayFee ? gatewayFeeEstimate : fallbackGatewayFee;
-    } catch (feeEstimateError) {
-      console.warn("Gateway fee estimate failed; falling back to 0.1% buffer.", feeEstimateError);
-    }
-
-    const requiredGatewayBalance = amountInAtomicUnits + estimatedGatewayFee;
-
-    if (!useForwarding) {
+    if (executionPlan.destinationGasPreflight) {
       // PRE-FLIGHT CHECK: Verify gas balance on destination chain BEFORE burning
       const { getGatewayEOAWalletId } = await import("@/lib/circle/create-gateway-eoa-wallets");
 
@@ -429,11 +576,36 @@ export async function POST(req: NextRequest) {
         console.log(`Gas check passed for ${gasCheck.address} on ${destinationChain} (balance: ${gasCheck.balance})`);
       } catch (gasCheckError: any) {
         console.error("Gas pre-flight check failed:", gasCheckError);
-        // Continue anyway - the actual mint will catch this if it's a real issue
+        return NextResponse.json(
+          {
+            error: "DESTINATION_GAS_CHECK_UNAVAILABLE",
+            message: gasCheckError?.message || `Could not verify destination gas on ${destinationChain}.`,
+            chain: destinationChain,
+            stage: "mint",
+          },
+          { status: 503 },
+        );
       }
     }
 
-    if (autoDeposit) {
+    if (!unifiedSource && !autoDeposit) {
+      const gatewayBalance = await getSourceGatewayBalance(walletAddress, sourceChainKey);
+      if (gatewayBalance < requiredGatewayBalance) {
+        const shortfall = requiredGatewayBalance - gatewayBalance;
+        return NextResponse.json({
+          error: "GATEWAY_INSUFFICIENT_SCOPED_BALANCE",
+          message: "The selected source does not have enough ready Gateway balance. Choose an explicit top-up or review unified Gateway sources.",
+          sourceChain,
+          gatewayBalance: atomicUsdcToDecimal(gatewayBalance),
+          requiredGatewayBalance: atomicUsdcToDecimal(requiredGatewayBalance),
+          minimumDepositAmount: atomicUsdcToDecimal(shortfall),
+          fallbackOptions: ["deposit", "burn_intent_set"],
+          autoDeposit: false,
+        }, { status: 400 });
+      }
+    }
+
+    if (!unifiedSource && autoDeposit) {
       const gatewayBalance = await getSourceGatewayBalance(walletAddress, sourceChainKey);
       if (gatewayBalance < requiredGatewayBalance) {
         const pendingDeposits = await getPendingGatewayFinalityDeposits(
@@ -473,6 +645,7 @@ export async function POST(req: NextRequest) {
               gatewayBalance: Number(gatewayBalance) / 1_000_000,
               requiredGatewayBalance: Number(requiredGatewayBalance) / 1_000_000,
               estimatedGatewayFee: Number(estimatedGatewayFee) / 1_000_000,
+              maximumGatewayFee: Number(maximumGatewayFee) / 1_000_000,
               walletBalance: Number(walletUsdcBalance) / 1_000_000,
               requiredAmount: Number(requiredGatewayBalance) / 1_000_000,
             },
@@ -535,66 +708,105 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    if (unifiedSource) {
+      const selectedStatuses = unifiedQuote!.allocations.map((allocation) =>
+        unifiedQuote!.sourceStatuses.find((status) => status.chain === allocation.sourceChain)!);
+      const delegateRequired = selectedStatuses.filter((status) => !status.authorized);
+      if (delegateRequired.length > 0) {
+        return NextResponse.json({
+          error: "GATEWAY_DELEGATE_REQUIRED",
+          message: "Confirm the persistent Gateway signer delegate on every selected source, then wait for finality and preview again.",
+          status: "pending_gateway_authorization",
+          sources: delegateRequired.map((status) => ({
+            sourceChain: status.chain,
+            authorizationSupported: status.authorizationSupported,
+            action: status.authorizationSupported ? "authorize_delegate" : "exclude_source",
+          })),
+          delegateEndpoint: "/api/gateway/delegate",
+          partialBurnSubmitted: false,
+        }, { status: 409 });
+      }
+    }
+
+    if (unifiedSource && preflightOnly) {
+      return NextResponse.json({
+        valid: true,
+        estimate: gatewayUnifiedEstimateResponse(unifiedQuote!),
+        partialBurnSubmitted: false,
+        fundsMoved: false,
+        transferSubmitted: false,
+      });
+    }
+
     if (!sourceSignerAddress) {
       const { getOrCreateGatewayEOAWallet } = await import("@/lib/circle/create-gateway-eoa-wallets");
-      const { address: eoaAddress } = await getOrCreateGatewayEOAWallet(user.id, sourceChain);
+      const { address: eoaAddress } = await getOrCreateGatewayEOAWallet(user.id, "MULTICHAIN");
       sourceSignerAddress = eoaAddress as Address;
     }
 
     let isAuthorized: boolean | null = null;
 
     try {
-      isAuthorized = await isGatewaySignerAuthorized(walletAddress, sourceSignerAddress, sourceChainKey);
+      if (unifiedSource) {
+        isAuthorized = true;
+      } else {
+        isAuthorized = await isGatewaySignerAuthorized(walletAddress, sourceSignerAddress, sourceChainKey);
+      }
     } catch (authorizationError) {
       console.warn("Gateway signer authorization check failed; continuing to burn attempt.", authorizationError);
     }
 
     if (isAuthorized === false) {
-      const sourceGasCheck = await checkWalletGasBalance(walletId, sourceChainKey);
-      if (!sourceGasCheck.hasGas) {
-        return NextResponse.json(
-          {
-            error: "INSUFFICIENT_GAS",
-            walletId,
-            walletAddress: sourceGasCheck.address,
-            walletRole: "sca",
-            blockchain: CIRCLE_CHAIN_NAMES[sourceChainKey] ?? GATEWAY_CHAIN_CONFIGS[sourceChainKey].label,
-            chain: sourceChain,
-            stage: "delegate",
-            message: `Transfer requires native gas on ${sourceChain} to authorize the Gateway signer before burning Gateway balance.`,
-          },
-          { status: 400 },
-        );
-      }
-
-      const delegateTxHash = await initiateDepositFromCustodialWallet(
-        walletId,
-        sourceChainKey,
-        0n,
-        sourceSignerAddress,
-      );
-
-      return gatewayFinalityPendingResponse({
-        amount,
-        sourceChain: sourceChainKey,
-        destinationChain: destinationChainKey,
-        recipient: recipient as Address,
-        txHash: delegateTxHash,
-        stage: "delegate",
-        locale,
-      });
+      return NextResponse.json({
+        error: "GATEWAY_DELEGATE_REQUIRED",
+        message: `Confirm the persistent Gateway signer delegate on ${sourceChain}, then wait for finality and preview again.`,
+        status: "pending_gateway_authorization",
+        sources: [{
+          sourceChain,
+          authorizationSupported: Boolean(GATEWAY_CHAIN_CONFIGS[sourceChainKey].circleBlockchain),
+          action: GATEWAY_CHAIN_CONFIGS[sourceChainKey].circleBlockchain ? "authorize_delegate" : "exclude_source",
+        }],
+        delegateEndpoint: "/api/gateway/delegate",
+        partialBurnSubmitted: false,
+      }, { status: 409 });
     }
 
     // Use EOA-signed burn/mint process for all transfers (same-chain and cross-chain)
-    const { attestation, attestationSignature, transferId, fees, forwardingDetails } = await transferGatewayBalanceWithEOA(
-      user.id,
-      amountInAtomicUnits,
-      sourceChainKey,
-      destinationChainKey,
-      recipient as Address,
-      walletAddress,
-      { enableForwarder: useForwarding }
-    );
+    const transferResult = unifiedSource
+      ? await (() => {
+          const burnIntents = unifiedQuote!.burnIntents.map((intent) => ({
+            ...intent,
+            spec: {
+              ...intent.spec,
+              sourceSigner: sourceSignerAddress!,
+              salt: `0x${randomBytes(32).toString("hex")}` as `0x${string}`,
+            },
+          }));
+          return transferGatewayBurnIntentSetWithEOA(
+            user.id,
+            burnIntents,
+            destinationChainKey,
+            recipient as Address,
+            { enableForwarder: useForwarding },
+          );
+        })()
+      : await transferGatewayBalanceWithEOA(
+          user.id,
+          amountInAtomicUnits,
+          sourceChainKey,
+          destinationChainKey,
+          recipient as Address,
+          walletAddress,
+          { enableForwarder: useForwarding, maxFee: maximumGatewayFee },
+        );
+    const {
+      attestation,
+      attestationSignature,
+      transferId,
+      fees,
+      forwardingDetails,
+      destinationTxHash: forwardedDestinationTxHash,
+    } = transferResult;
 
     let mintTxHash: string | undefined;
     if (!useForwarding) {
@@ -616,6 +828,24 @@ export async function POST(req: NextRequest) {
       mintTxHash = mintTx.txHash;
     }
 
+    const actualFees = forwardingDetails?.fees ?? fees;
+    const destinationTxHash = gatewayDestinationTxHash({
+      mintTxHash,
+      forwardedDestinationTxHash,
+      forwardingDetails,
+    });
+    if (useForwarding && !destinationTxHash) {
+      throw new GatewayForwardingSettlementError(
+        transferId,
+        "Circle's settled response did not include a valid destination transaction hash.",
+      );
+    }
+    const {
+      actualFeeStatus,
+      actualGatewayFee,
+      actualSourceDebit,
+    } = gatewayActualTransferAmounts(amountInAtomicUnits, actualFees);
+
     const attestationHash = attestation;
 
     const { data: transaction, error: transactionError } = await supabase
@@ -623,10 +853,17 @@ export async function POST(req: NextRequest) {
       .insert([
         {
           user_id: user.id,
-          chain: sourceChain,
+          chain: unifiedSource ? "gateway" : sourceChain,
+          source_mode: unifiedSource ? "unified" : "scoped",
+          source_allocations: unifiedQuote?.allocations.map((allocation) => ({
+            sourceChain: allocation.sourceChain,
+            amount: atomicUsdcToDecimal(allocation.valueAtomic),
+            maximumFeeReserve: atomicUsdcToDecimal(allocation.maxFeeAtomic),
+            maximumDebit: atomicUsdcToDecimal(allocation.maximumDebitAtomic),
+          })) ?? null,
           tx_type: "transfer",
           amount: parseFloat(amount),
-          tx_hash: mintTxHash ?? transferId,
+          tx_hash: destinationTxHash ?? null,
           gateway_wallet_address: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9",
           destination_chain: destinationChain,
           status: "success",
@@ -651,16 +888,22 @@ export async function POST(req: NextRequest) {
           userAddress: walletAddress,
           recipientAddress: recipient,
           amount,
-          sourceChain,
+          sourceChain: unifiedSource ? "gateway" : sourceChain,
           destinationChain,
           sourceTxHash: autoDepositTxHash,
-          destinationTxHash: mintTxHash,
+          destinationTxHash,
           metadata: {
             transactionHistoryId: transaction.id,
             transferId,
             forwarding: useForwarding,
             forwardingDetails: forwardingDetails ?? null,
             mintGasMode: effectiveMintGasMode,
+            sourceMode: unifiedSource ? "unified" : "scoped",
+            sourceAllocations: unifiedQuote?.allocations.map((allocation) => ({
+              sourceChain: allocation.sourceChain,
+              amountAtomic: allocation.valueAtomic.toString(),
+              maxFeeAtomic: allocation.maxFeeAtomic.toString(),
+            })) ?? null,
             autoDepositTxHash: autoDepositTxHash ?? null,
           },
         });
@@ -681,17 +924,35 @@ export async function POST(req: NextRequest) {
       transactionId: transaction?.id,
       attestation: attestationHash,
       mintTxHash,
+      destinationTxHash,
       transferId,
-      fees,
+      fees: actualFees,
+      actualFeeStatus,
+      actualGatewayFee,
+      actualSourceDebit,
       forwardingDetails,
       forwarding: useForwarding,
       mintGasMode: effectiveMintGasMode,
       estimatedGatewayFee: Number(estimatedGatewayFee) / 1_000_000,
+      maximumGatewayFee: Number(maximumGatewayFee) / 1_000_000,
       requiredGatewayBalance: Number(requiredGatewayBalance) / 1_000_000,
+      feeEstimateKind,
+      feeBreakdown,
+      supportedMintGasModes: gatewaySupportedMintGasModes(destinationChainKey),
+      manualMintSupported: gatewayManualMintSupported(destinationChainKey),
       autoDeposit: Boolean(autoDepositTxHash),
       autoDepositTxHash,
       autoDepositedAmount,
       sourceChain,
+      sourceMode: unifiedSource ? "unified" : "scoped",
+      sourceAllocations: unifiedQuote?.allocations.map((allocation) => ({
+        sourceChain: allocation.sourceChain,
+        amount: atomicUsdcToDecimal(allocation.valueAtomic),
+        estimatedFee: atomicUsdcToDecimal(allocation.estimatedFeeAtomic),
+        maximumFeeReserve: atomicUsdcToDecimal(allocation.maxFeeAtomic),
+        maximumDebit: atomicUsdcToDecimal(allocation.maximumDebitAtomic),
+        priorityReason: allocation.priorityReason,
+      })) ?? null,
       destinationChain,
       amount: parseFloat(amount),
       recipient,
@@ -714,26 +975,55 @@ export async function POST(req: NextRequest) {
   } catch (error: any) {
     console.error("Error in transfer:", error);
 
+    if (error instanceof GatewayManualMintUnsupportedError) {
+      return NextResponse.json(
+        {
+          error: error.code,
+          message: error.message,
+          destinationChain: error.destinationChain,
+          supportedMintGasModes: error.supportedMintGasModes,
+          manualMintSupported: false,
+        },
+        { status: 422 },
+      );
+    }
+
+    if (/mintGasMode|USDC amount/i.test(error?.message ?? "")) {
+      return NextResponse.json(
+        { error: "INVALID_GATEWAY_TRANSFER", message: error.message },
+        { status: 400 },
+      );
+    }
+
     const forwardingFailureReason = parseForwardingFailure(error);
-    if (forwardingFailureReason) {
+    const forwardingTransferId = gatewayForwardingTransferId(error);
+    if (forwardingTransferId || error instanceof GatewayForwardingSettlementError || forwardingFailureReason) {
       return NextResponse.json(
         {
           error: "GATEWAY_FORWARDING_FAILED",
-          reason: forwardingFailureReason,
-          message:
-            `Circle Forwarding Service failed on-chain (${forwardingFailureReason}). ` +
-            "For pay-to-recipient flows, choose Manual gas and Payna will mint from your Gateway signer instead of relying on the forwarder. " +
-            "If this transfer already submitted, check the transfer status before retrying to avoid sending twice.",
+          reason: forwardingFailureReason ?? error.message,
+          transferId: forwardingTransferId,
+          message: gatewayForwardingFailureMessage(forwardingTransferId),
           sourceChain,
           destinationChain,
           recipient: recipientAddress,
-          retryMintGasMode: "manual",
+          safeToRetry: false,
         },
         { status: 502 },
       );
     }
 
     if (isSignerNotAuthorizedError(error)) {
+      if (sourceMode === "unified") {
+        return NextResponse.json({
+          error: "GATEWAY_DELEGATE_REQUIRED",
+          message: "A selected source is no longer authorized. Re-authorize the persistent delegate and preview the whole set again.",
+          sources: Array.isArray(selectedSourceChains)
+            ? selectedSourceChains.map((sourceChain) => ({ sourceChain, action: "authorize_delegate" }))
+            : [],
+          partialBurnSubmitted: false,
+        }, { status: 409 });
+      }
       return gatewayFinalityPendingResponse({
         amount,
         sourceChain: sourceChain as SupportedChain,
@@ -779,7 +1069,8 @@ export async function POST(req: NextRequest) {
         await supabase.from("transaction_history").insert([
           {
             user_id: user.id,
-            chain: sourceChain,
+            chain: sourceMode === "unified" ? "gateway" : sourceChain,
+            source_mode: sourceMode === "unified" ? "unified" : "scoped",
             tx_type: "transfer",
             amount: parseFloat(amount || 0),
             destination_chain: destinationChain,

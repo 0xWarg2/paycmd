@@ -64,7 +64,7 @@ export function PaymentRequestClient({ requestId }: { requestId: string }) {
         method: "POST",
         body: JSON.stringify({ sourceChain: sourceChain || undefined }),
       });
-      setStatus(`Paid. Tx: ${data.transfer?.mintTxHash ?? data.transfer?.txHash ?? "pending"}`);
+      setStatus(`Paid. Tx: ${data.transfer?.destinationTxHash ?? data.transfer?.mintTxHash ?? data.transfer?.txHash ?? "pending"}`);
       const refreshed = await requestJson(`/api/payment-requests/${requestId}`);
       setRequest(refreshed.request);
     } catch (error) {

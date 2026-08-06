@@ -1,4 +1,4 @@
-import { type PayCmdChain } from "@/lib/paycmd/chains";
+import { type PayCmdChain } from "./chains.ts";
 
 export type PayCmdWeb3Chain = {
   id: number;
@@ -23,7 +23,8 @@ export const web3Chains: Record<PayCmdChain, PayCmdWeb3Chain> = {
     name: "Arc Testnet",
     rpcUrl: `https://rpc.testnet.arc.network/${arcRpcKey}`,
     blockExplorerUrl: "https://testnet.arcscan.app",
-    nativeCurrency: { name: "USD Coin", symbol: "USDC", decimals: 6 },
+    // Arc RPC gas balances use 18-decimal base units. ERC-20 USDC below remains 6 decimals.
+    nativeCurrency: { name: "USD Coin", symbol: "USDC", decimals: 18 },
     usdcAddress: "0x3600000000000000000000000000000000000000",
   },
   arbitrumSepolia: {

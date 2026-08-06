@@ -23,6 +23,7 @@ export default defineConfig([
     ".next/**",
     ".next-build/**",
     ".next-playwright/**",
+    ".worktrees/**",
     "out/**",
     "build/**",
     "next-env.d.ts",

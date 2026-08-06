@@ -4,9 +4,9 @@ import {
   bridgeModeFrom,
   bridgeSpeedFrom,
   normalizeCctpBridgeChain,
-} from "@/lib/paycmd/cctp-bridge";
-import { chainAliases } from "@/lib/paycmd/chains";
-import { normalizeSwapToken } from "@/lib/paycmd/swap";
+} from "./cctp-bridge.ts";
+import { chainAliases } from "./chains.ts";
+import { normalizeSwapToken } from "./swap.ts";
 
 export const commandNames = [
   "wallet",
@@ -239,6 +239,10 @@ function sourceChainFrom(input: string) {
   return chainTokenFrom(input, String.raw`from|từ|tu`);
 }
 
+function gatewaySourceModeFrom(input: string): "scoped" | "unified" {
+  return /\b(?:from|từ|tu)\s+gateway\b/i.test(input) ? "unified" : "scoped";
+}
+
 function destinationChainFrom(input: string) {
   return chainTokenFrom(input, String.raw`to|sang|tới|toi|đến|den`);
 }
@@ -462,18 +466,27 @@ export const commandRegistry: PayCmdCommand[] = [
       const raw = compact(input);
       const amount = amountFrom(raw);
       const token = tokenFrom(raw);
+      const sourceMode = gatewaySourceModeFrom(raw);
       const sourceChain = sourceChainFrom(raw);
       const destinationChain = destinationChainFrom(raw);
       const safeAmount = amountSchema.safeParse(amount).success ? amount : "";
+      const requiredFields = sourceMode === "unified"
+        ? ["amount", "destinationChain"]
+        : this.requiredFields;
 
       return result(
         "transfer",
         raw,
-        { amount: safeAmount, token, sourceChain, destinationChain, mintGasMode: mintGasModeFrom(raw) },
-        this.requiredFields,
+        { amount: safeAmount, token, sourceMode, sourceChain, destinationChain, mintGasMode: mintGasModeFrom(raw) },
+        requiredFields,
         this.sample,
-        sourceChain && destinationChain && safeAmount
-          ? commandText(locale, "transfer.ready", { amount: safeAmount, token, sourceChain, destinationChain })
+        (sourceMode === "unified" || sourceChain) && destinationChain && safeAmount
+          ? commandText(locale, "transfer.ready", {
+              amount: safeAmount,
+              token,
+              sourceChain: sourceMode === "unified" ? "Gateway" : sourceChain,
+              destinationChain,
+            })
           : commandText(locale, "transfer.draft"),
       );
     },
@@ -547,28 +560,32 @@ export const commandRegistry: PayCmdCommand[] = [
     aliases: ["/pay", "pay"],
     title: "Pay contact",
     sample: "/pay 25 to Minh on arc from base",
-    requiredFields: ["amount", "recipient", "destinationChain"],
+    requiredFields: ["amount", "recipient", "sourceChain", "destinationChain"],
     parse(input, locale) {
       const raw = compact(input);
       const amount = amountFrom(raw);
       const token = tokenFrom(raw);
       const recipient = recipientFrom(raw);
       const destinationChain = onChainFrom(raw) || destinationChainFrom(raw);
+      const sourceMode = gatewaySourceModeFrom(raw);
       const sourceChain = sourceChainFrom(raw);
       const safeAmount = amountSchema.safeParse(amount).success ? amount : "";
+      const requiredFields = sourceMode === "unified"
+        ? ["amount", "recipient", "destinationChain"]
+        : this.requiredFields;
 
       return result(
         "pay",
         raw,
-        { amount: safeAmount, token, recipient, destinationChain, sourceChain, mintGasMode: mintGasModeFrom(raw) },
-        this.requiredFields,
+        { amount: safeAmount, token, recipient, destinationChain, sourceMode, sourceChain, mintGasMode: mintGasModeFrom(raw) },
+        requiredFields,
         this.sample,
-        recipient && safeAmount
+        recipient && safeAmount && destinationChain && (sourceMode === "unified" || sourceChain)
           ? commandText(locale, "pay.ready", {
               amount: safeAmount,
               token,
               recipient,
-              chain: destinationChain || commandText(locale, "pay.defaultChain"),
+              chain: destinationChain,
             })
           : commandText(locale, "pay.draft"),
       );

@@ -11,7 +11,6 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
-import { formatUnits } from "viem";
 
 import { getChainMeta } from "@/components/chain-identity";
 import { localeRequestHeaders, translateClient, useI18n } from "@/lib/i18n";
@@ -26,8 +25,18 @@ import {
   gatewayDepositPollingIntervalMs,
   gatewayDepositSettlementsFromSync,
 } from "@/lib/paycmd/gateway-finality";
+import {
+  gatewayReceiptFeeComponents,
+  gatewayTransferAmounts,
+} from "@/lib/paycmd/gateway-transfer";
+import { formatNativeGasBalance } from "@/lib/paycmd/native-gas";
 import { createClient } from "@/lib/supabase/client";
 import { ParsedCommand } from "@/lib/paycmd/commands";
+import {
+  canSafelyRetryExecutionFailure,
+  gatewayTransferSubmitted,
+  parseGatewayAllocationGuardDraftField,
+} from "@/lib/paycmd/ui-models";
 
 export type ExecutionItem = {
   id: string;
@@ -44,6 +53,8 @@ export type ExecutionItem = {
   txHash?: string;
   result?: unknown;
   error?: string;
+  fundsMoved?: boolean;
+  safeToRetry?: boolean;
   // Mirrors the ExecutionItem in components/paycmd-app.tsx, which renders it. Kept in sync here
   // because the two declarations are assigned to each other structurally — a field on only one
   // side compiles fine and then reads as undefined at the render site.
@@ -170,46 +181,39 @@ export function formatDecimalAmount(value: unknown, maxFractionDigits = 6) {
   }).format(numberValue);
 }
 
-export function formatNativeGasBalance(rawBalance: unknown, chain: string) {
-  const meta = getChainMeta(chain);
-  const decimals = meta?.nativeSymbol === "USDC" ? 6 : 18;
-  const symbol = meta?.nativeSymbol ?? "ETH";
-
-  try {
-    const value = typeof rawBalance === "bigint" ? rawBalance : BigInt(String(rawBalance ?? "0"));
-    const formatted = formatUnits(value, decimals);
-    return `${formatDecimalAmount(formatted, 6)} ${symbol}`;
-  } catch {
-    return `0 ${symbol}`;
-  }
-}
-
 function gatewayFeeText(transfer: any, translate: Translator) {
-  const amount = Number(transfer?.amount ?? 0);
-  const estimatedFee = Number(transfer?.estimatedGatewayFee ?? transfer?.fees?.total ?? 0);
-  const required = Number(transfer?.requiredGatewayBalance ?? amount + estimatedFee);
-  const txRef = transfer?.mintTxHash ?? transfer?.txHash ?? transfer?.transferId;
+  const {
+    amount,
+    gatewayFee,
+    sourceDebit,
+    estimatedGatewayFee,
+  } = gatewayTransferAmounts(transfer, "receipt");
+  const txRef = transfer?.destinationTxHash ?? transfer?.mintTxHash ?? transfer?.txHash ?? transfer?.transferId;
   const manualHint =
     transfer?.forwarding
       ? translate("runtime.gatewayFeeAutoHint")
       : translate("runtime.gatewayFeeManualHint");
 
-  if (!amount && !estimatedFee) {
+  if (!amount && gatewayFee === null && !estimatedGatewayFee) {
     return txRef ? `ID: ${txRef}\nMode: ${manualHint}` : `Mode: ${manualHint}`;
   }
 
   const feeLine =
-    estimatedFee > 0
-      ? `${formatDecimalAmount(estimatedFee)} USDC`
-      : translate("runtime.gatewayNoBreakdown");
+    gatewayFee !== null
+      ? `${formatDecimalAmount(gatewayFee)} USDC`
+      : translate("runtime.result.actualFeePending");
+  const components = gatewayReceiptFeeComponents(transfer ?? {}).join(" + ");
 
   return [
     translate("runtime.result.recipient", { value: `${formatDecimalAmount(amount)} USDC` }),
-    translate("runtime.result.sourceDebit", { value: formatDecimalAmount(required) }),
+    sourceDebit !== null
+      ? translate("runtime.result.sourceDebit", { value: `${formatDecimalAmount(sourceDebit)} USDC` })
+      : translate("runtime.result.actualDebitPending"),
     translate("runtime.result.fees", { value: feeLine }),
-    translate("runtime.result.includes", {
-      forwardingFee: transfer?.forwarding ? translate("runtime.result.forwardingFee") : "",
-    }),
+    gatewayFee === null && estimatedGatewayFee > 0
+      ? translate("runtime.result.estimatedFee", { value: formatDecimalAmount(estimatedGatewayFee) })
+      : "",
+    translate("runtime.result.includes", { components }),
     transfer?.forwarding
       ? translate("bridge.destinationGasForwarder")
       : translate("runtime.result.destinationGasSigner"),
@@ -630,11 +634,17 @@ async function executeServerCommand(draft: ParsedCommand) {
     return requestJson("/api/gateway/transfer", {
       method: "POST",
       body: JSON.stringify({
+        sourceMode: draft.fields.sourceMode ?? "scoped",
         sourceChain: draft.fields.sourceChain,
         destinationChain: draft.fields.destinationChain,
         amount: draft.fields.amount,
-        autoDeposit: true,
+        autoDeposit: false,
         mintGasMode: draft.fields.mintGasMode ?? "auto_forwarding",
+        selectedSourceChains: draft.fields.selectedSourceChains
+          ? draft.fields.selectedSourceChains.split(",").filter(Boolean)
+          : undefined,
+        allocationFingerprint: draft.fields.allocationFingerprint || undefined,
+        allocationGuard: parseGatewayAllocationGuardDraftField(draft.fields.allocationGuard),
       }),
     });
   }
@@ -645,9 +655,15 @@ async function executeServerCommand(draft: ParsedCommand) {
       body: JSON.stringify({
         amount: draft.fields.amount,
         recipient: draft.fields.recipient,
+        sourceMode: draft.fields.sourceMode ?? "scoped",
         sourceChain: draft.fields.sourceChain,
         destinationChain: draft.fields.destinationChain,
-        mintGasMode: draft.fields.mintGasMode ?? "manual",
+        mintGasMode: draft.fields.mintGasMode ?? "auto_forwarding",
+        selectedSourceChains: draft.fields.selectedSourceChains
+          ? draft.fields.selectedSourceChains.split(",").filter(Boolean)
+          : undefined,
+        allocationFingerprint: draft.fields.allocationFingerprint || undefined,
+        allocationGuard: parseGatewayAllocationGuardDraftField(draft.fields.allocationGuard),
       }),
     });
   }
@@ -1044,7 +1060,11 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
         }
 
         const result = await executeServerCommand(draft);
-        const txHash = result?.txHash ?? result?.mintTxHash;
+        const txHash =
+          result?.destinationTxHash ??
+          result?.transfer?.destinationTxHash ??
+          result?.txHash ??
+          result?.mintTxHash;
         // A deposit's on-chain transaction succeeding is not the same as the balance being
         // spendable: Circle needs finality/indexing first, measured at ~10 minutes on testnet,
         // and `app/api/gateway/deposit/route.ts` says so by returning this status. Claiming
@@ -1092,7 +1112,12 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
       } catch (error) {
         const message = error instanceof Error ? error.message : t("runtime.commandFailed");
         const errorCode = (error as { code?: string })?.code;
+        const transferSubmitted = gatewayTransferSubmitted((error as { data?: unknown })?.data);
         const waitingGateway = errorCode === "GATEWAY_FINALITY_PENDING";
+        const safeToRetry = !waitingGateway && canSafelyRetryExecutionFailure({
+          errorCode,
+          transferSubmitted,
+        });
         const localizedMessage = waitingGateway
           ? gatewayFinalityPendingText((error as { data?: unknown })?.data, draft, t)
           : message;
@@ -1100,6 +1125,8 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
           ...execution,
           status: waitingGateway ? ("waiting_gateway" as const) : ("failed" as const),
           error: localizedMessage,
+          fundsMoved: transferSubmitted,
+          safeToRetry,
         };
 
         await updateExecutionRecord(failed);

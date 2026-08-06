@@ -17,7 +17,7 @@ import {
   xdcTestnet,
 } from "viem/chains";
 import { defineChain } from "viem";
-import { isSupportedChain } from "@/lib/paycmd/chains";
+import { isSupportedChain } from "./chains.ts";
 
 export const CIRCLE_TESTNET_FAUCET_URL = "https://faucet.circle.com/";
 
