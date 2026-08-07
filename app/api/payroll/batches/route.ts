@@ -1,107 +1,61 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { normalizeChain } from "@/lib/paycmd/chains";
+import { usdcToAtomic } from "@/lib/paycmd/payroll-snapshot";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { data, error } = await supabase
     .from("payroll_batches")
     .select("*, payroll_items(*)")
     .eq("user_id", user.id)
     .order("created_at", { ascending: false });
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
+  if (error) return NextResponse.json({ error: "Could not load payroll batches" }, { status: 500 });
   return NextResponse.json({ batches: data ?? [] });
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(request: NextRequest) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
+  const body = await request.json().catch(() => ({}));
+  const groupId = String(body.groupId ?? "");
+  const amount = String(body.amount ?? "");
+  const sourceChain = normalizeChain(body.sourceChain);
+  const recipientFingerprint = String(body.recipientFingerprint ?? "");
   try {
-    const body = await req.json().catch(() => ({}));
-    const name = String(body.name ?? `batch-${Date.now()}`).trim();
-    const amount = Number(body.amount ?? 0);
-    const sourceChain = normalizeChain(body.sourceChain) || "arcTestnet";
-
-    if (!amount || amount <= 0) {
-      return NextResponse.json({ error: "amount is required" }, { status: 400 });
+    if (!groupId || !sourceChain || !recipientFingerprint || usdcToAtomic(amount) <= 0n) {
+      return NextResponse.json({ error: "Invalid payroll batch input" }, { status: 400 });
     }
-
-    const { data: contacts, error: contactError } = await supabase
-      .from("contacts")
-      .select("id, display_name, wallet_address, preferred_chain")
-      .eq("user_id", user.id)
-      .eq("status", "active")
-      .limit(25);
-
-    if (contactError) {
-      throw new Error(contactError.message);
-    }
-
-    if (!contacts?.length) {
-      return NextResponse.json(
-        { error: "No active contacts found for payroll" },
-        { status: 400 },
-      );
-    }
-
-    const { data: batch, error: batchError } = await supabase
-      .from("payroll_batches")
-      .insert({
-        user_id: user.id,
-        name,
-        source_chain: sourceChain,
-        status: "draft",
-      })
-      .select("*")
-      .single();
-
-    if (batchError) {
-      throw new Error(batchError.message);
-    }
-
-    const items = contacts.map((contact) => ({
-      batch_id: batch.id,
-      contact_id: contact.id,
-      recipient_label: contact.display_name,
-      recipient_address: contact.wallet_address,
-      destination_chain: contact.preferred_chain || "arcTestnet",
-      amount,
-      token: "USDC",
-      status: "queued",
-    }));
-
-    const { data: createdItems, error: itemError } = await supabase
-      .from("payroll_items")
-      .insert(items)
-      .select("*");
-
-    if (itemError) {
-      throw new Error(itemError.message);
-    }
-
-    return NextResponse.json({ batch, items: createdItems ?? [] }, { status: 201 });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not create payroll batch";
-    return NextResponse.json({ error: message }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: "Invalid payroll batch input" }, { status: 400 });
   }
+
+  const { data: batchId, error } = await supabase.rpc("create_payroll_batch_snapshot", {
+    p_group_id: groupId,
+    p_amount: amount,
+    p_source_chain: sourceChain,
+    p_expected_fingerprint: recipientFingerprint,
+  });
+  if (error) {
+    const code = String(error.message ?? "");
+    if (code.includes("PAYROLL_PREVIEW_STALE")) return NextResponse.json({ error: "PAYROLL_PREVIEW_STALE", code: "PAYROLL_PREVIEW_STALE" }, { status: 409 });
+    if (code.includes("PAYROLL_GROUP_NOT_FOUND")) return NextResponse.json({ error: "PAYROLL_GROUP_NOT_FOUND", code: "PAYROLL_GROUP_NOT_FOUND" }, { status: 404 });
+    if (code.includes("PAYROLL_GROUP_EMPTY")) return NextResponse.json({ error: "PAYROLL_GROUP_EMPTY", code: "PAYROLL_GROUP_EMPTY" }, { status: 400 });
+    return NextResponse.json({ error: "Could not create payroll batch" }, { status: 500 });
+  }
+
+  const { data: batch, error: batchError } = await supabase
+    .from("payroll_batches")
+    .select("*, payroll_items(*)")
+    .eq("id", batchId)
+    .eq("user_id", user.id)
+    .single();
+  if (batchError) return NextResponse.json({ error: "Could not load payroll batch" }, { status: 500 });
+  return NextResponse.json({ batch, items: batch.payroll_items ?? [] }, { status: 201 });
 }

@@ -1,6 +1,7 @@
 export type KnowledgeTopic = "payna" | "circle" | "arc" | "web3" | "live";
 export type KnowledgeSource = "payna" | "circle" | "arc" | "web";
 export type GroundingStatus = "verified" | "partial" | "unavailable" | "not_applicable";
+export type WalletContextStatus = "verified" | "partial" | "unavailable";
 
 export type KnowledgeRoute = {
   topics: KnowledgeTopic[];

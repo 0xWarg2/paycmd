@@ -17,10 +17,10 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { fetchGatewayBalance, getUsdcBalance, CHAIN_BY_DOMAIN, supportedGatewayChains } from "@/lib/circle/gateway-sdk";
+import { supportedGatewayChains } from "@/lib/circle/gateway-sdk";
+import { loadGatewayBalanceResponse } from "@/lib/paycmd/ai/wallet-context-server";
 import { isSupportedChain, type PayCmdChain } from "@/lib/paycmd/chains";
 import { createClient } from "@/lib/supabase/server";
-import type { Address } from "viem";
 
 type BalanceRequest = {
   addresses?: string[];
@@ -71,119 +71,9 @@ export async function POST(req: NextRequest) {
     }
 
     const chainsToCheck = chainFilter ? [chainFilter] : supportedGatewayChains;
-
-    // Fetch balances for all addresses
-    const balancePromises = addresses.map(async (address: string) => {
-      try {
-        // Fetch Gateway balance (available balance on Gateway contracts)
-        let gatewayBalances: Array<{ domain: number; balance: number; chain: string }> = [];
-        let gatewayTotal = 0;
-        // Same trap as the per-chain catch below: if this call fails, gatewayTotal stays 0,
-        // which is indistinguishable from "nothing deposited on Gateway" unless we say so.
-        let gatewayUnavailable = false;
-
-        try {
-          const gatewayResponse = await fetchGatewayBalance(address as Address);
-          console.log(`Gateway API response for ${address}:`, JSON.stringify(gatewayResponse, null, 2));
-
-          gatewayBalances = gatewayResponse.balances.map((b) => {
-            // Gateway API returns balance as decimal string (e.g., "1.000000"), not atomic units
-            const balance = parseFloat(b.balance);
-            const chainName = CHAIN_BY_DOMAIN[b.domain] || "unknown";
-
-            console.log(`Gateway balance on domain ${b.domain} (${chainName}): ${balance} USDC`);
-
-            return {
-              domain: b.domain,
-              balance,
-              chain: chainName,
-              address,
-            };
-          }).filter((balance) => !chainFilter || balance.chain === chainFilter);
-
-          gatewayTotal = gatewayBalances.reduce((sum, b) => sum + b.balance, 0);
-          console.log(`Total Gateway balance for ${address}: ${gatewayTotal} USDC`);
-        } catch (error: any) {
-          console.error(`Error fetching Gateway balance for ${address}:`, error.message);
-          console.log(`Will fetch on-chain balances only`);
-          gatewayUnavailable = true;
-        }
-
-        // Fetch on-chain USDC balances (wallet balances not yet deposited)
-        const chainBalances = await Promise.all(
-          chainsToCheck.map(async (chain) => {
-            try {
-              const balance = await getUsdcBalance(address as Address, chain);
-              return {
-                chain,
-                balance: Number(balance) / 1_000_000, // Convert to USDC
-                address,
-              };
-            } catch (error) {
-              // A failed lookup must not masquerade as a zero balance. Returning `balance: 0`
-              // here let a dead RPC silently understate real funds inside a 200 response, so
-              // the UI had no way to tell "no USDC on this chain" from "could not check".
-              const message = error instanceof Error ? error.message : String(error);
-              console.error(`Error fetching on-chain balance for ${chain}:`, message);
-              return {
-                chain,
-                balance: null as number | null,
-                address,
-                error: message,
-              };
-            }
-          })
-        );
-
-        const failedChains = chainBalances.filter((cb) => cb.balance === null).map((cb) => cb.chain);
-
-        // Only successful lookups contribute. With any failedChains this is a floor, not the total.
-        const walletTotal = chainBalances.reduce((sum, cb) => sum + (cb.balance ?? 0), 0);
-
-        return {
-          address,
-          gatewayBalances,
-          gatewayTotal,
-          chainBalances,
-          walletTotal,
-          totalBalance: gatewayTotal + walletTotal,
-          failedChains,
-          gatewayUnavailable,
-        };
-      } catch (error: any) {
-        console.error(`Error fetching balance for ${address}:`, error);
-        return {
-          address,
-          error: error.message,
-          totalBalance: 0,
-          // Nothing was read for this address, so every chain counts as unchecked.
-          failedChains: [...chainsToCheck] as string[],
-          gatewayUnavailable: true,
-        };
-      }
-    });
-
-    const balances = await Promise.all(balancePromises);
-
-    // Calculate total unified balance from all addresses
-    const totalUnified = balances.reduce((sum, b) => {
-      return sum + (b.totalBalance || 0);
-    }, 0);
-
-    // Union across addresses so callers get one flag instead of re-walking every entry.
-    const failedChains = [...new Set(balances.flatMap((b) => b.failedChains ?? []))];
-    const gatewayUnavailable = balances.some((b) => b.gatewayUnavailable);
-
-    return NextResponse.json({
-      success: true,
-      totalUnified,
-      // `totalUnified` only counts chains that answered, so with any failedChains it is a
-      // lower bound. Callers must render it as "at least", never as an exact total.
-      partial: failedChains.length > 0 || gatewayUnavailable,
-      failedChains,
-      gatewayUnavailable,
-      balances,
-    });
+    return NextResponse.json(
+      await loadGatewayBalanceResponse(addresses, chainsToCheck, undefined, chainFilter),
+    );
   } catch (error: any) {
     console.error("Error fetching balances:", error);
     return NextResponse.json(

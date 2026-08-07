@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 
-import { ContactsList, type ContactListItem } from "@/components/contacts-list";
+import { ContactsList, type ContactGroupListItem, type ContactListItem } from "@/components/contacts-list";
 
 const fixtureContacts: ContactListItem[] = [
   {
@@ -21,21 +21,32 @@ const fixtureContacts: ContactListItem[] = [
   },
 ];
 
+const coreTeam: ContactGroupListItem = {
+  id: "group-core-team",
+  name: "Core Team",
+  normalized_name: "core team",
+  members: [fixtureContacts[0]],
+};
+
 export default async function ContactsPreviewPage({
   searchParams,
 }: {
-  searchParams: Promise<{ single?: string }>;
+  searchParams: Promise<{ single?: string; group?: string }>;
 }) {
   if (process.env.NODE_ENV === "production" || process.env.PAYNA_UI_FIXTURE !== "1") {
     notFound();
   }
-  const { single } = await searchParams;
+  const { single, group } = await searchParams;
 
   return (
     <main className="command-center-canvas min-h-dvh p-4 text-foreground md:p-8">
       <div className="mx-auto max-w-3xl">
         <h1 className="mb-6 text-2xl font-semibold">Contacts fixture</h1>
-        <ContactsList initialContacts={single === "1" ? fixtureContacts.slice(0, 1) : fixtureContacts} />
+        <ContactsList
+          initialContacts={single === "1" ? fixtureContacts.slice(0, 1) : fixtureContacts}
+          initialGroups={group === "core-team" ? [coreTeam] : []}
+          previewMode
+        />
       </div>
     </main>
   );

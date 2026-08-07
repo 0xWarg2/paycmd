@@ -4,10 +4,11 @@ title: "Mô hình an toàn"
 description: "Bảo vệ private key, preview, confirmation và ranh giới khôi phục trên testnet."
 section: "safety-and-support"
 order: 70
-lastUpdated: "2026-08-05"
-keywords: ["security", "seed phrase", "confirmation", "testnet"]
+lastUpdated: "2026-08-07"
+keywords: ["security", "seed phrase", "confirmation", "testnet", "preview hết hạn", "15 giây"]
 tutorial: true
 aiSummary:
+  - "Mọi transaction preview hết hạn sau chính xác 15 giây; expiry disable và cancel preview, nên phải submit lại để lấy preview mới."
   - "Payna hướng tới testnet: không chia sẻ secret ví, kiểm tra mọi preview và signature, rồi kiểm tra giao dịch đã submit trước khi retry."
 ---
 
@@ -31,7 +32,11 @@ Circle SCA, Gateway depositor, Gateway signer được ủy quyền và MetaMask
 
 Natural language/parser chỉ chuẩn bị intent, không thể bỏ qua explicit confirmation. Kiểm tra amount, token, rail, chain, full recipient, mint mode, estimated fee, source debit và gas payer. Với swap xem route/minimum output/slippage; với payment/transfer xác nhận source đã nêu.
 
+Mỗi transaction preview có lease chính xác 15 giây. Khi hết hạn, Payna disable control confirm và cancel preview với trạng thái expired; stale confirmation không thể execute. Hãy submit lại command để tạo preview 15 giây mới. Sửa text hoặc đổi mode không làm preview hết hạn hoạt động lại.
+
 Hủy khi bất kỳ trường nào khác yêu cầu của bạn. Mở preview mới sau khi đổi amount, recipient, route, source, destination hoặc mint mode vì quote và balance có thể cũ. Các guide [Gateway fees và forwarding](/docs/circle/gateway/fees-gas-and-forwarding), [CCTP bridge](/docs/circle/cctp-bridge) và [Arc swap](/docs/arc/overview-and-swap) giải thích các bước confirmation bổ sung của từng rail.
+
+AskPayna nằm ngoài execution boundary này. Mode đó không bao giờ tạo, render, confirm hay execute transaction preview, kể cả slash command hoặc transfer-like text. User phải tự chọn action đổi mode; chuyển sang Payna có thể prefill text nhưng không tự submit hay confirm.
 
 ## Kiểm tra address, chain và allowance
 

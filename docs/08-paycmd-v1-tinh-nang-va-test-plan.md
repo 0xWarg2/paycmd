@@ -345,8 +345,8 @@ Lưu ý hiện tại:
 ## 15. Payroll Batch
 
 Tính năng:
-- `/payroll run team 25 from base`: tạo payroll batch từ tối đa 25 active contacts của user.
-- Mỗi contact thành một payroll item.
+- `/payroll run team 25 from base`: tạo payroll batch từ group `team` được chọn rõ ràng, tối đa 25 recipient eligible của user.
+- Mỗi recipient snapshot thành một payroll item; thay đổi membership sau preview sẽ buộc tạo preview mới và confirm lại.
 - Confirm route chạy từng item tuần tự qua Gateway transfer.
 - Batch status: `draft`, `running`, `success`, `partial_failed`, `failed`, `cancelled`.
 
@@ -359,6 +359,7 @@ Cách test:
 6. Trong Supabase, kiểm tra `payroll_batches` và `payroll_items`.
 7. Test partial failure bằng cách dùng một external address hợp lệ nhưng thiếu gas/balance.
 8. Kỳ vọng item lỗi có `status = failed`, batch thành `partial_failed`.
+9. Kỳ vọng item sau item lỗi vẫn chạy; demo không retry, queue hoặc resume batch.
 
 ## 16. Transaction History
 
