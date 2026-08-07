@@ -5,7 +5,7 @@ import {
   bridgeSpeedFrom,
   normalizeCctpBridgeChain,
 } from "./cctp-bridge.ts";
-import { chainAliases } from "./chains.ts";
+import { chainAliases, chainCommandAlias, type PayCmdChain } from "./chains.ts";
 import { normalizeSwapToken } from "./swap.ts";
 
 export const commandNames = [
@@ -91,11 +91,15 @@ const commandMessages: Record<CommandLocale, Record<string, string>> = {
     "request.ready": "Request {amount} {token} từ {payer} trên {destinationChain}",
     "request.draft": "Tạo payment request link",
     "payroll.ready": "Run payroll {batchName} với {amount} USDC mỗi contact",
-    "payroll.draft": "Tạo payroll batch cho contacts active",
+    "payroll.draft": "Tạo payroll batch cho một nhóm contact cụ thể",
     "contacts.list": "List contacts",
     "contacts.add": "Add contact {name}",
     "contacts.internal": "Add internal contact from wallet address",
     "contacts.draft": "Thêm contact nhận tiền",
+    "contacts.groupList": "List contact groups",
+    "contacts.groupCreate": "Create contact group {name}",
+    "contacts.groupDelete": "Delete contact group {name}",
+    "contacts.groupMember": "Update contact group membership",
     "gas.chain": "Kiểm tra gas trên {chain}",
     "gas.draft": "Kiểm tra gas wallet",
     "gateway.balanceChain": "Xem Gateway balance trên {chain}",
@@ -135,11 +139,15 @@ const commandMessages: Record<CommandLocale, Record<string, string>> = {
     "request.ready": "Request {amount} {token} from {payer} on {destinationChain}",
     "request.draft": "Create a payment request link",
     "payroll.ready": "Run payroll {batchName} with {amount} USDC per contact",
-    "payroll.draft": "Create a payroll batch for active contacts",
+    "payroll.draft": "Create a payroll batch for one explicit contact group",
     "contacts.list": "List contacts",
     "contacts.add": "Add contact {name}",
     "contacts.internal": "Add internal contact from wallet address",
     "contacts.draft": "Add a payment contact",
+    "contacts.groupList": "List contact groups",
+    "contacts.groupCreate": "Create contact group {name}",
+    "contacts.groupDelete": "Delete contact group {name}",
+    "contacts.groupMember": "Update contact group membership",
     "gas.chain": "Check gas on {chain}",
     "gas.draft": "Check wallet gas",
     "gateway.balanceChain": "Check Gateway balance on {chain}",
@@ -255,6 +263,56 @@ function recipientFrom(input: string) {
   return input.match(/\bto\s+(.+?)(?:\s+(?:on|from)\s+|$)/i)?.[1]?.trim() ?? "";
 }
 
+const transferAllowedTailPattern = /^(?:manual(?:\s+(?:mint|gas))?|no\s+forwarding|without\s+forwarding|auto(?:\s+forwarding)?)$/i;
+
+/**
+ * `/transfer` always sends to the current user's Circle wallet. Keep recipient-looking text
+ * visible to the preview instead of silently discarding it, so the UI can block confirmation and
+ * direct the user to `/pay`.
+ */
+export function unsupportedTransferRecipientFrom(input: string) {
+  const address = input.match(/\b0x[a-fA-F0-9]{40}\b/)?.[0];
+  if (address) return address;
+
+  const destinationTail = input.match(
+    new RegExp(
+      String.raw`\b(?:to|sang|tới|toi|đến|den)\s+(?:${chainTokenPattern})\b(.*)$`,
+      "i",
+    ),
+  )?.[1]?.trim();
+  if (destinationTail) {
+    const normalizedTail = destinationTail.replace(/^[,;:\-]\s*/, "").trim();
+    if (transferAllowedTailPattern.test(normalizedTail)) return "";
+    const explicitlyNamedRecipient = normalizedTail.match(
+      /^(?:to|cho|tới|toi|đến|den)\s+(.+)$/i,
+    )?.[1];
+    return explicitlyNamedRecipient?.trim() ?? "";
+  }
+
+  const contactStyle = input.match(
+    new RegExp(
+      String.raw`\b(?:to|cho|tới|toi|đến|den)\s+(.+?)\s+(?:on|trên|tren)\s+(?:${chainTokenPattern})\b`,
+      "i",
+    ),
+  )?.[1]?.trim();
+
+  return contactStyle ?? "";
+}
+
+export function suggestedPayCommandFromTransfer(command: ParsedCommand) {
+  if (command.command !== "transfer") return "";
+
+  const recipient = command.fields.unsupportedRecipient?.trim() || unsupportedTransferRecipientFrom(command.raw);
+  const amount = command.fields.amount?.trim();
+  const destinationChain = command.fields.destinationChain as PayCmdChain | undefined;
+  const sourceMode = command.fields.sourceMode === "unified" ? "unified" : "scoped";
+  const sourceChain = command.fields.sourceChain as PayCmdChain | undefined;
+  if (!recipient || !amount || !destinationChain || (sourceMode === "scoped" && !sourceChain)) return "";
+
+  const source = sourceMode === "unified" ? "gateway" : chainCommandAlias(sourceChain!);
+  return `/pay ${amount} ${command.fields.token || "USDC"} to ${recipient} on ${chainCommandAlias(destinationChain)} from ${source}`;
+}
+
 function payerFrom(input: string) {
   return input.match(/\bfrom\s+(.+?)(?:\s+on\s+|$)/i)?.[1]?.trim() ?? "";
 }
@@ -276,6 +334,27 @@ function contactFieldsFrom(input: string) {
   const chain = match?.[3] ? chainAliases[match[3].trim().toLowerCase() as keyof typeof chainAliases] ?? "" : "";
 
   return { name, address, chain };
+}
+
+function contactGroupFieldsFrom(input: string) {
+  const match = input.match(/^\/?contacts\s+group\s+(create|list|delete|add|remove)\b\s*(.*)$/i);
+  const verb = match?.[1]?.toLowerCase() ?? "";
+  const tail = match?.[2]?.trim() ?? "";
+  const action = verb === "create" ? "create_group"
+    : verb === "list" ? "list_groups"
+      : verb === "delete" ? "delete_group"
+        : verb === "add" ? "add_group_member"
+          : verb === "remove" ? "remove_group_member" : "";
+  return {
+    action,
+    groupName: action === "create_group" || action === "delete_group" ? tail : "",
+    contactName: "",
+    memberExpression: action === "add_group_member" || action === "remove_group_member" ? tail : "",
+  };
+}
+
+function payrollGroupNameFrom(input: string) {
+  return input.match(/\b(?:run|create)\s+(.+?)\s+\d+(?:\.\d{1,6})?(?:\s+(?:USDC|EURC))?(?=\s+(?:from|từ|tu)\b|$)/i)?.[1]?.trim() ?? "";
 }
 
 function compact(raw: string) {
@@ -468,7 +547,8 @@ export const commandRegistry: PayCmdCommand[] = [
       const token = tokenFrom(raw);
       const sourceMode = gatewaySourceModeFrom(raw);
       const sourceChain = sourceChainFrom(raw);
-      const destinationChain = destinationChainFrom(raw);
+      const unsupportedRecipient = unsupportedTransferRecipientFrom(raw);
+      const destinationChain = destinationChainFrom(raw) || (unsupportedRecipient ? onChainFrom(raw) : "");
       const safeAmount = amountSchema.safeParse(amount).success ? amount : "";
       const requiredFields = sourceMode === "unified"
         ? ["amount", "destinationChain"]
@@ -477,7 +557,15 @@ export const commandRegistry: PayCmdCommand[] = [
       return result(
         "transfer",
         raw,
-        { amount: safeAmount, token, sourceMode, sourceChain, destinationChain, mintGasMode: mintGasModeFrom(raw) },
+        {
+          amount: safeAmount,
+          token,
+          sourceMode,
+          sourceChain,
+          destinationChain,
+          mintGasMode: mintGasModeFrom(raw),
+          unsupportedRecipient,
+        },
         requiredFields,
         this.sample,
         (sourceMode === "unified" || sourceChain) && destinationChain && safeAmount
@@ -622,11 +710,11 @@ export const commandRegistry: PayCmdCommand[] = [
     aliases: ["/payroll", "payroll"],
     title: "Run payroll",
     sample: "/payroll run team 25 from base",
-    requiredFields: ["action", "batchName", "amount"],
+    requiredFields: ["action", "groupName", "amount", "sourceChain"],
     parse(input, locale) {
       const raw = compact(input);
       const action = raw.match(/\b(run|create)\b/i)?.[1]?.toLowerCase() ?? "";
-      const batchName = raw.match(/\b(?:run|create)\s+([a-zA-Z0-9_-]+)/i)?.[1] ?? "";
+      const groupName = payrollGroupNameFrom(raw);
       const amount = amountFrom(raw);
       const sourceChain = sourceChainFrom(raw);
       const safeAmount = amountSchema.safeParse(amount).success ? amount : "";
@@ -634,11 +722,11 @@ export const commandRegistry: PayCmdCommand[] = [
       return result(
         "payroll",
         raw,
-        { action, batchName, amount: safeAmount, sourceChain },
+        { action, groupName, amount: safeAmount, sourceChain },
         this.requiredFields,
         this.sample,
-        batchName && safeAmount
-          ? commandText(locale, "payroll.ready", { batchName, amount: safeAmount })
+        groupName && safeAmount && sourceChain
+          ? commandText(locale, "payroll.ready", { batchName: groupName, amount: safeAmount })
           : commandText(locale, "payroll.draft"),
       );
     },
@@ -651,6 +739,22 @@ export const commandRegistry: PayCmdCommand[] = [
     requiredFields: ["action", "name", "address"],
     parse(input, locale) {
       const raw = compact(input);
+      const group = contactGroupFieldsFrom(raw);
+      if (group.action) {
+        const requiredFields = group.action === "list_groups"
+          ? ["action"]
+          : group.action === "create_group" || group.action === "delete_group"
+            ? ["action", "groupName"]
+            : ["action", "memberExpression"];
+        const summary = group.action === "list_groups"
+          ? commandText(locale, "contacts.groupList")
+          : group.action === "create_group"
+            ? commandText(locale, "contacts.groupCreate", { name: group.groupName })
+            : group.action === "delete_group"
+              ? commandText(locale, "contacts.groupDelete", { name: group.groupName })
+              : commandText(locale, "contacts.groupMember");
+        return result("contacts", raw, group, requiredFields, this.sample, summary);
+      }
       const action = raw.match(/\b(add|list)\b/i)?.[1]?.toLowerCase() ?? "";
       const contact = contactFieldsFrom(raw);
       const requiredFields =
@@ -794,6 +898,7 @@ export function requiresConfirmation(command: ParsedCommand) {
     command.command === "withdraw" ||
     command.command === "transfer" ||
     command.command === "pay" ||
-    command.command === "payroll"
+    command.command === "payroll" ||
+    (command.command === "contacts" && ["create_group", "delete_group", "add_group_member", "remove_group_member"].includes(command.fields.action))
   );
 }

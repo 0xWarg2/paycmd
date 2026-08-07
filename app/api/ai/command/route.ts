@@ -5,19 +5,22 @@ import { chainAliases, supportedChains } from "@/lib/paycmd/chains";
 import { askDeepSeek } from "@/lib/paycmd/ai/deepseek";
 import { AiAccessError, runDeepSeekWithQuota } from "@/lib/paycmd/ai/access";
 import { commandRouterModel, commandRouterModelProfile } from "@/lib/paycmd/ai/models";
-import { aiCommandResponseSchema } from "@/lib/paycmd/ai/schema";
+import { guardCommandResponse, normalizeIntentDecision, type ChatMode } from "@/lib/paycmd/ai/intent-policy";
+import { aiCommandRequestSchema, aiCommandResponseSchema } from "@/lib/paycmd/ai/schema";
 import { requestLocale, tr, type PayCmdLocale } from "@/lib/i18n/server";
-import { commandRegistry, parsePayCmd, type CommandName } from "@/lib/paycmd/commands";
+import {
+  commandRegistry,
+  parsePayCmd,
+  suggestedPayCommandFromTransfer,
+  unsupportedTransferRecipientFrom,
+  type CommandName,
+} from "@/lib/paycmd/commands";
+import { contactGroupIntentFromNaturalLanguage } from "@/lib/paycmd/contact-group-intent";
 import {
   completePaymentChainFollowUp,
   paymentWaitingForChains,
 } from "@/lib/paycmd/payment-command-context";
 import { createClient } from "@/lib/supabase/server";
-
-type AiCommandRequest = {
-  input?: string;
-  recentMessages?: { role: string; text: string }[];
-};
 
 // Comfortably above the 25s transport timeout below. Without this the platform default applied,
 // which is shorter than the budget this route asks for — and because the deterministic fallback runs
@@ -470,6 +473,22 @@ function deterministicCommandFallback(
   locale: PayCmdLocale,
   recentMessages: { role: string; text: string }[] = [],
 ) {
+  const parsedInput = parsePayCmd(input, locale);
+  const transferPaySuggestion = suggestedPayCommandFromTransfer(parsedInput);
+  if (transferPaySuggestion) {
+    return {
+      intent: "clarify" as const,
+      canonicalCommand: "",
+      assistantText: tr(locale, "ai.transferRecommendPay", {
+        recipient: parsedInput.fields.unsupportedRecipient,
+      }),
+      missingFields: [],
+      suggestions: [transferPaySuggestion],
+      parsedCommand: null,
+      modelProfile: "paycmd-rules-fallback",
+    };
+  }
+
   const deterministicContact = deterministicContactCommand(input, recentMessages, locale);
   if (deterministicContact) {
     const parsedCommand = parsePayCmd(deterministicContact.canonicalCommand, locale);
@@ -527,23 +546,55 @@ function commandRouterResult(
   aiResult: any,
   modelProfile: string,
   locale: PayCmdLocale,
+  mode: ChatMode,
   reasoning?: string,
   input?: string,
 ) {
+  const decision = normalizeIntentDecision(aiResult.decision, input ?? "");
+
   if (aiResult.intent !== "command") {
-    return {
+    return guardCommandResponse(mode, decision, {
       ...aiResult,
+      parsedCommand: null,
+      modelProfile,
+      reasoning: reasoning || undefined,
+    });
+  }
+
+  const canonicalCommand = preserveNamedBalanceChain(aiResult.canonicalCommand, input ?? "");
+  const parsedCommand = parsePayCmd(canonicalCommand, locale);
+  const recipientFromOriginalInput = parsedCommand.command === "transfer"
+    ? unsupportedTransferRecipientFrom(input ?? "")
+    : "";
+  const recommendationDraft = recipientFromOriginalInput && !parsedCommand.fields.unsupportedRecipient
+    ? {
+        ...parsedCommand,
+        raw: input ?? parsedCommand.raw,
+        fields: {
+          ...parsedCommand.fields,
+          unsupportedRecipient: recipientFromOriginalInput,
+        },
+      }
+    : parsedCommand;
+  const suggestedPayCommand = suggestedPayCommandFromTransfer(recommendationDraft);
+
+  if (suggestedPayCommand) {
+    return {
+      intent: "clarify",
+      canonicalCommand: "",
+      assistantText: tr(locale, "ai.transferRecommendPay", {
+        recipient: recommendationDraft.fields.unsupportedRecipient,
+      }),
+      missingFields: [],
+      suggestions: [suggestedPayCommand],
       parsedCommand: null,
       modelProfile,
       reasoning: reasoning || undefined,
     };
   }
 
-  const canonicalCommand = preserveNamedBalanceChain(aiResult.canonicalCommand, input ?? "");
-  const parsedCommand = parsePayCmd(canonicalCommand, locale);
-
   if (parsedCommand.missingFields.length || parsedCommand.status !== "draft_ready") {
-    return {
+    return guardCommandResponse(mode, decision, {
       intent: "clarify",
       canonicalCommand,
       assistantText:
@@ -554,22 +605,23 @@ function commandRouterResult(
       parsedCommand,
       modelProfile,
       reasoning: reasoning || undefined,
-    };
+    });
   }
 
-  return {
+  return guardCommandResponse(mode, decision, {
     ...aiResult,
     canonicalCommand,
     parsedCommand,
     modelProfile,
     reasoning: reasoning || undefined,
-  };
+  });
 }
 
 export async function POST(req: NextRequest) {
   const locale = requestLocale(req);
   let fallbackInput = "";
   let fallbackRecentMessages: { role: string; text: string }[] = [];
+  let fallbackChatMode: ChatMode = "paycmd";
 
   try {
     const supabase = await createClient();
@@ -581,43 +633,89 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = (await req.json().catch(() => ({}))) as AiCommandRequest;
-    const input = body.input?.trim() ?? "";
+    const parsedRequest = aiCommandRequestSchema.safeParse(await req.json().catch(() => ({})));
+    if (!parsedRequest.success) {
+      return NextResponse.json({ error: "invalid command request" }, { status: 400 });
+    }
+
+    const input = parsedRequest.data.input?.trim() ?? "";
+    const chatMode = parsedRequest.data.chatMode;
     fallbackInput = input;
+    fallbackChatMode = chatMode;
 
     if (!input) {
       return NextResponse.json({ error: "input is required" }, { status: 400 });
     }
 
-    const recentMessages = (body.recentMessages ?? []).slice(-8);
+    const recentMessages = (parsedRequest.data.recentMessages ?? []).slice(-8);
     fallbackRecentMessages = recentMessages;
 
     const completedPayment = completePaymentChainFollowUp(input, recentMessages, locale);
     if (completedPayment && !completedPayment.missingFields.length) {
-      return NextResponse.json({
-        intent: "command",
-        canonicalCommand: completedPayment.raw,
-        assistantText: completedPayment.summary,
-        missingFields: [],
-        suggestions: [completedPayment.sample],
-        parsedCommand: completedPayment,
-        modelProfile: "paycmd-rules-fallback",
-      });
+      const decision = normalizeIntentDecision(
+        { speechAct: "action", confidence: "high", reasonCode: "explicit_imperative" },
+        input,
+      );
+      return NextResponse.json(
+        guardCommandResponse(
+          chatMode,
+          decision,
+          {
+            intent: "command",
+            canonicalCommand: completedPayment.raw,
+            assistantText: completedPayment.summary,
+            missingFields: [],
+            suggestions: [completedPayment.sample],
+            parsedCommand: completedPayment,
+            modelProfile: "paycmd-rules-fallback",
+          },
+        ),
+      );
     }
 
     const pendingPayment = paymentWaitingForChains(input, locale);
     if (pendingPayment) {
-      return NextResponse.json({
-        intent: "clarify",
-        canonicalCommand: "",
-        assistantText: tr(locale, "ai.payChainsRequired", {
-          recipient: pendingPayment.fields.recipient,
+      const decision = normalizeIntentDecision(
+        { speechAct: "action", confidence: "high", reasonCode: "explicit_imperative" },
+        input,
+      );
+      return NextResponse.json(
+        guardCommandResponse(
+          chatMode,
+          decision,
+          {
+            intent: "clarify",
+            canonicalCommand: "",
+            assistantText: tr(locale, "ai.payChainsRequired", {
+              recipient: pendingPayment.fields.recipient,
+            }),
+            missingFields: pendingPayment.missingFields,
+            suggestions: [pendingPayment.sample],
+            parsedCommand: pendingPayment,
+            modelProfile: "paycmd-rules-fallback",
+          },
+        ),
+      );
+    }
+
+    const contactGroupIntent = contactGroupIntentFromNaturalLanguage(input, locale);
+    if (contactGroupIntent) {
+      const parsedCommand = parsePayCmd(contactGroupIntent.canonicalCommand, locale);
+      const decision = normalizeIntentDecision(
+        { speechAct: "action", confidence: "high", reasonCode: "explicit_imperative" },
+        input,
+      );
+      return NextResponse.json(
+        guardCommandResponse(chatMode, decision, {
+          intent: "command",
+          canonicalCommand: contactGroupIntent.canonicalCommand,
+          assistantText: contactGroupIntent.assistantText,
+          missingFields: [],
+          suggestions: [parsedCommand.sample],
+          parsedCommand,
+          modelProfile: "paycmd-rules-contact-groups",
         }),
-        missingFields: pendingPayment.missingFields,
-        suggestions: [pendingPayment.sample],
-        parsedCommand: pendingPayment,
-        modelProfile: "paycmd-rules-fallback",
-      });
+      );
     }
 
     const appContext = await getAppContext(user.id);
@@ -632,8 +730,12 @@ export async function POST(req: NextRequest) {
       // `.default("")`, meaning a response that omits it still validates and then silently parses as
       // an unknown command. Describing the keys in the prompt is the only thing preventing that.
       "Output exactly this json object and no other keys:",
-      '{"intent":"command"|"clarify"|"answer"|"crypto_research","canonicalCommand":string,"assistantText":string,"missingFields":string[],"suggestions":string[]}',
+      '{"intent":"command"|"clarify"|"answer"|"crypto_research","canonicalCommand":string,"assistantText":string,"missingFields":string[],"suggestions":string[],"decision":{"speechAct":"action"|"question"|"ambiguous","confidence":"high"|"medium"|"low","reasonCode":"explicit_imperative"|"explicit_slash_command"|"informational_question"|"missing_action_commitment"|"conflicting_signals"}}',
       'canonicalCommand: one slash command from the supported command list with every value filled in, for example "/pay 25 to Minh on arc from base". Use "" for any intent other than "command".',
+      "Classify the user's speech act independently of chat mode. Questions ask for information and must never become executable commands.",
+      'Classify "Làm sao gửi 50 USDC sang Arc nhanh nhất?" as a question with reasonCode "informational_question".',
+      'Classify "How do I transfer USDC?" as a question with reasonCode "informational_question".',
+      'Classify "Gửi 50 USDC cho Minh từ Base sang Arc" as an action with reasonCode "explicit_imperative".',
       'missingFields: the requiredFields names you could not fill. Empty array unless intent is "clarify".',
       "suggestions: up to 3 slash commands the user may want next.",
       "The supported command list below uses the keys name/title/sample/requiredFields. That describes the available commands; it is not the shape of your output.",
@@ -647,6 +749,8 @@ export async function POST(req: NextRequest) {
       "If the message could be a Payna action such as pay, transfer, swap, fund, deposit, withdraw, balance, wallet, contact, gas, payroll, or payment request, prefer command or clarify over crypto_research.",
       "For a balance request that names a chain or testnet, canonicalCommand must be /balance on <that chain>; never widen it to /balance.",
       "All payment/fund/deposit/withdraw/transfer/payroll commands will be previewed and confirmed by the user later.",
+      "Transfer is self-transfer only: it moves Gateway funds to the current user's Circle wallet. If the user names a contact or another wallet address, recommend /pay and never silently discard that recipient.",
+      "Contact-group actions are supported. Canonical grammar: /contacts group create <name>, /contacts group list, /contacts group add <group name> <existing contact name>, /contacts group remove <group name> <existing contact name>, or /contacts group delete <name>. Do not invent contacts or silently delete a group.",
       `Gateway chains: ${gatewayChainPromptHints()}.`,
       `Bridge chains (testnet MetaMask rail): ${cctpBridgeChainConfigs.map((chain) => `${chain.aliases[0]} -> ${chain.key}`).join(", ")}.`,
       "Swap is Arc Testnet only and supports USDC, EURC, and cirBTC. Canonical swap format: /swap <amount> <tokenIn> to <tokenOut>.",
@@ -654,6 +758,7 @@ export async function POST(req: NextRequest) {
       JSON.stringify(commandCatalog()),
       "Current app context:",
       JSON.stringify(appContext),
+      `Current chat mode: ${chatMode}`,
       "Recent chat:",
       JSON.stringify(recentMessages),
       `User input: ${input}`,
@@ -691,7 +796,11 @@ export async function POST(req: NextRequest) {
         rawTail: response.text.slice(-120),
       });
       return NextResponse.json({
-        ...deterministicCommandFallback(input, locale, recentMessages),
+        ...guardCommandResponse(
+          chatMode,
+          normalizeIntentDecision({}, input),
+          deterministicCommandFallback(input, locale, recentMessages),
+        ),
         // Empty while `thinking` is off above, but this is the most valuable place to have a trace if
         // it is ever turned back on — it is the branch where the model answered and we could not use
         // what it said.
@@ -710,13 +819,27 @@ export async function POST(req: NextRequest) {
         missingFields: parsedOutput.data.missingFields,
       });
       return NextResponse.json({
-        ...deterministicCommandFallback(input, locale, recentMessages),
+        ...guardCommandResponse(
+          chatMode,
+          normalizeIntentDecision({}, input),
+          deterministicCommandFallback(input, locale, recentMessages),
+        ),
         reasoning: response.reasoning || undefined,
         quota,
       });
     }
     return NextResponse.json(
-      { ...commandRouterResult(parsedOutput.data, commandRouterModelProfile, locale, response.reasoning, input), quota },
+      {
+        ...commandRouterResult(
+          parsedOutput.data,
+          commandRouterModelProfile,
+          locale,
+          chatMode,
+          response.reasoning,
+          input,
+        ),
+        quota,
+      },
     );
   } catch (error: any) {
     if (error instanceof AiAccessError) {
@@ -726,7 +849,15 @@ export async function POST(req: NextRequest) {
       );
     }
     console.error("DeepSeek command router failed:", error);
-    if (fallbackInput) return NextResponse.json(deterministicCommandFallback(fallbackInput, locale, fallbackRecentMessages));
+    if (fallbackInput) {
+      return NextResponse.json(
+        guardCommandResponse(
+          fallbackChatMode,
+          normalizeIntentDecision({}, fallbackInput),
+          deterministicCommandFallback(fallbackInput, locale, fallbackRecentMessages),
+        ),
+      );
+    }
     return NextResponse.json({ error: error.message || "Failed to parse AI command" }, { status: 500 });
   }
 }

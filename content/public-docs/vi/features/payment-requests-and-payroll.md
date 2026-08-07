@@ -4,17 +4,17 @@ title: "Payment requests và payroll"
 description: "Tách inbound payment-request link khỏi outbound payroll batch cần confirm."
 section: "features"
 order: 42
-lastUpdated: "2026-08-05"
+lastUpdated: "2026-08-07"
 keywords: ["request", "payment link", "payroll", "batch"]
 tutorial: true
 aiSummary:
-  - "Payment request tạo inbound link hoặc QR ở trạng thái pending; payroll tạo và confirm outbound Gateway payments cho tối đa 25 active contacts."
-  - "Payroll hiện recipient count và aggregate amount trước execution, rồi giữ success hoặc failure theo từng item và toàn batch."
+  - "Payment request tạo inbound link hoặc QR ở trạng thái pending; payroll tạo và confirm outbound Gateway payments cho tối đa 25 thành viên hợp lệ của một contact group đã chọn rõ ràng."
+  - "Payroll chụp recipient snapshot có fingerprint, hiện tổng chính xác trước execution, rồi giữ success hoặc failure theo từng item và toàn batch."
 ---
 
 ## Hai workflow ngược chiều
 
-Payment request và payroll đều liên quan nhiều người, nhưng hướng tiền và quyền hạn khác nhau. `/request 25 from Minh on arc` tạo inbound request: requester muốn nhận 25 USDC. Nó không debit Minh. `/payroll run team 25 from base` chuẩn bị outbound payments: operator đang đăng nhập muốn gửi 25 USDC cho mỗi active contact được chọn.
+Payment request và payroll đều liên quan nhiều người, nhưng hướng tiền và quyền hạn khác nhau. `/request 25 from Minh on arc` tạo inbound request: requester muốn nhận 25 USDC. Nó không debit Minh. `/payroll run team 25 from base` chuẩn bị outbound payments: operator đang đăng nhập muốn gửi 25 USDC cho mỗi thành viên hợp lệ của group `team`.
 
 Không dùng request làm bằng chứng payment đã xảy ra, và không dùng payroll khi mỗi recipient cần amount khác nhau. Command payroll hiện tại áp dụng một amount cho mọi contact được đưa vào.
 
@@ -32,21 +32,23 @@ Sau transfer thành công, Payna chuyển request sang `paid`, lưu payer và pa
 
 ## Chuẩn bị payroll recipient
 
-Payroll Payna hiện tại tạo recipient list từ tối đa 25 contact có status `active`. Mỗi item snapshot contact ID, label, wallet address, preferred destination chain, common per-recipient amount và token USDC. Inactive contact bị loại. Active list trống sẽ chặn tạo batch.
+Tạo group trong Contacts hoặc bằng `/contacts group create Team`, sau đó thêm contact bằng `/contacts group add Team Minh`. Payroll luôn yêu cầu một group name rõ ràng; không có fallback “toàn bộ contacts active”. Tối đa 25 thành viên có status `active`, địa chỉ EVM hợp lệ và destination chain đã lưu được đưa vào snapshot. Inactive hoặc địa chỉ không hợp lệ hiện là excluded; không làm batch fail nếu vẫn còn recipient hợp lệ.
+
+Mỗi item snapshot contact ID, label, wallet address, preferred destination chain, common per-recipient amount và token USDC. Snapshot cũng có recipient fingerprint: nếu membership hoặc recipient hợp lệ đổi sau lúc review, Payna từ chối batch cũ, tạo preview mới 15 giây và bắt confirm lại.
 
 Command flow hiện chưa có CSV upload control. Nếu team bắt đầu từ CSV, hãy validate ngoài Payna, rồi add và review contacts trước khi tạo batch. Kiểm tra tên bắt buộc, địa chỉ EVM đầy đủ, destination chain, dòng trùng, active status và identity internal hay external. Một spreadsheet row không ghi đè contact đã lưu trong Payna.
 
 ## Aggregate preview và confirmation
 
-Trước confirmation, Payna load active contacts, giới hạn tập ở 25 và hiện recipient count. Total exposure bằng amount mỗi contact nhân số người nhận. Confirm button ghi aggregate USDC total và recipient count; nút bị disable khi list đang load, không có active recipient hoặc validation lỗi.
+Trước confirmation, Payna load chính xác group đã chọn, giới hạn tập ở 25 và hiện recipient count, excluded count, per-recipient amount, aggregate total, source chain và danh sách recipient có thể mở rộng. Total exposure được tính bằng USDC six-decimal arithmetic, không bằng JavaScript floating point. Confirm button ghi aggregate USDC total và recipient count; nút bị disable khi preview đang load, không có recipient hợp lệ hoặc validation lỗi.
 
-Kiểm tra batch name, source chain, per-recipient amount, aggregate total và Contacts directory. Preview mô tả recipient set là active contacts thay vì hiện mọi địa chỉ đầy đủ inline, nên review danh bạ là bước bổ sung bắt buộc. Confirmation authorize toàn bộ batch boundary, không tạo payroll policy không giới hạn.
+Kiểm tra group, source chain, per-recipient amount, aggregate total, excluded rows và Contacts directory. Confirmation authorize đúng snapshot đó, không tạo payroll policy không giới hạn.
 
 ## Execution và partial failure
 
 Sau confirm, batch chuyển từ `draft` sang `running`. Payna xử lý item tuần tự qua Gateway bằng source chain của batch, destination và address đã lưu của từng item, cùng auto forwarding. Mỗi item đi qua `queued`, `running`, rồi `success` hoặc `failed`; item thành công lưu transaction reference, còn item lỗi lưu error.
 
-Item đã thành công không rollback khi payment sau thất bại. Batch cuối cùng là `success`, `failed` hoặc `partial_failed` theo item result. Vì vậy đừng chạy lại toàn command chỉ vì một recipient lỗi: trước tiên đối soát item nào đã chuyển tiền, rồi chỉ xử lý phần chưa trả.
+Item đã thành công không rollback khi payment sau thất bại. Nếu item thứ 10 fail, item 11–25 vẫn tiếp tục theo thứ tự. Batch cuối cùng là `success`, `failed` hoặc `partial_failed` theo item result. Bản demo này không có retry tự động, queue, resume batch hay parallel processing. Vì vậy đừng chạy lại toàn command chỉ vì một recipient lỗi: trước tiên đối soát item nào đã chuyển tiền, rồi chỉ xử lý phần chưa trả.
 
 ## History và đối soát
 

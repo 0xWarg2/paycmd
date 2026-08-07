@@ -2,26 +2,33 @@
 
 import { Activity, Bell, ChevronDown, Contact, MessageCircle, MoreHorizontal, Network, ShieldCheck, Wallet, WalletCards } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
-import { CommandPalette } from "@/components/paycmd-app";
+import {
+  AssistantActionBar,
+  CommandPalette,
+  CommandPreviewCard,
+  ModeBoundCommandPreview,
+  useChatModeBoundary,
+  type AssistantAction,
+} from "@/components/paycmd-app";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { TransactionHistory, type Transaction } from "@/components/transaction-history";
 import {
   ExecutionTimeline,
-  TransactionConfirmActions,
-  TransactionPreviewFields,
-  TransactionSafetyHeader,
 } from "@/components/paycmd/transaction-safety";
-import { buildTransactionPreviewModel } from "@/lib/paycmd/ui-models";
+import { createPreviewExpiresAt } from "@/lib/paycmd/preview-lease";
+import type { ParsedCommand } from "@/lib/paycmd/commands";
 
-const preview = buildTransactionPreviewModel({
+const previewDraft: ParsedCommand = {
   command: "bridge",
+  raw: "/bridge 50 USDC from baseSepolia to arcTestnet",
   summary: "Bridge 50 USDC to Arc Testnet",
   fields: {
     amount: "50",
@@ -31,7 +38,51 @@ const preview = buildTransactionPreviewModel({
     recipientAddress: "0x1111…1111",
     bridgeMintMode: "auto_forwarding",
   },
-});
+  missingFields: [],
+  sample: "/bridge 50 USDC from baseSepolia to arcTestnet",
+  status: "draft_ready",
+};
+
+type PreviewLeaseFixture = "live" | "expired" | "legacy";
+
+function ProductionPreviewLeaseFixture({ lease }: { lease: PreviewLeaseFixture }) {
+  const [previewExpiresAt] = useState<string | undefined>(() => {
+    const now = Date.now();
+    if (lease === "expired") return new Date(now - 1).toISOString();
+    if (lease === "legacy") return undefined;
+    return createPreviewExpiresAt(now);
+  });
+  const [metadata, setMetadata] = useState<{
+    draftState: "active" | "cancelled";
+    cancellationReason?: "expired";
+  }>({ draftState: "active" });
+  const [cancellationCount, setCancellationCount] = useState(0);
+  const cancelPreview = useCallback((cancellationReason?: "expired") => {
+    setCancellationCount((count) => count + 1);
+    setMetadata((current) =>
+      current.draftState === "cancelled"
+        ? current
+        : { draftState: "cancelled", cancellationReason },
+    );
+  }, []);
+
+  return (
+    <>
+      <CommandPreviewCard
+        draft={previewDraft}
+        state={metadata.draftState}
+        isActive={metadata.draftState === "active"}
+        previewExpiresAt={previewExpiresAt}
+        cancellationReason={metadata.cancellationReason}
+        onConfirm={() => undefined}
+        onCancel={cancelPreview}
+      />
+      <output data-testid="preview-lease-metadata" className="sr-only">
+        {metadata.draftState}:{metadata.cancellationReason ?? "none"}:{cancellationCount}
+      </output>
+    </>
+  );
+}
 
 const previewTransactions: Transaction[] = [
   {
@@ -49,8 +100,102 @@ const previewTransactions: Transaction[] = [
   },
 ];
 
+function ModeSafetyFixture() {
+  const [activeDraftId, setActiveDraftId] = useState<string | null>("mode-safety-preview");
+  const [draftState, setDraftState] = useState<"active" | "cancelled">("active");
+  const [input, setInput] = useState("");
+  const [confirmedCount, setConfirmedCount] = useState(0);
+  const [retriedCount, setRetriedCount] = useState(0);
+  const [submittedCount] = useState(0);
+  const [researchCount, setResearchCount] = useState(0);
+  const [previewExpiresAt] = useState(() => new Date(Date.now() + 300_000).toISOString());
+
+  function cancelActiveDraft() {
+    setDraftState("cancelled");
+    setActiveDraftId(null);
+  }
+
+  const { chatMode, changeChatMode, canRunPaynaAction } = useChatModeBoundary({
+    activeDraftId,
+    onCancelActiveDraft: cancelActiveDraft,
+  });
+  const staleConfirmRef = useRef(() => {
+    if (canRunPaynaAction()) setConfirmedCount((count) => count + 1);
+  });
+  const staleRetryRef = useRef(() => {
+    if (canRunPaynaAction()) setRetriedCount((count) => count + 1);
+  });
+  const actions: AssistantAction[] = [
+    { kind: "retry_command", label: "Retry command", draft: previewDraft },
+    {
+      kind: "switch_to_paycmd",
+      label: "Switch to Payna",
+      query: "/pay 50 USDC to Minh on arc from base",
+    },
+    {
+      kind: "switch_to_asksurf",
+      label: "Switch to AskPayna",
+      query: "What is Circle Gateway?",
+    },
+  ];
+
+  return (
+    <main className="mx-auto max-w-3xl space-y-5 p-8">
+      <h1 className="text-xl font-semibold">Chat mode safety fixture</h1>
+      <div className="flex gap-2">
+        <Button type="button" onClick={() => changeChatMode("paycmd")}>Select Payna</Button>
+        <Button type="button" variant="outline" onClick={() => changeChatMode("asksurf")}>Select AskPayna</Button>
+      </div>
+      <Input aria-label="Mode safety input" value={input} onChange={(event) => setInput(event.target.value)} />
+      <ModeBoundCommandPreview
+        chatMode={chatMode}
+        fallback={<p>Preview controls are unavailable in AskPayna.</p>}
+        draft={previewDraft}
+        state={draftState}
+        isActive={activeDraftId !== null && draftState === "active"}
+        previewExpiresAt={previewExpiresAt}
+        onConfirm={() => staleConfirmRef.current()}
+        onCancel={cancelActiveDraft}
+      />
+      <p>This question requires AskPayna consent.</p>
+      <AssistantActionBar
+        chatMode={chatMode}
+        actions={actions}
+        onAskSurf={() => {
+          changeChatMode("asksurf");
+          setResearchCount((count) => count + 1);
+        }}
+        onPayCmd={(query) => {
+          changeChatMode("paycmd");
+          setInput(query);
+        }}
+        onRetry={() => staleRetryRef.current()}
+      />
+      <div className="flex gap-2">
+        <Button type="button" variant="outline" onClick={() => staleConfirmRef.current()}>
+          Invoke stale confirm callback
+        </Button>
+        <Button type="button" variant="outline" onClick={() => staleRetryRef.current()}>
+          Invoke stale retry callback
+        </Button>
+      </div>
+      <output data-testid="mode-safety-state">
+        {chatMode}:{draftState}:confirmed={confirmedCount}:retried={retriedCount}:submitted={submittedCount}:research={researchCount}
+      </output>
+    </main>
+  );
+}
+
 export function CommandCenterPreview() {
+  const searchParams = useSearchParams();
   const [paletteInput, setPaletteInput] = useState("/balance a");
+  const requestedLease = searchParams.get("previewLease");
+  const previewLease: PreviewLeaseFixture =
+    requestedLease === "expired" || requestedLease === "legacy" ? requestedLease : "live";
+
+  if (searchParams.get("modeSafety") === "1") {
+    return <ModeSafetyFixture />;
+  }
 
   return (
     <main className="command-center-canvas min-h-dvh text-foreground">
@@ -113,16 +258,7 @@ export function CommandCenterPreview() {
             <div className="mx-auto grid max-w-5xl gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(280px,.75fr)]">
               <Card className="command-panel overflow-hidden">
                 <CardContent className="space-y-5 p-5 md:p-6">
-                  <TransactionSafetyHeader
-                    title={preview.summary}
-                    description="Review the route and estimated settlement details before signing."
-                    rail="CCTP v2"
-                  />
-                  <TransactionPreviewFields model={preview} />
-                  <div className="rounded-xl border border-info/30 bg-info/8 px-3 py-2 text-xs leading-5 text-info-foreground">
-                    MetaMask will request approval on Base Sepolia. Destination gas is handled by forwarding.
-                  </div>
-                  <TransactionConfirmActions confirmLabel={preview.confirmLabel} />
+                  <ProductionPreviewLeaseFixture lease={previewLease} />
                 </CardContent>
               </Card>
 
