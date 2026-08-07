@@ -2433,9 +2433,10 @@ async function executeCommand(draft: ParsedCommand) {
     const created = await requestJson("/api/payroll/batches", {
       method: "POST",
       body: JSON.stringify({
-        name: draft.fields.groupName,
+        groupId: draft.fields.groupId,
         amount: draft.fields.amount,
         sourceChain: draft.fields.sourceChain,
+        recipientFingerprint: draft.fields.recipientFingerprint,
       }),
     });
 
@@ -3435,6 +3436,7 @@ export function PayCmdApp() {
       };
       const message = error instanceof Error ? error.message : "Command failed";
       const errorCode = raw?.code;
+      const payrollPreviewStale = draft.command === "payroll" && errorCode === "PAYROLL_PREVIEW_STALE";
       const waitingGateway = errorCode === "GATEWAY_FINALITY_PENDING";
       const transferSubmitted = gatewayTransferSubmitted(raw?.data);
 
@@ -3459,12 +3461,18 @@ export function PayCmdApp() {
       );
 
       await addSystemStatus(
-        message,
+        payrollPreviewStale ? t("preview.payrollStale") : message,
         failed,
         canRetrySafely
           ? [{ kind: "retry_command" as const, label: t("action.retryCommand"), draft }]
           : undefined,
       );
+
+      // Membership is a live source of truth. The batch RPC rejected the old fingerprint before
+      // creating anything, so issue a brand-new 15s preview rather than silently retrying it.
+      if (payrollPreviewStale) {
+        await submitPaynaSlashCommand(draft.raw);
+      }
     }
   }
 
@@ -6726,8 +6734,18 @@ export function CommandPreviewCard({
   const [gatewayDelegateMessage, setGatewayDelegateMessage] = useState("");
   const [gatewayPreflightLoading, setGatewayPreflightLoading] = useState(false);
   const [gatewayRefreshMessage, setGatewayRefreshMessage] = useState("");
-  const [payrollRecipientCount, setPayrollRecipientCount] = useState<number | null>(null);
-  const [payrollRecipientError, setPayrollRecipientError] = useState("");
+  const [payrollPreview, setPayrollPreview] = useState<{
+    groupId: string;
+    groupName: string;
+    recipients: Array<{ contactId: string; label: string; address: string; destinationChain: string }>;
+    excluded: Array<{ contactId?: string; label?: string; reason: string }>;
+    sourceChain: string;
+    recipientFingerprint: string;
+    recipientCount: number;
+    perRecipientAmount: string;
+    totalAmount: string;
+  } | null>(null);
+  const [payrollPreviewError, setPayrollPreviewError] = useState("");
   const manualMintSupported = gatewayManualMintSupported(previewDestinationChain);
   const manualMintUnavailableMessage = previewDestinationChain
     ? t("preview.manualMintUnavailable", {
@@ -6774,26 +6792,35 @@ export function CommandPreviewCard({
     if (!isPayroll || !isActive) return;
 
     let cancelled = false;
-    setPayrollRecipientCount(null);
-    setPayrollRecipientError("");
-    void requestJson("/api/contacts")
+    setPayrollPreview(null);
+    setPayrollPreviewError("");
+    if (!draft.fields.groupName || !draft.fields.amount || !draft.fields.sourceChain) {
+      setPayrollPreviewError(t("preview.payrollLoadFailed"));
+      return;
+    }
+    void requestJson("/api/payroll/preview", {
+      method: "POST",
+      body: JSON.stringify({
+        groupName: draft.fields.groupName,
+        amount: draft.fields.amount,
+        sourceChain: draft.fields.sourceChain,
+      }),
+    })
       .then((result) => {
         if (cancelled) return;
-        const contacts: unknown[] = Array.isArray(result?.contacts) ? result.contacts : [];
-        const activeCount = contacts
-          .filter((contact) => recordFrom(contact).status === "active")
-          .slice(0, 25).length;
-        setPayrollRecipientCount(activeCount);
-        if (!activeCount) setPayrollRecipientError(t("preview.payrollLoadFailed"));
+        if (!result?.preview) throw new Error(t("preview.payrollLoadFailed"));
+        setPayrollPreview(result.preview);
       })
-      .catch(() => {
-        if (!cancelled) setPayrollRecipientError(t("preview.payrollLoadFailed"));
+      .catch((error) => {
+        if (!cancelled) {
+          setPayrollPreviewError(error instanceof Error ? error.message : t("preview.payrollLoadFailed"));
+        }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [isActive, isPayroll, t]);
+  }, [draft.fields.amount, draft.fields.groupName, draft.fields.sourceChain, isActive, isPayroll, t]);
 
   useEffect(() => {
     if (bridgeRecipientMode === "external" && bridgeMintMode === "manual_mint") {
@@ -6992,10 +7019,7 @@ export function CommandPreviewCard({
           destination: draft.fields.destinationChain,
         })
       : draft.summary;
-  const payrollTotal =
-    isPayroll && payrollRecipientCount !== null
-      ? formatDecimalAmount(Number(draft.fields.amount || 0) * payrollRecipientCount)
-      : null;
+  const payrollTotal = isPayroll ? payrollPreview?.totalAmount ?? null : null;
   const confirmedDraft: ParsedCommand = {
     ...draft,
     summary: isBridge
@@ -7017,10 +7041,12 @@ export function CommandPreviewCard({
           ...draft.fields,
           token: "USDC",
           recipient:
-            payrollRecipientCount === null
+            payrollPreview === null
               ? t("preview.confirmPayrollPending")
-              : t("preview.activeRecipients", { count: payrollRecipientCount }),
+              : t("preview.activeRecipients", { count: payrollPreview.recipientCount }),
           totalExposure: payrollTotal ? `${payrollTotal} USDC` : "",
+          groupId: payrollPreview?.groupId ?? "",
+          recipientFingerprint: payrollPreview?.recipientFingerprint ?? "",
         }
       : isBridge
       ? {
@@ -7061,8 +7087,8 @@ export function CommandPreviewCard({
       : confirmedDraft;
   const previewModel = buildTransactionPreviewModel(confirmedDraft);
   const confirmLabel = isPayroll
-    ? payrollTotal && payrollRecipientCount
-      ? t("preview.confirmPayroll", { total: payrollTotal, token: "USDC", count: payrollRecipientCount })
+    ? payrollTotal && payrollPreview
+      ? t("preview.confirmPayroll", { total: payrollTotal, token: "USDC", count: payrollPreview.recipientCount })
       : t("preview.confirmPayrollPending")
     : hasMintGasChoice && gatewayFallbackMode === "deposit"
       ? t("preview.gatewayConfirmDeposit", { amount: gatewayDepositAmount })
@@ -7204,9 +7230,9 @@ export function CommandPreviewCard({
         ) : null}
       </div>
       <TransactionPreviewFields model={previewModel} />
-      {isPayroll && payrollRecipientError ? (
+      {isPayroll && payrollPreviewError ? (
         <div role="alert" className="rounded-xl border border-danger/35 bg-danger/10 px-3 py-2 text-xs text-danger">
-          {payrollRecipientError}
+          {payrollPreviewError}
         </div>
       ) : null}
       <div className="space-y-2 rounded-lg border bg-background p-2 text-xs text-muted-foreground">
@@ -7544,6 +7570,18 @@ export function CommandPreviewCard({
             </button>
           </div>
         ) : null}
+        {isPayroll && payrollPreview ? (
+          <TransactionPreviewSummary
+            title={t("preview.payrollSummary")}
+            subtitle={t("preview.payrollGroup", { group: payrollPreview.groupName })}
+            metrics={[
+              { label: t("preview.activeRecipients", { count: payrollPreview.recipientCount }), value: `${payrollPreview.perRecipientAmount} USDC` },
+              { label: t("preview.payrollTotal"), value: `${payrollPreview.totalAmount} USDC` },
+              { label: t("preview.payrollExcluded"), value: String(payrollPreview.excluded.length) },
+            ]}
+            details={payrollPreview.recipients.map((recipient) => `${recipient.label} · ${recipient.address}`)}
+          />
+        ) : null}
         {hasMintGasChoice ? (
           <>
             {scopedGatewayInsufficient ? (
@@ -7711,7 +7749,7 @@ export function CommandPreviewCard({
           <TransactionConfirmActions
             confirmLabel={gatewayPreflightLoading ? t("preview.gatewayCheckingQuote") : confirmLabel}
             cancelLabel={t("common.cancel")}
-            disabled={!canConfirmLease || (isBridge ? bridgeConfirmDisabled : isSwap ? swapConfirmDisabled : hasMintGasChoice ? gatewayConfirmDisabled : isPayroll ? payrollRecipientCount === null || payrollRecipientCount === 0 || Boolean(payrollRecipientError) : false)}
+            disabled={!canConfirmLease || (isBridge ? bridgeConfirmDisabled : isSwap ? swapConfirmDisabled : hasMintGasChoice ? gatewayConfirmDisabled : isPayroll ? payrollPreview === null || payrollPreview.recipientCount === 0 || Boolean(payrollPreviewError) : false)}
             onCancel={() => onCancel()}
             onConfirm={() => void confirmWithGatewayPreflight()}
           />

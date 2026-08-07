@@ -204,8 +204,8 @@
             "batch"
           ],
           "content": [
-            "Payment request tạo inbound link hoặc QR ở trạng thái pending; payroll tạo và confirm outbound Gateway payments cho tối đa 25 active contacts.",
-            "Payroll hiện recipient count và aggregate amount trước execution, rồi giữ success hoặc failure theo từng item và toàn batch."
+            "Payment request tạo inbound link hoặc QR ở trạng thái pending; payroll tạo và confirm outbound Gateway payments cho tối đa 25 thành viên hợp lệ của một contact group đã chọn rõ ràng.",
+            "Payroll chụp recipient snapshot có fingerprint, hiện tổng chính xác trước execution, rồi giữ success hoặc failure theo từng item và toàn batch."
           ],
           "url": "https://heypayna.xyz/docs/features/payment-requests-and-payroll"
         },
@@ -579,8 +579,8 @@
             "batch"
           ],
           "content": [
-            "A payment request creates a pending inbound link or QR; payroll creates and confirms outbound Gateway payments for up to 25 active contacts.",
-            "Payroll exposes recipient count and aggregate amount before execution, then preserves success or failure per item and at batch level."
+            "A payment request creates a pending inbound link or QR; payroll creates and confirms outbound Gateway payments for up to 25 eligible members of one explicit contact group.",
+            "Payroll snapshots recipients with a fingerprint, exposes an exact aggregate before execution, then preserves success or failure per item and batch."
           ],
           "url": "https://heypayna.xyz/docs/features/payment-requests-and-payroll"
         },

@@ -684,9 +684,10 @@ async function executeServerCommand(draft: ParsedCommand) {
     const created = await requestJson("/api/payroll/batches", {
       method: "POST",
       body: JSON.stringify({
-        name: draft.fields.groupName,
+        groupId: draft.fields.groupId,
         amount: draft.fields.amount,
         sourceChain: draft.fields.sourceChain,
+        recipientFingerprint: draft.fields.recipientFingerprint,
       }),
     });
 
