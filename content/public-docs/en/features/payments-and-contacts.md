@@ -11,6 +11,7 @@ aiSummary:
   - "A Payna payment requires amount, recipient, source chain, and destination chain, then shows a 15-second confirmation preview before Gateway execution."
   - "AskPayna never turns /pay or transfer-like text into a preview; switch to Payna and resubmit there to prepare a payment."
   - "Contacts store identity and routing hints, never signing authority; verify the resolved address and destination every time."
+  - "Payna understands clear Vietnamese and English contact-group imperatives, but never turns a group question into an action."
 ---
 
 ## Address or saved contact
@@ -24,6 +25,12 @@ Use `/contacts list` to inspect the directory. Use `/contacts add Minh 0x1111...
 When an address belongs to a Payna account, Payna can resolve it as an internal contact and use that user's current Circle wallet at payment time. This avoids relying only on an old stored address. An address-only add can autofill an internal profile name. An external wallet cannot be autofilled, so provide a display name.
 
 If a display name already exists in your directory, adding it again updates that contact. Contact lookup for `/pay` is case-insensitive by display name. A requested destination chain overrides the saved preferred chain; the stored preference is a routing hint, not an immutable guarantee.
+
+## Contact groups in chat
+
+Manage groups with slash commands: `/contacts group create Core Team`, `/contacts group list`, `/contacts group add Core Team Minh`, `/contacts group remove Core Team Minh`, and `/contacts group delete Core Team`. Deleting a group only removes its memberships; its contacts remain in the directory.
+
+In Payna mode, AI also routes clear imperatives such as “Tạo nhóm Core Team”, “thêm Minh vào nhóm Core Team”, “Xóa Lan khỏi nhóm Core Team”, or “delete group Core Team” into that grammar. It recognizes an action only when the request is explicit: “How do I create a group?” remains a question and never creates or changes a group.
 
 ## Source and destination are required
 

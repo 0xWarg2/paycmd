@@ -15,6 +15,7 @@ import {
   unsupportedTransferRecipientFrom,
   type CommandName,
 } from "@/lib/paycmd/commands";
+import { contactGroupIntentFromNaturalLanguage } from "@/lib/paycmd/contact-group-intent";
 import {
   completePaymentChainFollowUp,
   paymentWaitingForChains,
@@ -697,6 +698,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const contactGroupIntent = contactGroupIntentFromNaturalLanguage(input, locale);
+    if (contactGroupIntent) {
+      const parsedCommand = parsePayCmd(contactGroupIntent.canonicalCommand, locale);
+      const decision = normalizeIntentDecision(
+        { speechAct: "action", confidence: "high", reasonCode: "explicit_imperative" },
+        input,
+      );
+      return NextResponse.json(
+        guardCommandResponse(chatMode, decision, {
+          intent: "command",
+          canonicalCommand: contactGroupIntent.canonicalCommand,
+          assistantText: contactGroupIntent.assistantText,
+          missingFields: [],
+          suggestions: [parsedCommand.sample],
+          parsedCommand,
+          modelProfile: "paycmd-rules-contact-groups",
+        }),
+      );
+    }
+
     const appContext = await getAppContext(user.id);
     const responseLanguageInstruction =
       locale === "en"
@@ -729,6 +750,7 @@ export async function POST(req: NextRequest) {
       "For a balance request that names a chain or testnet, canonicalCommand must be /balance on <that chain>; never widen it to /balance.",
       "All payment/fund/deposit/withdraw/transfer/payroll commands will be previewed and confirmed by the user later.",
       "Transfer is self-transfer only: it moves Gateway funds to the current user's Circle wallet. If the user names a contact or another wallet address, recommend /pay and never silently discard that recipient.",
+      "Contact-group actions are supported. Canonical grammar: /contacts group create <name>, /contacts group list, /contacts group add <group name> <existing contact name>, /contacts group remove <group name> <existing contact name>, or /contacts group delete <name>. Do not invent contacts or silently delete a group.",
       `Gateway chains: ${gatewayChainPromptHints()}.`,
       `Bridge chains (testnet MetaMask rail): ${cctpBridgeChainConfigs.map((chain) => `${chain.aliases[0]} -> ${chain.key}`).join(", ")}.`,
       "Swap is Arc Testnet only and supports USDC, EURC, and cirBTC. Canonical swap format: /swap <amount> <tokenIn> to <tokenOut>.",

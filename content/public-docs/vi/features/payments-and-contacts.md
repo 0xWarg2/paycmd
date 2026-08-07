@@ -11,6 +11,7 @@ aiSummary:
   - "Payment Payna cần amount, recipient, source chain và destination chain, rồi hiện confirmation preview 15 giây trước khi chạy Gateway."
   - "AskPayna không biến /pay hay transfer-like text thành preview; hãy chuyển sang Payna rồi submit lại tại đó để chuẩn bị payment."
   - "Contact chỉ lưu identity và routing hint, không có quyền ký; luôn kiểm tra địa chỉ đã resolve và destination."
+  - "Payna hiểu các imperative contact-group rõ ràng bằng tiếng Việt/Anh, nhưng không biến câu hỏi về group thành hành động."
 ---
 
 ## Địa chỉ hay saved contact
@@ -24,6 +25,12 @@ Dùng `/contacts list` để kiểm tra danh bạ. Dùng `/contacts add Minh 0x1
 Khi địa chỉ thuộc một tài khoản Payna, app có thể resolve nó như internal contact và lấy Circle wallet hiện tại của user đó lúc thanh toán. Nhờ vậy, payment không chỉ dựa vào stored address cũ. Lệnh add chỉ có address có thể tự điền tên profile nội bộ. External wallet không tự điền được, nên cần display name.
 
 Nếu display name đã tồn tại trong danh bạ, việc add lại sẽ cập nhật contact đó. `/pay` tìm contact theo display name không phân biệt hoa thường. Destination chain ghi trong command sẽ ghi đè preferred chain đã lưu; preference chỉ là routing hint, không phải cam kết cố định.
+
+## Nhóm contact qua chat
+
+Bạn có thể quản lý nhóm bằng slash command: `/contacts group create Core Team`, `/contacts group list`, `/contacts group add Core Team Minh`, `/contacts group remove Core Team Minh`, và `/contacts group delete Core Team`. Xóa group chỉ xóa membership; contact trong directory vẫn còn.
+
+Trong Payna mode, AI cũng route các yêu cầu mệnh lệnh rõ ràng như “Tạo nhóm Core Team”, “thêm Minh vào nhóm Core Team”, “Xóa Lan khỏi nhóm Core Team”, hoặc “delete group Core Team” vào đúng command trên. AI chỉ nhận diện action khi câu yêu cầu rõ ràng; câu hỏi như “Làm sao tạo nhóm?” vẫn là câu hỏi, không tạo hoặc sửa group.
 
 ## Bắt buộc source và destination
 

@@ -190,7 +190,8 @@
           "content": [
             "Payment Payna cần amount, recipient, source chain và destination chain, rồi hiện confirmation preview 15 giây trước khi chạy Gateway.",
             "AskPayna không biến /pay hay transfer-like text thành preview; hãy chuyển sang Payna rồi submit lại tại đó để chuẩn bị payment.",
-            "Contact chỉ lưu identity và routing hint, không có quyền ký; luôn kiểm tra địa chỉ đã resolve và destination."
+            "Contact chỉ lưu identity và routing hint, không có quyền ký; luôn kiểm tra địa chỉ đã resolve và destination.",
+            "Payna hiểu các imperative contact-group rõ ràng bằng tiếng Việt/Anh, nhưng không biến câu hỏi về group thành hành động."
           ],
           "url": "https://heypayna.xyz/docs/features/payments-and-contacts"
         },
@@ -565,7 +566,8 @@
           "content": [
             "A Payna payment requires amount, recipient, source chain, and destination chain, then shows a 15-second confirmation preview before Gateway execution.",
             "AskPayna never turns /pay or transfer-like text into a preview; switch to Payna and resubmit there to prepare a payment.",
-            "Contacts store identity and routing hints, never signing authority; verify the resolved address and destination every time."
+            "Contacts store identity and routing hints, never signing authority; verify the resolved address and destination every time.",
+            "Payna understands clear Vietnamese and English contact-group imperatives, but never turns a group question into an action."
           ],
           "url": "https://heypayna.xyz/docs/features/payments-and-contacts"
         },
