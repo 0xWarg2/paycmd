@@ -148,13 +148,19 @@ async function startSupabaseBoundary() {
   };
 }
 
-test("real PaycmdApp persists and reloads AskPayna wallet status without wallet details", async ({
+test("real PaycmdApp persists wallet status and enforces AskPayna mode boundaries", async ({
   page,
 }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1024", "focused real-app integration assertion");
 
   const supabase = await startSupabaseBoundary();
   try {
+    const cryptoInputs: string[] = [];
+    const commandInputs: string[] = [];
+    const executionRequests: string[] = [];
+    const slashInput = "/pay 50 USDC to Minh on arc from base";
+    const transferQuestion = "Làm sao gửi 50 USDC sang Arc nhanh nhất?";
+    const researchQuestion = "What is Circle Gateway?";
     const accessToken = testAccessToken();
     const session = {
       access_token: accessToken,
@@ -178,6 +184,40 @@ test("real PaycmdApp persists and reloads AskPayna wallet status without wallet 
       },
     ]);
     await page.addInitScript(() => window.localStorage.setItem("paycmd_locale", "en"));
+    await page.addInitScript(() => {
+      const walletRequests: string[] = [];
+      Object.defineProperty(window, "__paynaWalletRequests", { value: walletRequests });
+      Object.defineProperty(window, "ethereum", {
+        configurable: true,
+        value: {
+          request: async ({ method }: { method: string }) => {
+            walletRequests.push(method);
+            throw new Error(`Unexpected wallet request: ${method}`);
+          },
+        },
+      });
+    });
+    page.on("request", (request) => {
+      if (request.method() === "GET") return;
+      const pathname = new URL(request.url()).pathname;
+      if (
+        pathname === "/api/commands/parse" ||
+        pathname === "/api/payments/pay" ||
+        pathname === "/api/payment-drafts" ||
+        pathname.startsWith("/api/payment-drafts/") ||
+        pathname === "/api/gateway/transfer" ||
+        pathname === "/api/gateway/deposit" ||
+        pathname === "/api/gateway/withdraw" ||
+        pathname === "/api/gateway/delegate" ||
+        pathname === "/api/user/fund" ||
+        pathname === "/api/user/link-metamask" ||
+        pathname === "/api/deposit" ||
+        pathname.startsWith("/api/cctp/") ||
+        pathname.startsWith("/api/swap/")
+      ) {
+        executionRequests.push(`${request.method()} ${pathname}`);
+      }
+    });
     await page.route("**/api/notifications", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: '{"notifications":[]}' }),
     );
@@ -200,6 +240,30 @@ test("real PaycmdApp persists and reloads AskPayna wallet status without wallet 
     );
     await page.route("**/api/ai/crypto", async (route) => {
       const input = (route.request().postDataJSON() as { input: string }).input;
+      cryptoInputs.push(input);
+      const acceptanceResponse =
+        input === slashInput
+          ? "AskPayna explained the slash command without preparing a transaction."
+          : input === transferQuestion
+            ? "AskPayna explained the Arc route with Circle and Arc evidence."
+            : input === researchQuestion
+              ? "AskPayna researched Circle Gateway after explicit consent."
+              : null;
+      if (acceptanceResponse) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            assistantText: acceptanceResponse,
+            provider: "asksurf",
+            citations: [],
+            groundingStatus: "verified",
+            knowledgeSources: ["circle", "arc"],
+            walletContextStatus: "verified",
+          }),
+        });
+        return;
+      }
       const requestedStatus = input.split(" ").at(-1);
       const walletContextStatus = requestedStatus === "invalid" ? "ready" : requestedStatus;
       await route.fulfill({
@@ -213,6 +277,28 @@ test("real PaycmdApp persists and reloads AskPayna wallet status without wallet 
           walletContext: {
             externalWallets: [{ address: walletAddress, usdc: "30" }],
           },
+        }),
+      });
+    });
+    await page.route("**/api/ai/command", async (route) => {
+      const input = (route.request().postDataJSON() as { input: string }).input;
+      commandInputs.push(input);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          intent: "crypto_research",
+          canonicalCommand: "",
+          assistantText: "Research requires explicit AskPayna consent.",
+          missingFields: [],
+          suggestions: [],
+          parsedCommand: null,
+          decision: {
+            speechAct: "question",
+            confidence: "high",
+            reasonCode: "informational_question",
+          },
+          modelProfile: "test-intent-router",
         }),
       });
     });
@@ -279,6 +365,77 @@ test("real PaycmdApp persists and reloads AskPayna wallet status without wallet 
       ),
     ).not.toContainText("Balances");
     await expect(page.getByText(walletAddress)).toHaveCount(0);
+
+    await page.getByRole("button", { name: "AskPayna", exact: true }).click();
+    await composer.fill(slashInput);
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect.poll(() => [...cryptoInputs]).toContain(slashInput);
+    await expect(
+      page.getByText("AskPayna explained the slash command without preparing a transaction.", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(page.getByText(/AskPayna only explains and researches/i).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Confirm\b/i })).toHaveCount(0);
+    await expect(page.getByText("Transaction preview", { exact: true })).toHaveCount(0);
+    expect(supabase.rows.some((row) => row.kind === "preview")).toBe(false);
+    expect(executionRequests).toEqual([]);
+    expect(
+      await page.evaluate(() => [...((window as any).__paynaWalletRequests as string[])]),
+    ).toEqual([]);
+
+    await composer.fill(transferQuestion);
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect.poll(() => [...cryptoInputs]).toContain(transferQuestion);
+    await expect(
+      page.getByText("AskPayna explained the Arc route with Circle and Arc evidence.", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    expect(commandInputs).toEqual([]);
+    expect(cryptoInputs.filter((input) => input === slashInput)).toHaveLength(1);
+    expect(cryptoInputs.filter((input) => input === transferQuestion)).toHaveLength(1);
+    await expect(page.getByRole("button", { name: /^Confirm\b/i })).toHaveCount(0);
+    await expect(page.getByText("Transaction preview", { exact: true })).toHaveCount(0);
+    expect(supabase.rows.some((row) => row.kind === "preview")).toBe(false);
+    expect(executionRequests).toEqual([]);
+    expect(
+      await page.evaluate(() => [...((window as any).__paynaWalletRequests as string[])]),
+    ).toEqual([]);
+
+    await page.getByRole("button", { name: "Payna", exact: true }).click();
+    await composer.fill(researchQuestion);
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect.poll(() => [...commandInputs]).toEqual([researchQuestion]);
+    await expect(
+      page
+        .getByTestId("command-center-content")
+        .getByText(/This question fits AskPayna\. Switch modes and start research only if you choose the action below\./i),
+    ).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "Research effort" })).toHaveCount(0);
+    expect(cryptoInputs.filter((input) => input === researchQuestion)).toHaveLength(0);
+
+    const consentAction = page.getByRole("button", { name: "Switch to AskPayna" });
+    await expect(consentAction).toBeVisible();
+    await consentAction.click();
+    await expect.poll(() => cryptoInputs.filter((input) => input === researchQuestion)).toHaveLength(1);
+    await expect(page.getByRole("combobox", { name: "Research effort" })).toBeVisible();
+    await expect(
+      page
+        .getByTestId("command-center-content")
+        .getByText("AskPayna researched Circle Gateway after explicit consent.", {
+          exact: true,
+        }),
+    ).toBeVisible();
+    expect(commandInputs).toEqual([researchQuestion]);
+    expect(cryptoInputs.filter((input) => input === researchQuestion)).toHaveLength(1);
+    await expect(page.getByRole("button", { name: /^Confirm\b/i })).toHaveCount(0);
+    await expect(page.getByText("Transaction preview", { exact: true })).toHaveCount(0);
+    expect(supabase.rows.some((row) => row.kind === "preview")).toBe(false);
+    expect(executionRequests).toEqual([]);
+    expect(
+      await page.evaluate(() => [...((window as any).__paynaWalletRequests as string[])]),
+    ).toEqual([]);
   } finally {
     await supabase.close();
   }
