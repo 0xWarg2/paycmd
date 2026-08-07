@@ -27,9 +27,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const { id } = await params;
   const body = await request.json().catch(() => ({}));
-  const contactIds = Array.isArray(body.contactIds)
-    ? [...new Set(body.contactIds.filter((contactId: unknown) => typeof contactId === "string" && contactId))]
+  const rawContactIds = Array.isArray((body as { contactIds?: unknown }).contactIds)
+    ? (body as { contactIds: unknown[] }).contactIds
     : [];
+  const contactIds = [...new Set(rawContactIds.filter((contactId): contactId is string => typeof contactId === "string" && Boolean(contactId)))];
   const repository = createSupabaseContactGroupRepository(supabase);
   try {
     for (const contactId of contactIds) {
