@@ -43,3 +43,31 @@ test("pay from gateway selects unified source mode while scoped pay remains unch
   assert.equal(scoped.fields.sourceMode, "scoped");
   assert.equal(scoped.fields.sourceChain, "baseSepolia");
 });
+
+test("parses contact group commands with multi-word names", () => {
+  assert.deepEqual(parsePayCmd("/contacts group create Core Team").fields, {
+    action: "create_group",
+    groupName: "Core Team",
+    contactName: "",
+    memberExpression: "",
+  });
+  assert.deepEqual(parsePayCmd("/contacts group add Core Team Minh").fields, {
+    action: "add_group_member",
+    groupName: "",
+    contactName: "",
+    memberExpression: "Core Team Minh",
+  });
+});
+
+test("parses payroll against one explicit group", () => {
+  const draft = parsePayCmd("/payroll run Core Team 25 from base");
+  assert.equal(draft.fields.groupName, "Core Team");
+  assert.equal(draft.fields.amount, "25");
+  assert.equal(draft.fields.sourceChain, "baseSepolia");
+  assert.deepEqual(draft.missingFields, []);
+});
+
+test("payroll without a group remains incomplete", () => {
+  const draft = parsePayCmd("/payroll run 25 from base");
+  assert.ok(draft.missingFields.includes("groupName"));
+});

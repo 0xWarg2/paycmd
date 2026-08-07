@@ -119,6 +119,7 @@ import {
   ParsedCommand,
   requiresConfirmation,
 } from "@/lib/paycmd/commands";
+import { executeContactGroupCommand } from "@/lib/paycmd/contact-group-command";
 import { chainCommandAlias, isSupportedChain, type PayCmdChain } from "@/lib/paycmd/chains";
 import {
   gatewayManualMintSupported,
@@ -2432,7 +2433,7 @@ async function executeCommand(draft: ParsedCommand) {
     const created = await requestJson("/api/payroll/batches", {
       method: "POST",
       body: JSON.stringify({
-        name: draft.fields.batchName,
+        name: draft.fields.groupName,
         amount: draft.fields.amount,
         sourceChain: draft.fields.sourceChain,
       }),
@@ -2448,6 +2449,9 @@ async function executeCommand(draft: ParsedCommand) {
   }
 
   if (draft.command === "contacts") {
+    if (["list_groups", "create_group", "delete_group", "add_group_member", "remove_group_member"].includes(draft.fields.action)) {
+      return executeContactGroupCommand(draft, requestJson);
+    }
     if (draft.fields.action === "list") {
       return requestJson("/api/contacts");
     }
