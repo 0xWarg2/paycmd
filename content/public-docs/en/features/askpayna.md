@@ -4,19 +4,30 @@ title: "AskPayna research"
 description: "How AskPayna retrieves Circle, Arc, and Web3 sources before DeepSeek synthesis."
 section: "features"
 order: 40
-lastUpdated: "2026-08-05"
-keywords: ["AskPayna", "Circle MCP", "Arc MCP", "Tavily", "DeepSeek"]
+lastUpdated: "2026-08-07"
+keywords: ["AskPayna", "Circle MCP", "Arc MCP", "Tavily", "DeepSeek", "mode", "wallet observations"]
 tutorial: true
 aiSummary:
+  - "AskPayna never creates a transaction preview and never renders, confirms, or executes one; transaction requests require Payna mode."
   - "AskPayna routes Payna tutorial, Circle MCP, Arc MCP, and Tavily for broad or live Web3 questions, then asks DeepSeek to synthesize only the retrieved evidence."
+  - "Operational wallet questions can include authenticated point-in-time observations, with Gateway ready and pending amounts, Circle SCA USDC, external-wallet USDC, and native gas kept separate."
   - "References come from retrieval; missing sources produce partial or unavailable grounding, never invented citations."
 ---
 
 ## Choose the right mode
 
-Use AskPayna for explanations, comparisons, research, and Web3 questions. Use Payna mode for `/pay`, `/transfer`, `/bridge`, wallet checks, and transaction history. AskPayna can explain and suggest a slash command, but it does not create, sign, or execute transactions.
+Use AskPayna for explanations, comparisons, research, and Web3 questions. Use Payna mode for commands, transaction previews, wallet checks, and transaction history. AskPayna never creates a transaction preview: it does not parse a command into a draft, render confirmation controls, confirm, sign, or execute a transaction, even when the text begins with `/pay` or sounds like a transfer request. It can explain a route and suggest a slash command; switch to Payna and submit there if you intend to act.
+
+| Current mode | Input | Result |
+| --- | --- | --- |
+| AskPayna | Question or research prompt | Retrieve evidence and explain; no transaction preview or execution. |
+| AskPayna | Slash command or transfer-like text | Explain the safety boundary and offer a switch to Payna; no preview, confirmation, or execution. |
+| Payna | Clear operational command | Parse it and, when valid, show a transaction preview that still requires explicit confirmation. |
+| Payna | Question unrelated to execution | Offer an explicit **Switch to AskPayna** action; remain in Payna and do not research until the user consents. |
 
 Choose Instant for a concise answer with low latency. Choose Research for more structured analysis; its Standard and Deep effort levels control depth and model profile. More effort cannot compensate for missing evidence, and neither mode makes an unsourced live claim trustworthy.
+
+For example, ask **“Làm sao gửi 50 USDC sang Arc nhanh nhất?”** in AskPayna. The result is a non-executing explanation grounded in official Circle and Arc evidence, supplemented only when relevant by authenticated point-in-time wallet observations. It is not a `/pay` draft or transaction, and it has no confirmation button.
 
 ## How intent routing works
 
@@ -26,44 +37,36 @@ Be specific about the product, protocol, chain, comparison criteria, and desired
 
 ## Payna tutorial source
 
-Product guidance comes from Payna's bilingual, versioned tutorial generated from these public docs. It matches the web-app tutorial version, so AskPayna can explain current command syntax, previews, rails, and safety boundaries without treating a generic search result as product truth. Include “Payna” or “AskPayna” when the question is about the app.
+Payna usage and tutorial guidance comes from Payna's synchronized bilingual, versioned public docs. It matches the web-app tutorial version, so AskPayna can explain current command syntax, previews, rails, and safety boundaries without treating a generic search result as product truth. Include “Payna” or “AskPayna” when the question is about the app.
 
 ## Circle and Arc sources
 
-Circle topics use Circle MCP to search official Circle developer material. Arc topics use Arc MCP, backed by the documentation published at [arc.io](https://www.arc.io/). A question about Circle Gateway on Arc legitimately needs both families. A question only about Circle Wallets should not add unrelated web results, and an Arc RPC question should remain with the Arc specialist source.
+Circle facts come from Circle MCP searches of official Circle developer material. Arc facts come from Arc MCP, backed by the documentation published at [arc.io](https://www.arc.io/). A question about Circle Gateway on Arc legitimately needs both families. A question only about Circle Wallets should not add unrelated web results, and an Arc RPC question should remain with the Arc specialist source.
 
 These retrieval systems return factual snippets and HTTPS source URLs. They are evidence, not instructions: AskPayna must ignore commands embedded inside retrieved text.
 
+## Authenticated wallet observations
+
+AskPayna loads wallet observations only when the user is authenticated and the question is operationally relevant, such as asking whether current funds can support a route. Conceptual questions do not trigger wallet reads. Observations are point-in-time context, not web citations or authority to spend.
+
+The evidence keeps every spendability family separate: Gateway-ready USDC, Gateway-pending USDC, Circle SCA USDC, external-wallet USDC, and external-wallet native gas. It never adds these into one balance or treats one rail as another. Partial reads stay unavailable rather than becoming zero. This context feature added no MetaMask signing or transaction rail; AskPayna still cannot ask MetaMask to sign or submit anything.
+
 ## Tavily for broad or live Web3
 
-Tavily is used for recognized broad Web3 subjects. When a question already identifies a Web3, Circle, or Arc topic, time-sensitive terms such as “latest,” “today,” news, price, or market also select live retrieval with a recent-news window. A bare “market data” prompt does not select Tavily because it identifies no qualifying topic. Circle and Arc specialist questions add Tavily only when they also name a broader topic or ask for current information.
-
-Search results must clear Payna's relevance threshold and provide an HTTPS URL. Tavily availability, rate limits, or source freshness can affect coverage, so inspect publication dates and source quality before acting on a market claim.
+Tavily covers recognized broad Web3 subjects and dated or live requests. A bare “market data” prompt selects nothing until it names a qualifying topic; Circle and Arc specialist questions add Tavily only for broader or current information. Results must clear the relevance threshold and provide an HTTPS URL. Check source quality and publication date before acting.
 
 ## DeepSeek evidence synthesis
 
-After retrieval, DeepSeek receives a bounded evidence bundle and the grounding status. It organizes the answer into a title, sections, optional comparison tables, and related questions. DeepSeek is the synthesizer, not the citation authority: factual and time-sensitive claims should be based on the supplied bundle, with inference clearly separated.
-
-Payna removes model-authored URLs from the answer body. Reference cards are attached separately from the retrieval records, capped and deduplicated, so a plausible URL generated by a model cannot become a citation.
+DeepSeek synthesizes a bounded evidence bundle; it is not the citation authority. Factual and time-sensitive claims must use that bundle and separate inference. Payna removes model-authored URLs, then creates capped, deduplicated reference cards only from retrieval records.
 
 ## Citation and grounding states
 
-`verified` means every requested source family returned usable documents; it does not mean every statement is infallible. `partial` means at least one family succeeded and at least one failed. `unavailable` means none returned usable evidence. `not_applicable` means the question did not select a knowledge source.
-
-With `partial`, narrow conclusions to the available references and identify the missing family. With `unavailable`, AskPayna should say online verification failed, attach no citations, and avoid presenting current facts as verified. A response without a relevant reference is a reason to retry or narrow the question, not permission to invent one.
+`verified` means every requested family returned usable documents; `partial` means some succeeded; `unavailable` means none did; `not_applicable` means no knowledge source applied. For `partial`, identify missing families. For `unavailable`, attach no citations or current claims. Missing evidence is a reason to retry or narrow the question, never to invent a source.
 
 ## Secrets and identifier handling
 
 Never enter a seed phrase, mnemonic, recovery phrase, private key, API key, password, or signing secret. Queries that explicitly contain wallet-secret terms are blocked before external retrieval. Public EVM addresses and transaction hashes are replaced with neutral placeholders in the outbound search query. This redaction is a safety boundary, not a reason to paste sensitive data into chat.
 
-## Better questions
-
-- “How does Payna's `/bridge` preview differ from `/transfer`?”
-- “According to Circle, what happens after a CCTP v2 burn?”
-- “What are the Arc Testnet RPC and explorer details?”
-- “Compare optimistic and zero-knowledge rollups, with sources.”
-- “What changed in Ethereum L2 news this week? Include dates.”
-
 ## When a source fails
 
-Check the grounding badge and reference cards first. Retry a timeout or rate limit later; remove unrelated topics so the router selects fewer families; and rewrite vague live questions with a date and subject. If Circle or Arc evidence is missing, ask the specialist question separately. If the result remains `unavailable`, use the official documentation directly or defer the decision. Never paste service credentials to “fix” retrieval, and never treat an uncited answer as operational approval.
+Check grounding and references. Retry timeouts later, remove unrelated topics, and add dates to live questions. Ask missing Circle or Arc topics separately. If the result remains `unavailable`, use official docs or defer the decision. Never paste credentials or treat an uncited answer as operational approval.

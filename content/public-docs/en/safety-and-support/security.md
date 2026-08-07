@@ -4,10 +4,11 @@ title: "Safety model"
 description: "Private-key safety, previews, confirmations, and testnet recovery boundaries."
 section: "safety-and-support"
 order: 70
-lastUpdated: "2026-08-05"
-keywords: ["security", "seed phrase", "confirmation", "testnet"]
+lastUpdated: "2026-08-07"
+keywords: ["security", "seed phrase", "confirmation", "testnet", "preview expiry", "15 seconds"]
 tutorial: true
 aiSummary:
+  - "Every transaction preview expires after exactly 15 seconds; expiry disables and cancels it, so resubmit for a fresh preview."
   - "Payna is testnet-oriented: never share wallet secrets, verify every preview and signature, and inspect submitted work before retrying."
 ---
 
@@ -31,7 +32,11 @@ The Circle SCA, Gateway depositor, delegated Gateway signer, and MetaMask accoun
 
 Natural language and parsers prepare intent; they cannot bypass explicit confirmation. Check amount, token, rail, chains, full recipient, mint mode, estimated fee, source debit, and gas payer. For swaps, inspect route, minimum output, and slippage; for payments/transfers, verify the named source.
 
+Every transaction preview lease lasts exactly 15 seconds. At expiry Payna disables its confirmation control and cancels the preview as expired; no stale confirmation can execute. Submit the command again to create a fresh 15-second preview. Changing text or switching modes does not revive the expired one.
+
 Cancel when any field differs from your request. Re-open a fresh preview after changing amount, recipient, route, source, destination, or mint mode: quotes and balances can become stale. The deeper [Gateway fees and forwarding](/docs/circle/gateway/fees-gas-and-forwarding), [CCTP bridge](/docs/circle/cctp-bridge), and [Arc swap](/docs/arc/overview-and-swap) guides explain each rail's extra confirmation steps.
+
+AskPayna is outside this execution boundary. It never creates, renders, confirms, or executes a transaction preview, even for slash commands or transfer-like text. A switch action requires the user to choose the new mode; switching to Payna can prefill text but cannot submit or confirm it.
 
 ## Check addresses, chains, and allowances
 

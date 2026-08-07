@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "updatedAt": "2026-08-05",
+  "updatedAt": "2026-08-07",
   "product": "Hey Payna",
   "locales": {
     "vi": {
@@ -164,11 +164,15 @@
             "Circle MCP",
             "Arc MCP",
             "Tavily",
-            "DeepSeek"
+            "DeepSeek",
+            "mode",
+            "wallet observations"
           ],
           "content": [
+            "AskPayna không bao giờ tạo transaction preview, đồng thời không render, confirm hay thực thi preview; yêu cầu giao dịch phải dùng Payna mode.",
             "AskPayna route Payna tutorial, Circle MCP, Arc MCP và Tavily cho câu hỏi Web3 rộng hoặc live, rồi yêu cầu DeepSeek chỉ tổng hợp evidence đã retrieval.",
-            "Reference phải đến từ retrieval; thiếu nguồn sẽ trả grounding partial hoặc unavailable, không tạo citation giả."
+            "Câu hỏi wallet mang tính vận hành có thể dùng observation tại một thời điểm của user đã đăng nhập, nhưng Gateway ready/pending, Circle SCA, external-wallet asset và native gas luôn tách riêng.",
+            "Reference phải do retrieval cung cấp; thiếu nguồn sẽ trả grounding partial hoặc unavailable, không tạo citation giả."
           ],
           "url": "https://heypayna.xyz/docs/features/askpayna"
         },
@@ -179,10 +183,13 @@
             "pay",
             "contacts",
             "recipient",
-            "preview"
+            "preview",
+            "15 giây",
+            "AskPayna"
           ],
           "content": [
-            "Payment Payna cần amount, recipient, source chain và destination chain, rồi resolve người nhận và hiện confirmation preview trước khi chạy Gateway.",
+            "Payment Payna cần amount, recipient, source chain và destination chain, rồi hiện confirmation preview 15 giây trước khi chạy Gateway.",
+            "AskPayna không biến /pay hay transfer-like text thành preview; hãy chuyển sang Payna rồi submit lại tại đó để chuẩn bị payment.",
             "Contact chỉ lưu identity và routing hint, không có quyền ký; luôn kiểm tra địa chỉ đã resolve và destination."
           ],
           "url": "https://heypayna.xyz/docs/features/payments-and-contacts"
@@ -269,10 +276,13 @@
             "wallet",
             "link",
             "fund",
-            "balance"
+            "balance",
+            "AskPayna",
+            "wallet observations"
           ],
           "content": [
-            "Nhóm wallet gồm /wallet, /link, /fund và /balance; /fund chỉ nạp SCA còn /balance tổng hợp SCA và Gateway."
+            "Nhóm wallet gồm /wallet, /link, /fund và /balance; /fund chỉ nạp SCA còn /balance luôn ghi nhãn SCA và Gateway riêng.",
+            "Observation AskPayna đã xác thực tách Gateway ready/pending, Circle SCA USDC, external-wallet USDC và native gas, đồng thời không thêm signing rail."
           ],
           "url": "https://heypayna.xyz/docs/commands/wallet-and-balance"
         },
@@ -326,9 +336,12 @@
             "security",
             "seed phrase",
             "confirmation",
-            "testnet"
+            "testnet",
+            "preview hết hạn",
+            "15 giây"
           ],
           "content": [
+            "Mọi transaction preview hết hạn sau chính xác 15 giây; expiry disable và cancel preview, nên phải submit lại để lấy preview mới.",
             "Payna hướng tới testnet: không chia sẻ secret ví, kiểm tra mọi preview và signature, rồi kiểm tra giao dịch đã submit trước khi retry."
           ],
           "url": "https://heypayna.xyz/docs/safety-and-support/security"
@@ -526,10 +539,14 @@
             "Circle MCP",
             "Arc MCP",
             "Tavily",
-            "DeepSeek"
+            "DeepSeek",
+            "mode",
+            "wallet observations"
           ],
           "content": [
+            "AskPayna never creates a transaction preview and never renders, confirms, or executes one; transaction requests require Payna mode.",
             "AskPayna routes Payna tutorial, Circle MCP, Arc MCP, and Tavily for broad or live Web3 questions, then asks DeepSeek to synthesize only the retrieved evidence.",
+            "Operational wallet questions can include authenticated point-in-time observations, with Gateway ready and pending amounts, Circle SCA USDC, external-wallet USDC, and native gas kept separate.",
             "References come from retrieval; missing sources produce partial or unavailable grounding, never invented citations."
           ],
           "url": "https://heypayna.xyz/docs/features/askpayna"
@@ -541,10 +558,13 @@
             "pay",
             "contacts",
             "recipient",
-            "preview"
+            "preview",
+            "15 seconds",
+            "AskPayna"
           ],
           "content": [
-            "A Payna payment requires amount, recipient, source chain, and destination chain, then resolves the recipient and shows a confirmation preview before Gateway execution.",
+            "A Payna payment requires amount, recipient, source chain, and destination chain, then shows a 15-second confirmation preview before Gateway execution.",
+            "AskPayna never turns /pay or transfer-like text into a preview; switch to Payna and resubmit there to prepare a payment.",
             "Contacts store identity and routing hints, never signing authority; verify the resolved address and destination every time."
           ],
           "url": "https://heypayna.xyz/docs/features/payments-and-contacts"
@@ -631,10 +651,13 @@
             "wallet",
             "link",
             "fund",
-            "balance"
+            "balance",
+            "AskPayna",
+            "wallet observations"
           ],
           "content": [
-            "Wallet commands include /wallet, /link, /fund, and /balance; /fund only funds the SCA while /balance combines SCA and Gateway visibility."
+            "Wallet commands include /wallet, /link, /fund, and /balance; /fund only funds the SCA while /balance labels SCA and Gateway visibility separately.",
+            "Authenticated AskPayna observations keep Gateway ready/pending, Circle SCA USDC, external-wallet USDC, and native gas separate and add no signing rail."
           ],
           "url": "https://heypayna.xyz/docs/commands/wallet-and-balance"
         },
@@ -688,9 +711,12 @@
             "security",
             "seed phrase",
             "confirmation",
-            "testnet"
+            "testnet",
+            "preview expiry",
+            "15 seconds"
           ],
           "content": [
+            "Every transaction preview expires after exactly 15 seconds; expiry disables and cancels it, so resubmit for a fresh preview.",
             "Payna is testnet-oriented: never share wallet secrets, verify every preview and signature, and inspect submitted work before retrying."
           ],
           "url": "https://heypayna.xyz/docs/safety-and-support/security"

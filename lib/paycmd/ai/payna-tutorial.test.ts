@@ -21,6 +21,14 @@ test("retrieves English AskPayna source policy from the canonical tutorial", () 
   assert.equal(result.documents.some((document) => document.content.includes("Tavily")), true);
 });
 
+test("retrieves AskPayna mode safety and preview expiry guidance", () => {
+  const ask = searchPaynaTutorial("AskPayna transfer preview mode", "en");
+  const expiry = searchPaynaTutorial("preview hết hạn 15 giây", "vi");
+
+  assert.match(ask.documents.map((document) => document.content).join(" "), /never creates a transaction preview/i);
+  assert.match(expiry.documents.map((document) => document.content).join(" "), /15 giây/i);
+});
+
 test("returns at most four ranked tutorial sections with stable docs citations", () => {
   const result = searchPaynaTutorial("wallet fund pay transfer bridge swap AskPayna", "en");
 

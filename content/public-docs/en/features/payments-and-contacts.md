@@ -4,11 +4,12 @@ title: "Payments and contacts"
 description: "Resolve a saved contact or direct address, preview both chains, and confirm a USDC payment safely."
 section: "features"
 order: 41
-lastUpdated: "2026-08-05"
-keywords: ["pay", "contacts", "recipient", "preview"]
+lastUpdated: "2026-08-07"
+keywords: ["pay", "contacts", "recipient", "preview", "15 seconds", "AskPayna"]
 tutorial: true
 aiSummary:
-  - "A Payna payment requires amount, recipient, source chain, and destination chain, then resolves the recipient and shows a confirmation preview before Gateway execution."
+  - "A Payna payment requires amount, recipient, source chain, and destination chain, then shows a 15-second confirmation preview before Gateway execution."
+  - "AskPayna never turns /pay or transfer-like text into a preview; switch to Payna and resubmit there to prepare a payment."
   - "Contacts store identity and routing hints, never signing authority; verify the resolved address and destination every time."
 ---
 
@@ -34,7 +35,11 @@ This payment uses the Circle Gateway rail, not MetaMask CCTP. If a scoped ready 
 
 The preview must show amount and token, source network, destination network, and the resolved recipient. It also identifies the rail, cross-chain or recipient risk, destination gas mode, and fee or wallet estimate when available. Expand advanced details before approving a forwarding choice.
 
-The confirmation label repeats the amount, but it does not replace checking the full address. For a new contact, compare the address with a second trusted channel. If the destination or recipient is wrong, cancel and edit the draft. Understanding a natural-language instruction never moves money; the user must explicitly confirm execution.
+Every transaction preview has an exact 15-second lease. Confirm within that window only after checking every field. When it expires, Payna disables confirmation, cancels the preview as expired, and requires the user to submit the command again for a fresh preview. The old confirmation callback cannot execute, and editing the old card does not extend its lease.
+
+The confirmation label repeats the amount, but it does not replace checking the full address. For a new contact, compare the address with a second trusted channel. If the destination or recipient is wrong, cancel and edit the draft. Understanding a natural-language instruction never moves money; the user must explicitly confirm execution in Payna mode.
+
+AskPayna remains non-executing even for `/pay 50 USDC to Minh on arc from base` or transfer-like prose. It never parses, renders, confirms, or executes a payment preview. Its explanation can offer **Switch to Payna**, which only changes mode and prefills the text; the user must submit it in Payna to create a new 15-second preview.
 
 ## What happens after confirm
 
