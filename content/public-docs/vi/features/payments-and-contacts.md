@@ -40,11 +40,11 @@ Payment này dùng Circle Gateway rail, không phải MetaMask CCTP. Nếu scope
 
 ## Preview trước khi confirm
 
-Preview phải hiện amount và token, source network, destination network và recipient đã resolve. Nó còn xác định rail, rủi ro cross-chain hoặc recipient, destination gas mode, cùng fee hoặc wallet estimate khi có. Mở advanced details trước khi duyệt forwarding choice.
+Preview phải hiện amount và token, source network, destination network, recipient đã resolve, rail, gas mode và fee estimate khi có.
 
 Mọi transaction preview đều có lease chính xác 15 giây. Chỉ confirm trong cửa sổ đó sau khi đã kiểm tra mọi field. Khi preview hết hạn, Payna disable confirmation, cancel preview với lý do expired và yêu cầu user submit lại command để lấy preview mới. Callback confirm cũ không thể execute, và sửa card cũ không kéo dài lease.
 
-Confirmation label nhắc lại amount nhưng không thay cho việc kiểm tra địa chỉ đầy đủ. Với contact mới, đối chiếu địa chỉ qua kênh tin cậy thứ hai. Nếu destination hoặc recipient sai, hãy cancel và sửa draft. AI hiểu natural-language instruction không làm tiền di chuyển; user phải confirm execution rõ ràng trong Payna mode.
+Confirmation label nhắc lại amount nhưng không thay cho việc kiểm tra địa chỉ đầy đủ. Với contact mới, đối chiếu địa chỉ qua kênh tin cậy thứ hai. Nếu destination hoặc recipient sai, hãy cancel và sửa draft.
 
 AskPayna vẫn không thực thi kể cả với `/pay 50 USDC to Minh on arc from base` hay transfer-like prose. Mode này không bao giờ parse, render, confirm hay execute payment preview. Phần giải thích có thể hiện **Chuyển sang Payna**; action đó chỉ đổi mode và prefill text. User vẫn phải submit trong Payna để tạo preview 15 giây mới.
 
@@ -52,17 +52,17 @@ AskPayna vẫn không thực thi kể cả với `/pay 50 USDC to Minh on arc fr
 
 Payna resolve địa chỉ, validate hai chain và yêu cầu Gateway transfer đến destination. Manual destination mint có gas policy khác auto forwarding; hãy đọc preview thay vì giả định mọi route có fee giống nhau. Internal recipient có thể nhận notification Payna sau thành công. External wallet nhận funds onchain nhưng không tự có tài khoản Payna hoặc subscription notification.
 
-Khi được bật, Payna ghi receipt proof riêng trên Arc Testnet sau payment. Proof ghi dữ liệu receipt ở tầng ứng dụng; nó không phải payment transaction, và lỗi ghi proof không phải lý do gửi payment lại.
+Khi được bật, Payna ghi receipt proof riêng trên Arc Testnet. Proof không phải payment transaction; lỗi ghi proof không phải lý do gửi lại.
 
 ## History và receipt
 
-Receipt trong chat có thể hiện payment route, source allocation, destination hoặc mint transaction, explicit deposit transaction nếu user đã yêu cầu, forwarding transaction và Payna proof tùy chọn. Activity hiển thị transaction type nền, route, amount, state, date, reason và explorer link khi có hash. `/history` mở cùng tập operational record; dùng filter trong Activity để thu hẹp.
+Receipt trong chat hiện route, source allocation, transaction liên quan và Payna proof tùy chọn. Activity hiển thị amount, state, date, reason và explorer link. `/history` mở cùng tập record.
 
 Submitted transaction có thể còn pending sau chat confirmation. Đối chiếu explorer chain với hash và chờ destination/finality stage liên quan trước khi kết luận người nhận đã được trả. Lưu receipt khi đối soát payment nghiệp vụ.
 
 ## Lỗi identity thường gặp
 
-“Contact not found” nghĩa không saved display name nào khớp; hãy add contact hoặc dùng địa chỉ trực tiếp. “Invalid EVM wallet address” nghĩa format địa chỉ không hợp lệ. Lệnh add bắt buộc internal có thể trả `INTERNAL_WALLET_NOT_FOUND`; chỉ lưu named external contact sau khi xác nhận đó là chủ ý. Internal contact thiếu Circle wallet khả dụng không thể được trả như internal. Lookup service lỗi không chứng minh địa chỉ là external—hãy retry thay vì đổi identity type một cách mù quáng.
+“Contact not found” nghĩa không có saved display name khớp; hãy add contact hoặc dùng địa chỉ trực tiếp. “Invalid EVM wallet address” nghĩa địa chỉ sai format. `INTERNAL_WALLET_NOT_FOUND` cho biết internal contact chưa có Circle wallet. Lookup lỗi không chứng minh địa chỉ là external—hãy retry thay vì đổi identity type.
 
 ## Checklist an toàn
 

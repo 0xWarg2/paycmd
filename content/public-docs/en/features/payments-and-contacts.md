@@ -30,7 +30,7 @@ If a display name already exists in your directory, adding it again updates that
 
 Manage groups with slash commands: `/contacts group create Core Team`, `/contacts group list`, `/contacts group add Core Team Minh`, `/contacts group remove Core Team Minh`, and `/contacts group delete Core Team`. Deleting a group only removes its memberships; its contacts remain in the directory.
 
-In Payna mode, AI also routes clear imperatives such as “Tạo nhóm Core Team”, “thêm Minh vào nhóm Core Team”, “Xóa Lan khỏi nhóm Core Team”, or “delete group Core Team” into that grammar. It recognizes an action only when the request is explicit: “How do I create a group?” remains a question and never creates or changes a group.
+In Payna mode, AI also routes imperatives such as “Tạo nhóm Core Team”, “thêm Minh vào nhóm Core Team”, “Xóa Lan khỏi nhóm Core Team”, or “delete group Core Team” into that grammar. It recognizes an action only when the request is explicit: “How do I create a group?” remains a question and never creates or changes a group.
 
 ## Source and destination are required
 
