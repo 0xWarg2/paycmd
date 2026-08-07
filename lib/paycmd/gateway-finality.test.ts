@@ -96,6 +96,26 @@ test("allows the manual configure command to create the first Circle subscriptio
   });
 });
 
+test("classifies an already-settled deposit as a successful webhook acknowledgement", () => {
+  const classifyDeposit = (
+    gatewayWebhook as Record<string, unknown>
+  ).classifyGatewayWebhookDeposit;
+
+  assert.equal(typeof classifyDeposit, "function");
+  assert.equal(
+    (classifyDeposit as (status: string | null) => string)("success"),
+    "already_settled",
+  );
+  assert.equal(
+    (classifyDeposit as (status: string | null) => string)("pending_gateway_finality"),
+    "settle",
+  );
+  assert.equal(
+    (classifyDeposit as (status: string | null) => string)(null),
+    "retry",
+  );
+});
+
 test("accepts only a matching Circle Gateway deposit-finalized event", () => {
   const parsed = parseGatewayDepositFinalized(finalizedPayload, "testnet");
 
