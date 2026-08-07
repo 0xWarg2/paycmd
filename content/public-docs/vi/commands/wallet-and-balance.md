@@ -4,17 +4,24 @@ title: "Wallet và balance commands"
 description: "Reference cho wallet, link, fund và balance."
 section: "commands"
 order: 60
-lastUpdated: "2026-08-05"
-keywords: ["wallet", "link", "fund", "balance"]
+lastUpdated: "2026-08-07"
+keywords: ["wallet", "link", "fund", "balance", "AskPayna", "wallet observations"]
 commands: ["wallet", "link", "fund", "balance"]
 tutorial: true
 aiSummary:
-  - "Nhóm wallet gồm /wallet, /link, /fund và /balance; /fund chỉ nạp SCA còn /balance tổng hợp SCA và Gateway."
+  - "Nhóm wallet gồm /wallet, /link, /fund và /balance; /fund chỉ nạp SCA còn /balance luôn ghi nhãn SCA và Gateway riêng."
+  - "Observation AskPayna đã xác thực tách Gateway ready/pending, Circle SCA USDC, external-wallet USDC và native gas, đồng thời không thêm signing rail."
 ---
 
 ## Đọc vai trò wallet trước
 
 Các command này hiển thị bốn thứ riêng biệt: Payna account, MetaMask do user kiểm soát, Circle SCA wallet và Circle Gateway balance theo source. Chúng không tự gộp quyền sở hữu hay chuyển tiền. Xem [account và vai trò wallet](/docs/getting-started/account-and-wallets) để hiểu mô hình.
+
+## Wallet context trong AskPayna
+
+Với user đã đăng nhập, AskPayna chỉ có thể đọc wallet observation khi câu hỏi có liên quan vận hành, ví dụ “Tôi có đủ 50 USDC không?” hoặc “Làm sao gửi 50 USDC sang Arc?”. Mode này không load private wallet context cho câu hỏi protocol chung hay câu hỏi học thuật. Observation mô tả một thời điểm và có thể partial.
+
+AskPayna ghi nhãn riêng Gateway-ready USDC, Gateway-pending USDC, Circle SCA USDC, USDC trong external wallet và native gas của external wallet. Mode này không aggregate chúng thành total độc lập với rail, không đổi read unavailable thành zero và không ngụ ý family này có thể fund family khác. Việc thêm observation chỉ đọc không tạo MetaMask signing hay transaction rail trong AskPayna; research answer không tạo preview, wallet prompt, signature hay transaction.
 
 ## `/wallet`
 
@@ -57,5 +64,5 @@ Các command này hiển thị bốn thứ riêng biệt: Payna account, MetaMas
 - **Điều kiện:** Đăng nhập và đã tạo SCA. Không cần MetaMask, signature hay gas.
 - **Preview:** Đây là read ngay, không phải transaction preview. Kết quả liệt kê SCA `chainBalances`, Gateway domain balances, totals, failed chains và Gateway availability.
 - **Ranh giới confirm:** Không có; command không thể spend funds.
-- **Kết quả và dữ liệu lưu:** Chỉ trả balance vừa fetch, không ghi transaction history. `totalUnified` toàn chain cộng SCA và Gateway nhìn thấy để hiển thị, không đại diện khả năng spend.
+- **Kết quả và dữ liệu lưu:** Chỉ trả balance vừa fetch, không ghi transaction history. Trong kết quả command `/balance`, `totalUnified` toàn chain cộng SCA và Gateway nhìn thấy để hiển thị, không đại diện khả năng spend; wallet observation của AskPayna không dùng phép aggregate đó.
 - **Lỗi và cách sửa:** **“No wallet address found”**: chạy `/wallet create`. **“Unsupported chain”**: sửa scope. Kết quả **partial** hoặc failed chain nghĩa total chỉ là lower bound; retry read thay vì coi dữ liệu unavailable là zero.

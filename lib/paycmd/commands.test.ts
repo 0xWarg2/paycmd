@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parsePayCmd } from "./commands.ts";
+import { parsePayCmd, suggestedPayCommandFromTransfer } from "./commands.ts";
 
 test("pay requires both the source and destination chains", () => {
   const draft = parsePayCmd("/pay 1 USDC to Lecter Vu");
@@ -30,6 +30,48 @@ test("transfer from gateway selects unified source mode without requiring one so
   assert.deepEqual(draft.missingFields, []);
 });
 
+test("transfer preserves a trailing contact as an unsupported recipient for the safety UI", () => {
+  const draft = parsePayCmd("/transfer 5 USDC from arc to arc to Lecter Vu");
+
+  assert.equal(draft.status, "draft_ready");
+  assert.equal(draft.fields.destinationChain, "arcTestnet");
+  assert.equal(draft.fields.unsupportedRecipient, "Lecter Vu");
+  assert.equal(
+    suggestedPayCommandFromTransfer(draft),
+    "/pay 5 USDC to Lecter Vu on arc from arc",
+  );
+});
+
+test("transfer recognizes pay-style recipient syntax so the safety UI can block it", () => {
+  const draft = parsePayCmd("/transfer 5 USDC to Lecter Vu on arc from base");
+
+  assert.equal(draft.status, "draft_ready");
+  assert.equal(draft.fields.sourceChain, "baseSepolia");
+  assert.equal(draft.fields.destinationChain, "arcTestnet");
+  assert.equal(draft.fields.unsupportedRecipient, "Lecter Vu");
+});
+
+test("transfer does not confuse mint gas modifiers with an external recipient", () => {
+  const manual = parsePayCmd("/transfer 5 USDC from base to arc manual gas");
+  const automatic = parsePayCmd("/transfer 5 USDC from base to arc auto forwarding");
+  const polite = parsePayCmd("/transfer 5 USDC from base to arc please");
+
+  assert.equal(manual.fields.unsupportedRecipient, "");
+  assert.equal(automatic.fields.unsupportedRecipient, "");
+  assert.equal(polite.fields.unsupportedRecipient, "");
+  assert.equal(suggestedPayCommandFromTransfer(manual), "");
+});
+
+test("transfer recommends pay for an external wallet address", () => {
+  const address = "0x1234567890abcdef1234567890abcdef12345678";
+  const draft = parsePayCmd(`/transfer 5 USDC from gateway to arc to ${address}`);
+
+  assert.equal(
+    suggestedPayCommandFromTransfer(draft),
+    `/pay 5 USDC to ${address} on arc from gateway`,
+  );
+});
+
 test("pay from gateway selects unified source mode while scoped pay remains unchanged", () => {
   const unified = parsePayCmd("/pay 5 USDC to Minh on arc from gateway");
   const scoped = parsePayCmd("/pay 5 USDC to Minh on arc from base");
@@ -42,4 +84,32 @@ test("pay from gateway selects unified source mode while scoped pay remains unch
   assert.equal(scoped.status, "draft_ready");
   assert.equal(scoped.fields.sourceMode, "scoped");
   assert.equal(scoped.fields.sourceChain, "baseSepolia");
+});
+
+test("parses contact group commands with multi-word names", () => {
+  assert.deepEqual(parsePayCmd("/contacts group create Core Team").fields, {
+    action: "create_group",
+    groupName: "Core Team",
+    contactName: "",
+    memberExpression: "",
+  });
+  assert.deepEqual(parsePayCmd("/contacts group add Core Team Minh").fields, {
+    action: "add_group_member",
+    groupName: "",
+    contactName: "",
+    memberExpression: "Core Team Minh",
+  });
+});
+
+test("parses payroll against one explicit group", () => {
+  const draft = parsePayCmd("/payroll run Core Team 25 from base");
+  assert.equal(draft.fields.groupName, "Core Team");
+  assert.equal(draft.fields.amount, "25");
+  assert.equal(draft.fields.sourceChain, "baseSepolia");
+  assert.deepEqual(draft.missingFields, []);
+});
+
+test("payroll without a group remains incomplete", () => {
+  const draft = parsePayCmd("/payroll run 25 from base");
+  assert.ok(draft.missingFields.includes("groupName"));
 });

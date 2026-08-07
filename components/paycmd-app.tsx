@@ -4,6 +4,7 @@ import { createAdapterFromProvider } from "@circle-fin/adapter-viem-v2";
 import { BridgeKit } from "@circle-fin/bridge-kit";
 import {
   BadgeDollarSign,
+  AlertTriangle,
   Bot,
   Brain,
   Check,
@@ -53,6 +54,7 @@ import {
   getChainMeta,
 } from "@/components/chain-identity";
 import { PayCmdShell } from "@/components/paycmd-shell";
+import { PreviewLeaseTimer } from "@/components/paycmd/preview-lease-timer";
 import { UnifiedGatewaySourceSelector } from "@/components/unified-gateway-source-selector";
 import {
   ExecutionTimeline,
@@ -71,6 +73,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import { localeRequestHeaders, translateClient, useI18n } from "@/lib/i18n";
+import type { GroundingStatus, KnowledgeSource, WalletContextStatus } from "@/lib/paycmd/ai/knowledge-types";
+import {
+  normalizeWalletContextStatus,
+  walletContextMetadata,
+  walletContextMetadataFromResearch,
+} from "@/lib/paycmd/ai/wallet-context-status";
 import { balanceBreakdown } from "@/lib/paycmd/balance-breakdown";
 import {
   buildTransactionPreviewModel,
@@ -86,6 +94,11 @@ import {
   type QuotaOnboardingState,
 } from "@/lib/paycmd/ai/quota-onboarding";
 import { AI_QUOTA_X_PROFILE_URL, shouldShowQuotaContactCta } from "@/lib/paycmd/ai/quota-contact";
+import {
+  applyModePolicy,
+  submissionRoute,
+  type IntentDecision,
+} from "@/lib/paycmd/ai/intent-policy";
 import {
   balanceRequestBody,
   executionBalanceChainFilter,
@@ -106,7 +119,10 @@ import {
   parsePayCmd,
   ParsedCommand,
   requiresConfirmation,
+  suggestedPayCommandFromTransfer,
+  unsupportedTransferRecipientFrom,
 } from "@/lib/paycmd/commands";
+import { executeContactGroupCommand } from "@/lib/paycmd/contact-group-command";
 import { chainCommandAlias, isSupportedChain, type PayCmdChain } from "@/lib/paycmd/chains";
 import {
   gatewayManualMintSupported,
@@ -120,6 +136,7 @@ import {
 } from "@/lib/paycmd/gateway-source-selection";
 import { formatNativeGasBalance } from "@/lib/paycmd/native-gas";
 import { isNearViewportBottom, jumpToLatestMessage } from "@/lib/paycmd/chat-scroll";
+import { createPreviewExpiresAt, previewCanConfirm, previewLeaseState } from "@/lib/paycmd/preview-lease";
 import { web3Chains } from "@/lib/paycmd/web3-chains";
 import {
   getSwapAdapterAddress,
@@ -147,13 +164,12 @@ type EthereumProvider = {
 // database says "asksurf" — renaming the value would drop that history out of the rich research
 // renderer and show it as raw markdown. Rename what the user sees, not these.
 type AiProvider = "openai" | "asksurf" | "paycmd";
-type ChatMode = "paycmd" | "asksurf";
+export type ChatMode = "paycmd" | "asksurf";
 type SurfMode = "instant" | "research";
 // Two tiers, matching the two models available. `extended` and `maximum` were the pre-merge values;
 // `normalizeSurfEffort` folds them into `deep` when reading persisted rows.
 type SurfEffort = "standard" | "deep";
-type KnowledgeSource = "payna" | "circle" | "arc" | "web";
-type GroundingStatus = "verified" | "partial" | "unavailable" | "not_applicable";
+export type { WalletContextStatus } from "@/lib/paycmd/ai/knowledge-types";
 
 type ChatCitation = {
   title?: string;
@@ -162,7 +178,12 @@ type ChatCitation = {
   publishedAt?: string;
 };
 
-type AssistantAction =
+export type AssistantAction =
+  | {
+      kind: "switch_to_paycmd";
+      label: string;
+      query: string;
+    }
   | {
       kind: "switch_to_asksurf";
       label: string;
@@ -178,16 +199,45 @@ type AssistantAction =
       draft: ParsedCommand;
     };
 
+export function useChatModeBoundary({
+  activeDraftId,
+  onCancelActiveDraft,
+  initialMode = "paycmd",
+}: {
+  activeDraftId: string | null;
+  onCancelActiveDraft: (draftId: string) => void;
+  initialMode?: ChatMode;
+}) {
+  const [chatMode, setChatMode] = useState<ChatMode>(initialMode);
+  const chatModeRef = useRef<ChatMode>(initialMode);
+
+  function changeChatMode(nextMode: ChatMode) {
+    chatModeRef.current = nextMode;
+    if (nextMode === "asksurf" && activeDraftId) {
+      onCancelActiveDraft(activeDraftId);
+    }
+    setChatMode(nextMode);
+  }
+
+  function canRunPaynaAction() {
+    return chatModeRef.current === "paycmd";
+  }
+
+  return { chatMode, changeChatMode, canRunPaynaAction };
+}
+
 type DraftState = "active" | "cancelled" | "confirmed";
 type PreviewDisplayState = DraftState | "closed";
 
-type ChatMessage = {
+export type ChatMessage = {
   id: string;
   role: "assistant" | "user" | "system";
   text: string;
   kind?: "text" | "preview" | "status" | "onboarding";
   draft?: ParsedCommand;
   draftState?: DraftState;
+  previewExpiresAt?: string;
+  cancellationReason?: "expired";
   execution?: ExecutionItem;
   createdAt?: string;
   provider?: AiProvider;
@@ -204,6 +254,7 @@ type ChatMessage = {
   quotaContactCta?: boolean;
   groundingStatus?: GroundingStatus;
   knowledgeSources?: KnowledgeSource[];
+  walletContextStatus?: WalletContextStatus;
 };
 
 type AiQuota = {
@@ -242,6 +293,7 @@ type AiCommandResult = {
   missingFields: string[];
   suggestions: string[];
   parsedCommand: ParsedCommand | null;
+  decision: IntentDecision;
   modelProfile?: string;
   // Always absent in practice: the router runs with thinking off so its token budget goes entirely
   // to the JSON it has to return. Typed anyway because the route does forward it if enabled.
@@ -249,7 +301,7 @@ type AiCommandResult = {
   quota?: AiQuota;
 };
 
-type CryptoResearchResult = {
+export type CryptoResearchResult = {
   assistantText: string;
   citations?: ChatCitation[];
   provider: "asksurf";
@@ -261,9 +313,10 @@ type CryptoResearchResult = {
   quota?: AiQuota;
   groundingStatus?: GroundingStatus;
   knowledgeSources?: KnowledgeSource[];
+  walletContextStatus?: WalletContextStatus;
 };
 
-type ChatMessageRow = {
+export type ChatMessageRow = {
   id: string;
   thread_id: string;
   user_id: string;
@@ -428,6 +481,19 @@ function normalizeAssistantActions(value: unknown): AssistantAction[] | undefine
         ];
       }
 
+      if (item.kind === "switch_to_paycmd" && typeof item.query === "string" && item.query.trim()) {
+        return [
+          {
+            kind: "switch_to_paycmd" as const,
+            label:
+              typeof item.label === "string" && item.label.trim()
+                ? item.label.trim()
+                : translateClient("mode.switchToPayna"),
+            query: item.query.trim(),
+          },
+        ];
+      }
+
       if (item.kind !== "switch_to_asksurf" || typeof item.query !== "string" || !item.query.trim()) {
         return [];
       }
@@ -438,7 +504,7 @@ function normalizeAssistantActions(value: unknown): AssistantAction[] | undefine
           label:
             typeof item.label === "string" && item.label.trim()
               ? item.label.trim()
-              : translateClient("asksurf.askButton"),
+              : translateClient("mode.switchToAskPayna"),
           query: item.query.trim(),
           surfMode: item.surfMode === "instant" || item.surfMode === "research" ? item.surfMode : "research",
           effort: normalizeSurfEffort(item.effort),
@@ -2370,9 +2436,10 @@ async function executeCommand(draft: ParsedCommand) {
     const created = await requestJson("/api/payroll/batches", {
       method: "POST",
       body: JSON.stringify({
-        name: draft.fields.batchName,
+        groupId: draft.fields.groupId,
         amount: draft.fields.amount,
         sourceChain: draft.fields.sourceChain,
+        recipientFingerprint: draft.fields.recipientFingerprint,
       }),
     });
 
@@ -2386,6 +2453,9 @@ async function executeCommand(draft: ParsedCommand) {
   }
 
   if (draft.command === "contacts") {
+    if (["list_groups", "create_group", "delete_group", "add_group_member", "remove_group_member"].includes(draft.fields.action)) {
+      return executeContactGroupCommand(draft, requestJson);
+    }
     if (draft.fields.action === "list") {
       return requestJson("/api/contacts");
     }
@@ -2426,7 +2496,73 @@ async function executeCommand(draft: ParsedCommand) {
   throw new Error("Unsupported command");
 }
 
-function mapRowToMessage(row: ChatMessageRow): ChatMessage {
+export function chatMessageMetadata(message: Omit<ChatMessage, "id"> | ChatMessage) {
+  return {
+    draft: message.draft ?? null,
+    draftState: message.draftState ?? null,
+    previewExpiresAt: message.previewExpiresAt ?? null,
+    cancellationReason: message.cancellationReason ?? null,
+    execution: message.execution ?? null,
+    provider: message.provider ?? null,
+    citations: message.citations ?? null,
+    model: message.model ?? null,
+    surfMode: message.surfMode ?? null,
+    effort: message.effort ?? null,
+    durationMs: message.durationMs ?? null,
+    actions: message.actions ?? null,
+    reasoning: message.reasoning ?? null,
+    quota: message.quota ?? null,
+    quotaContactCta: message.quotaContactCta ?? null,
+    groundingStatus: message.groundingStatus ?? null,
+    knowledgeSources: message.knowledgeSources ?? null,
+    ...walletContextMetadata(message.walletContextStatus),
+  };
+}
+
+export function buildChatMessageInsertPayload(
+  message: Omit<ChatMessage, "id">,
+  threadId: string,
+  userId: string,
+) {
+  return {
+    thread_id: threadId,
+    user_id: userId,
+    role: message.role,
+    content: message.text,
+    kind: message.kind === "onboarding" ? "text" as const : message.kind ?? "text" as const,
+    metadata: chatMessageMetadata(message),
+  };
+}
+
+export function askPaynaAssistantMessageFromResponse(
+  result: CryptoResearchResult,
+  options: {
+    text: string;
+    surfMode: SurfMode;
+    effort: SurfEffort;
+    actions?: AssistantAction[];
+  },
+): Omit<ChatMessage, "id"> {
+  const walletMetadata = walletContextMetadataFromResearch(result);
+  return {
+    role: "assistant",
+    text: options.text,
+    provider: "asksurf",
+    citations: result.citations ?? [],
+    model: result.model,
+    surfMode: result.surfMode ?? options.surfMode,
+    effort: normalizeSurfEffort(result.effort ?? options.effort),
+    durationMs: result.durationMs,
+    reasoning: result.reasoning,
+    quota: result.quota,
+    groundingStatus: result.groundingStatus,
+    knowledgeSources: result.knowledgeSources,
+    walletContextStatus: walletMetadata.walletContextStatus ?? undefined,
+    actions: options.actions,
+  };
+}
+
+export function mapRowToMessage(row: ChatMessageRow): ChatMessage {
   const metadata = row.metadata ?? {};
 
   return {
@@ -2441,6 +2577,8 @@ function mapRowToMessage(row: ChatMessageRow): ChatMessage {
       metadata.draftState === "confirmed"
         ? metadata.draftState
         : undefined,
+    previewExpiresAt: typeof metadata.previewExpiresAt === "string" ? metadata.previewExpiresAt : undefined,
+    cancellationReason: metadata.cancellationReason === "expired" ? "expired" : undefined,
     execution: metadata.execution as ExecutionItem | undefined,
     createdAt: row.created_at,
     provider: normalizeAiProvider(metadata.provider),
@@ -2461,6 +2599,7 @@ function mapRowToMessage(row: ChatMessageRow): ChatMessage {
     quotaContactCta: metadata.quotaContactCta === true,
     groundingStatus: normalizeGroundingStatus(metadata.groundingStatus),
     knowledgeSources: normalizeKnowledgeSources(metadata.knowledgeSources),
+    walletContextStatus: normalizeWalletContextStatus(metadata.walletContextStatus),
   };
 }
 
@@ -2486,7 +2625,12 @@ export function PayCmdApp() {
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
-  const [chatMode, setChatMode] = useState<ChatMode>("paycmd");
+  const { chatMode, changeChatMode, canRunPaynaAction } = useChatModeBoundary({
+    activeDraftId,
+    onCancelActiveDraft: (draftId) => {
+      void cancelDraft(draftId);
+    },
+  });
   const [selectedSurfMode, setSelectedSurfMode] = useState<SurfMode>("research");
   const [selectedSurfEffort, setSelectedSurfEffort] = useState<SurfEffort>("standard");
   const [suggestionChips, setSuggestionChips] = useState<string[]>([]);
@@ -2631,35 +2775,9 @@ export function PayCmdApp() {
     }
 
     const supabase = createClient();
-    const metadata = {
-      draft: message.draft ?? null,
-      draftState: message.draftState ?? null,
-      execution: message.execution ?? null,
-      provider: message.provider ?? null,
-      citations: message.citations ?? null,
-      model: message.model ?? null,
-      surfMode: message.surfMode ?? null,
-      effort: message.effort ?? null,
-      durationMs: message.durationMs ?? null,
-      actions: message.actions ?? null,
-      // Any key added here must also be added to the metadata object in `updateDraftState` below,
-      // which rewrites this whole object field by field. Omitting it there silently drops the value.
-      reasoning: message.reasoning ?? null,
-      quota: message.quota ?? null,
-      quotaContactCta: message.quotaContactCta ?? null,
-      groundingStatus: message.groundingStatus ?? null,
-      knowledgeSources: message.knowledgeSources ?? null,
-    };
     const { data, error } = await supabase
       .from("chat_messages")
-      .insert({
-        thread_id: threadId,
-        user_id: userId,
-        role: message.role,
-        content: message.text,
-        kind: message.kind === "onboarding" ? "text" : message.kind ?? "text",
-        metadata,
-      })
+      .insert(buildChatMessageInsertPayload(message, threadId, userId))
       .select("*")
       .single();
 
@@ -2682,13 +2800,18 @@ export function PayCmdApp() {
     await saveMessage({ role: "system", text, kind: "status", execution, actions });
   }
 
-  async function updateDraftState(messageId: string, draftState: DraftState) {
+  async function updateDraftState(
+    messageId: string,
+    draftState: DraftState,
+    options?: { cancellationReason?: "expired" },
+  ) {
     const target = messages.find((message) => message.id === messageId);
     if (!target?.draft) return;
+    const cancellationReason = options?.cancellationReason ?? target.cancellationReason;
 
     setMessages((current) =>
       current.map((message) =>
-        message.id === messageId ? { ...message, draftState } : message,
+        message.id === messageId ? { ...message, draftState, cancellationReason } : message,
       ),
     );
 
@@ -2702,25 +2825,7 @@ export function PayCmdApp() {
     const { error } = await supabase
       .from("chat_messages")
       .update({
-        metadata: {
-          draft: target.draft,
-          draftState,
-          execution: target.execution ?? null,
-          provider: target.provider ?? null,
-          citations: target.citations ?? null,
-          model: target.model ?? null,
-          surfMode: target.surfMode ?? null,
-          effort: target.effort ?? null,
-          durationMs: target.durationMs ?? null,
-          actions: target.actions ?? null,
-          // This update replaces `metadata` wholesale rather than patching it, so every field
-          // `saveMessage` writes has to be repeated here or confirming a draft erases it.
-          reasoning: target.reasoning ?? null,
-          quota: target.quota ?? null,
-          quotaContactCta: target.quotaContactCta ?? null,
-          groundingStatus: target.groundingStatus ?? null,
-          knowledgeSources: target.knowledgeSources ?? null,
-        },
+        metadata: chatMessageMetadata({ ...target, draftState, cancellationReason }),
       })
       .eq("id", messageId)
       .eq("user_id", userId);
@@ -2730,8 +2835,8 @@ export function PayCmdApp() {
     }
   }
 
-  async function cancelDraft(messageId: string) {
-    await updateDraftState(messageId, "cancelled");
+  async function cancelDraft(messageId: string, options?: { cancellationReason?: "expired" }) {
+    await updateDraftState(messageId, "cancelled", options);
   }
 
   function cancelActiveInteraction() {
@@ -2767,10 +2872,21 @@ export function PayCmdApp() {
   async function askCryptoResearch(
     value: string,
     recentMessages: { role: string; text: string }[],
-    options?: { surfMode?: SurfMode; effort?: SurfEffort },
+    options?: { surfMode?: SurfMode; effort?: SurfEffort; offerPaynaSwitch?: boolean },
   ) {
     const surfMode = options?.surfMode ?? "research";
     const effort = surfMode === "instant" ? "standard" : options?.effort ?? "standard";
+    const paynaSwitchActions: AssistantAction[] | undefined = options?.offerPaynaSwitch
+      ? [
+          {
+            kind: "switch_to_paycmd",
+            label: t("mode.switchToPayna"),
+            query: value,
+          },
+        ]
+      : undefined;
+    const withAskPaynaSafetyCopy = (text: string) =>
+      options?.offerPaynaSwitch ? `${text.trim()}\n\n${t("mode.askPaynaNeverExecutes")}` : text;
     setActiveAiProvider("asksurf");
     setActiveAskSurfMode(surfMode);
     setActiveAskSurfEffort(effort);
@@ -2799,29 +2915,24 @@ export function PayCmdApp() {
         }),
       })) as CryptoResearchResult;
 
-      await saveMessage({
-        role: "assistant",
-        text: result.assistantText,
-        provider: "asksurf",
-        citations: result.citations ?? [],
-        model: result.model,
-        surfMode: result.surfMode ?? surfMode,
-        effort: normalizeSurfEffort(result.effort ?? effort),
-        durationMs: result.durationMs,
-        reasoning: result.reasoning,
-        quota: result.quota,
-        groundingStatus: result.groundingStatus,
-        knowledgeSources: result.knowledgeSources,
-      });
+      await saveMessage(askPaynaAssistantMessageFromResponse(result, {
+        text: withAskPaynaSafetyCopy(result.assistantText),
+        surfMode,
+        effort,
+        actions: paynaSwitchActions,
+      }));
     } catch (error) {
       if ((error as { name?: string })?.name === "AbortError") {
         if (timedOut) {
           await saveMessage({
             role: "assistant",
-            text: `Research timed out after ${Math.round(surfClientTimeoutMs(surfMode) / 1000)} seconds.`,
+            text: withAskPaynaSafetyCopy(
+              `Research timed out after ${Math.round(surfClientTimeoutMs(surfMode) / 1000)} seconds.`,
+            ),
             provider: "asksurf",
             surfMode,
             effort,
+            actions: paynaSwitchActions,
           });
         }
         return;
@@ -2831,12 +2942,15 @@ export function PayCmdApp() {
       const quotaExhausted = (error as { code?: string })?.code === "AI_QUOTA_EXHAUSTED";
       await saveMessage({
         role: "assistant",
-        text: quotaExhausted ? t("ai.quotaExhausted") : t("asksurf.failed", { message }),
+        text: withAskPaynaSafetyCopy(
+          quotaExhausted ? t("ai.quotaExhausted") : t("asksurf.failed", { message }),
+        ),
         provider: "asksurf",
         surfMode,
         effort,
         quota: normalizeAiQuota((error as { data?: { quota?: unknown } })?.data?.quota),
         quotaContactCta: quotaExhausted,
+        actions: paynaSwitchActions,
       });
     } finally {
       window.clearTimeout(timeout);
@@ -2849,7 +2963,7 @@ export function PayCmdApp() {
     }
   }
 
-  async function askAiForCommand(value: string) {
+  async function askAiForCommand(value: string, mode: ChatMode) {
     setIsAiThinking(true);
     setActiveAiProvider("openai");
     setAiLoadingStep(0);
@@ -2866,17 +2980,47 @@ export function PayCmdApp() {
         body: JSON.stringify({
           input: value,
           recentMessages,
+          chatMode: mode,
         }),
       })) as AiCommandResult;
 
       setSuggestionChips((result.suggestions ?? []).slice(0, 4));
 
-      if (result.intent === "crypto_research") {
-        await askCryptoResearch(value, recentMessages, { surfMode: "research", effort: "standard" });
+      const modeAction = applyModePolicy(mode, result.decision);
+      if (modeAction === "offer_askpayna" || result.intent === "crypto_research") {
+        await saveMessage({
+          role: "assistant",
+          text: t("mode.questionFitsAskPayna"),
+          provider: "openai",
+          model: result.modelProfile,
+          reasoning: result.reasoning,
+          quota: result.quota,
+          actions: [
+            {
+              kind: "switch_to_asksurf",
+              label: t("mode.switchToAskPayna"),
+              query: value,
+              surfMode: selectedSurfMode,
+              effort: selectedSurfEffort,
+            },
+          ],
+        });
         return;
       }
 
-      if (result.intent === "command" && result.parsedCommand) {
+      if (modeAction === "clarify") {
+        await saveMessage({
+          role: "assistant",
+          text: t("mode.intentAmbiguous"),
+          provider: "openai",
+          model: result.modelProfile,
+          reasoning: result.reasoning,
+          quota: result.quota,
+        });
+        return;
+      }
+
+      if (modeAction === "run_payna_action" && result.intent === "command" && result.parsedCommand) {
         if (!requiresConfirmation(result.parsedCommand)) {
           await runCommand(result.parsedCommand);
           return;
@@ -2886,12 +3030,14 @@ export function PayCmdApp() {
           await updateDraftState(activeDraftId, "cancelled");
         }
 
+        const previewExpiresAt = createPreviewExpiresAt();
         const previewMessage = await saveMessage({
           role: "assistant",
           text: result.assistantText || result.parsedCommand.summary,
           kind: "preview",
           draft: result.parsedCommand,
           draftState: "active",
+          previewExpiresAt,
           provider: "openai",
           model: result.modelProfile,
           reasoning: result.reasoning,
@@ -3293,6 +3439,7 @@ export function PayCmdApp() {
       };
       const message = error instanceof Error ? error.message : "Command failed";
       const errorCode = raw?.code;
+      const payrollPreviewStale = draft.command === "payroll" && errorCode === "PAYROLL_PREVIEW_STALE";
       const waitingGateway = errorCode === "GATEWAY_FINALITY_PENDING";
       const transferSubmitted = gatewayTransferSubmitted(raw?.data);
 
@@ -3317,16 +3464,23 @@ export function PayCmdApp() {
       );
 
       await addSystemStatus(
-        message,
+        payrollPreviewStale ? t("preview.payrollStale") : message,
         failed,
         canRetrySafely
           ? [{ kind: "retry_command" as const, label: t("action.retryCommand"), draft }]
           : undefined,
       );
+
+      // Membership is a live source of truth. The batch RPC rejected the old fingerprint before
+      // creating anything, so issue a brand-new 15s preview rather than silently retrying it.
+      if (payrollPreviewStale) {
+        await submitPaynaSlashCommand(draft.raw);
+      }
     }
   }
 
   async function runCommand(draft: ParsedCommand) {
+    if (!canRunPaynaAction()) return;
     if (draft.missingFields.length) return;
 
     if (isForegroundOnlyCommand(draft)) {
@@ -3604,33 +3758,19 @@ export function PayCmdApp() {
     );
   }
 
-  async function submitValue(value: string, options?: { forceAskSurf?: boolean }) {
-    shouldAutoScrollRef.current = true;
-    await saveMessage({ role: "user", text: value });
-    setInput("");
-    setHistoryIndex(null);
-    draftInputBeforeHistoryRef.current = "";
-    setSuggestionChips([]);
+  async function submitPaynaSlashCommand(value: string) {
+    const parsed = parsePayCmd(value, locale);
+    const suggestedPayCommand = suggestedPayCommandFromTransfer(parsed);
 
-    const recentMessages = messages.slice(-8).map((message) => ({
-      role: message.role,
-      text: message.text,
-    }));
-
-    if (!value.startsWith("/") && (options?.forceAskSurf || (chatMode === "asksurf" && !looksLikePayCmdAction(value)))) {
-      await askCryptoResearch(value, recentMessages, {
-        surfMode: selectedSurfMode,
-        effort: selectedSurfEffort,
+    if (suggestedPayCommand) {
+      setSuggestionChips([suggestedPayCommand]);
+      await saveMessage({
+        role: "assistant",
+        text: t("transfer.recommendPay", { recipient: parsed.fields.unsupportedRecipient }),
+        provider: "paycmd",
       });
       return;
     }
-
-    if (!value.startsWith("/")) {
-      await askAiForCommand(value);
-      return;
-    }
-
-    const parsed = parsePayCmd(value, locale);
 
     if (parsed.missingFields.length) {
       const missingBothPaymentChains =
@@ -3656,15 +3796,48 @@ export function PayCmdApp() {
       await updateDraftState(activeDraftId, "cancelled");
     }
 
+    const previewExpiresAt = createPreviewExpiresAt();
     const previewMessage = await saveMessage({
       role: "assistant",
       text: parsed.summary,
       kind: "preview",
       draft: parsed,
       draftState: "active",
+      previewExpiresAt,
       provider: "paycmd",
     });
     setActiveDraftId(previewMessage?.id ?? null);
+  }
+
+  async function submitValue(value: string, selectedMode: ChatMode = chatMode) {
+    shouldAutoScrollRef.current = true;
+    await saveMessage({ role: "user", text: value });
+    setInput("");
+    setHistoryIndex(null);
+    draftInputBeforeHistoryRef.current = "";
+    setSuggestionChips([]);
+
+    const recentMessages = messages.slice(-8).map((message) => ({
+      role: message.role,
+      text: message.text,
+    }));
+
+    const route = submissionRoute(selectedMode, value);
+    if (route === "askpayna") {
+      await askCryptoResearch(value, recentMessages, {
+        surfMode: selectedSurfMode,
+        effort: selectedSurfEffort,
+        offerPaynaSwitch: looksLikePayCmdAction(value) || value.startsWith("/"),
+      });
+      return;
+    }
+
+    if (route === "payna_slash") {
+      await submitPaynaSlashCommand(value);
+      return;
+    }
+
+    await askAiForCommand(value, "paycmd");
   }
 
   async function submitCommand(event: FormEvent) {
@@ -3692,10 +3865,10 @@ export function PayCmdApp() {
     void (async () => {
       submitLockRef.current = true;
       setIsSubmitting(true);
-      setChatMode("asksurf");
+      changeChatMode("asksurf");
 
       try {
-        await submitValue(value, { forceAskSurf: true });
+        await submitValue(value, "asksurf");
       } finally {
         submitLockRef.current = false;
         setIsSubmitting(false);
@@ -3710,16 +3883,14 @@ export function PayCmdApp() {
   // by construction rather than by remembering.
   function submitSuggestedCommand(command: string) {
     const value = command.trim();
-    if (!value || submitLockRef.current) return;
+    if (!value || submitLockRef.current || !canRunPaynaAction()) return;
 
     void (async () => {
       submitLockRef.current = true;
       setIsSubmitting(true);
-      // A slash command must not be rerouted into research by a leftover AskSurf mode.
-      setChatMode("paycmd");
 
       try {
-        await submitValue(value);
+        await submitValue(value, "paycmd");
       } finally {
         submitLockRef.current = false;
         setIsSubmitting(false);
@@ -3731,7 +3902,7 @@ export function PayCmdApp() {
   // is only attached to such failures (see runForegroundCommand's catch), so this never
   // re-submits a bridge whose burn already landed.
   function retryCommand(draft: ParsedCommand) {
-    if (submitLockRef.current) return;
+    if (submitLockRef.current || !canRunPaynaAction()) return;
 
     void (async () => {
       submitLockRef.current = true;
@@ -3743,6 +3914,11 @@ export function PayCmdApp() {
         setIsSubmitting(false);
       }
     })();
+  }
+
+  function switchToPayCmd(query: string) {
+    changeChatMode("paycmd");
+    setInput(query);
   }
 
   function selectCommand(sample: string) {
@@ -3806,6 +3982,17 @@ export function PayCmdApp() {
   }
 
   function confirmDraft(messageId: string, draft: ParsedCommand) {
+    if (!canRunPaynaAction()) {
+      void updateDraftState(messageId, "cancelled");
+      return;
+    }
+
+    const target = messages.find((message) => message.id === messageId);
+    if (!target || !previewCanConfirm(target)) {
+      void updateDraftState(messageId, "cancelled", { cancellationReason: "expired" });
+      return;
+    }
+
     void (async () => {
       await updateDraftState(messageId, "confirmed");
       await runCommand(draft);
@@ -4135,6 +4322,7 @@ export function PayCmdApp() {
                     <MessageBubble
                       key={message.id}
                       message={message}
+                      chatMode={chatMode}
                       activeDraftId={activeDraftId}
                       isLatestExecutionStatus={
                         message.kind === "status" && message.execution
@@ -4145,6 +4333,7 @@ export function PayCmdApp() {
                       onConfirm={confirmDraft}
                       onCancel={cancelDraft}
                       onRelatedQuestion={submitRelatedQuestion}
+                      onSwitchToPayCmd={switchToPayCmd}
                       onRetryCommand={retryCommand}
                       onSuggestedCommand={submitSuggestedCommand}
                     />
@@ -4221,7 +4410,7 @@ export function PayCmdApp() {
                 surfMode={selectedSurfMode}
                 surfEffort={selectedSurfEffort}
                 isBusy={isInputBusy}
-                onChatModeChange={setChatMode}
+                onChatModeChange={changeChatMode}
                 onSurfModeChange={(mode) => {
                   setSelectedSurfMode(mode);
                   if (mode === "instant") setSelectedSurfEffort("standard");
@@ -4738,18 +4927,40 @@ export function CommandPalette({
   );
 }
 
-function MessageBubble({
+export function ModeBoundCommandPreview({
+  chatMode,
+  fallback,
+  ...previewProps
+}: {
+  chatMode: ChatMode;
+  fallback?: ReactNode;
+  draft: ParsedCommand;
+  state: PreviewDisplayState;
+  isActive: boolean;
+  previewExpiresAt?: string;
+  cancellationReason?: "expired";
+  onConfirm: (draft: ParsedCommand) => void;
+  onCancel: (cancellationReason?: "expired") => void;
+}) {
+  if (chatMode !== "paycmd") return <>{fallback ?? null}</>;
+  return <CommandPreviewCard {...previewProps} />;
+}
+
+export function MessageBubble({
   message,
+  chatMode,
   activeDraftId,
   isLatestExecutionStatus,
   isLastMessage,
   onConfirm,
   onCancel,
   onRelatedQuestion,
+  onSwitchToPayCmd,
   onRetryCommand,
   onSuggestedCommand,
 }: {
   message: ChatMessage;
+  chatMode: ChatMode;
   activeDraftId: string | null;
   isLatestExecutionStatus: boolean;
   // Distinct from isLatestExecutionStatus, which is per-execution: a transfer's success card stays
@@ -4757,8 +4968,9 @@ function MessageBubble({
   // do not pile up under every past transaction.
   isLastMessage: boolean;
   onConfirm: (messageId: string, draft: ParsedCommand) => void;
-  onCancel: (messageId: string) => void;
+  onCancel: (messageId: string, options?: { cancellationReason?: "expired" }) => void;
   onRelatedQuestion: (question: string) => void;
+  onSwitchToPayCmd: (query: string) => void;
   onRetryCommand: (draft: ParsedCommand) => void;
   onSuggestedCommand: (command: string) => void;
 }) {
@@ -4796,28 +5008,33 @@ function MessageBubble({
             quota={message.quota}
             groundingStatus={message.groundingStatus}
             knowledgeSources={message.knowledgeSources}
+            walletContextStatus={message.walletContextStatus}
           />
         ) : null}
         {/* Above the content branches rather than inside them, so one placement covers the research
             renderer, the plain-text branch, previews and statuses alike. */}
         {!isUser && message.reasoning ? <ReasoningDisclosure reasoning={message.reasoning} /> : null}
         {message.kind === "preview" && message.draft ? (
-          <CommandPreviewCard
+          <ModeBoundCommandPreview
+            chatMode={chatMode}
+            fallback={<span className="block whitespace-pre-wrap break-words">{message.text}</span>}
             draft={message.draft}
             state={
               message.draftState ??
               (activeDraftId === message.id ? "active" : "closed")
             }
             isActive={activeDraftId === message.id && message.draftState === "active"}
+            previewExpiresAt={message.previewExpiresAt}
+            cancellationReason={message.cancellationReason}
             onConfirm={(confirmedDraft) => onConfirm(message.id, confirmedDraft)}
-            onCancel={() => onCancel(message.id)}
+            onCancel={(cancellationReason) => onCancel(message.id, { cancellationReason })}
           />
         ) : message.kind === "status" && message.execution ? (
           <ExecutionStatus
             execution={message.execution}
             text={message.text}
             isLatest={isLatestExecutionStatus}
-            showFollowUps={isLastMessage}
+            showFollowUps={chatMode === "paycmd" && isLastMessage}
             onSuggestedCommand={onSuggestedCommand}
           />
         ) : (
@@ -4845,8 +5062,10 @@ function MessageBubble({
             ) : null}
             {message.actions?.length ? (
               <AssistantActionBar
+                chatMode={chatMode}
                 actions={message.actions}
                 onAskSurf={onRelatedQuestion}
+                onPayCmd={onSwitchToPayCmd}
                 onRetry={onRetryCommand}
               />
             ) : null}
@@ -4874,18 +5093,27 @@ function executionStatusTone(execution: ExecutionItem, isLatest: boolean) {
   return "rounded-bl-md border border-border bg-muted/20 text-foreground";
 }
 
-function AssistantActionBar({
+export function AssistantActionBar({
+  chatMode,
   actions,
   onAskSurf,
+  onPayCmd,
   onRetry,
 }: {
+  chatMode: ChatMode;
   actions: AssistantAction[];
   onAskSurf: (question: string) => void;
+  onPayCmd: (query: string) => void;
   onRetry: (draft: ParsedCommand) => void;
 }) {
+  const visibleActions = actions.filter(
+    (action) => chatMode === "paycmd" || action.kind !== "retry_command",
+  );
+  if (!visibleActions.length) return null;
+
   return (
     <div className="flex flex-wrap gap-2 border-t pt-3">
-      {actions.map((action, index) =>
+      {visibleActions.map((action, index) =>
         action.kind === "retry_command" ? (
           <Button
             key={`retry_${action.draft.command}_${index}`}
@@ -4896,6 +5124,18 @@ function AssistantActionBar({
             onClick={() => onRetry(action.draft)}
           >
             <RotateCcw className="h-3.5 w-3.5" />
+            {action.label}
+          </Button>
+        ) : action.kind === "switch_to_paycmd" ? (
+          <Button
+            key={`${action.kind}_${action.query}`}
+            type="button"
+            size="sm"
+            variant="outline"
+            className="border-primary/50 bg-primary/10 text-primary hover:bg-primary/15"
+            onClick={() => onPayCmd(action.query)}
+          >
+            <Bot className="h-3.5 w-3.5" />
             {action.label}
           </Button>
         ) : (
@@ -4924,6 +5164,7 @@ function ProviderBadge({
   quota,
   groundingStatus,
   knowledgeSources,
+  walletContextStatus,
 }: {
   provider: AiProvider;
   model?: string;
@@ -4933,6 +5174,7 @@ function ProviderBadge({
   quota?: AiQuota;
   groundingStatus?: GroundingStatus;
   knowledgeSources?: KnowledgeSource[];
+  walletContextStatus?: WalletContextStatus;
 }) {
   const { t } = useI18n();
   const Icon = provider === "asksurf" ? Waypoints : provider === "openai" ? Bot : Sparkles;
@@ -4963,7 +5205,23 @@ function ProviderBadge({
       {knowledgeSources?.length ? (
         <span className="text-muted-foreground">· {knowledgeSources.map(knowledgeSourceLabel).join(" + ")}</span>
       ) : null}
+      {walletContextStatus ? <WalletContextBadge status={walletContextStatus} /> : null}
     </div>
+  );
+}
+
+export function WalletContextBadge({ status }: { status: WalletContextStatus }) {
+  const labels: Record<WalletContextStatus, string> = {
+    verified: "Balances verified",
+    partial: "Some balances unavailable",
+    unavailable: "Balances unavailable",
+  };
+
+  return (
+    <span className="inline-flex items-center gap-1 text-muted-foreground">
+      <WalletCards className="h-3 w-3" aria-hidden="true" />
+      {labels[status]}
+    </span>
   );
 }
 
@@ -6401,20 +6659,40 @@ function TransactionPreviewSummary({
   );
 }
 
-function CommandPreviewCard({
+export function CommandPreviewCard({
   draft,
   state,
   isActive,
+  previewExpiresAt,
+  cancellationReason,
   onConfirm,
   onCancel,
 }: {
   draft: ParsedCommand;
   state: PreviewDisplayState;
   isActive: boolean;
+  previewExpiresAt?: string;
+  cancellationReason?: "expired";
   onConfirm: (draft: ParsedCommand) => void;
-  onCancel: () => void;
+  onCancel: (cancellationReason?: "expired") => void;
 }) {
   const { t } = useI18n();
+  const expiryCancellationSent = useRef(false);
+  const isPersistedActive = state === "active";
+  const persistedPreviewIsExpired =
+    isPersistedActive &&
+    (!previewExpiresAt || previewLeaseState(previewExpiresAt).expired);
+  const canConfirmLease =
+    isPersistedActive &&
+    previewCanConfirm({ draftState: "active", previewExpiresAt });
+  const showExpired = cancellationReason === "expired" || persistedPreviewIsExpired;
+
+  useEffect(() => {
+    if (!persistedPreviewIsExpired || expiryCancellationSent.current) return;
+    expiryCancellationSent.current = true;
+    onCancel("expired");
+  }, [onCancel, persistedPreviewIsExpired]);
+
   const previewStatusLabel =
     state === "cancelled"
       ? t("status.cancelled")
@@ -6430,6 +6708,11 @@ function CommandPreviewCard({
   const isBridge = draft.command === "bridge";
   const isSwap = draft.command === "swap";
   const isPayroll = draft.command === "payroll";
+  const unsupportedTransferRecipient =
+    draft.command === "transfer"
+      ? draft.fields.unsupportedRecipient?.trim() || unsupportedTransferRecipientFrom(draft.raw)
+      : "";
+  const transferRecipientBlocked = Boolean(unsupportedTransferRecipient);
   const [selectedMintGasMode, setSelectedMintGasMode] = useState<"auto_forwarding" | "manual">(
     draft.fields.mintGasMode === "manual"
       ? "manual"
@@ -6470,8 +6753,18 @@ function CommandPreviewCard({
   const [gatewayDelegateMessage, setGatewayDelegateMessage] = useState("");
   const [gatewayPreflightLoading, setGatewayPreflightLoading] = useState(false);
   const [gatewayRefreshMessage, setGatewayRefreshMessage] = useState("");
-  const [payrollRecipientCount, setPayrollRecipientCount] = useState<number | null>(null);
-  const [payrollRecipientError, setPayrollRecipientError] = useState("");
+  const [payrollPreview, setPayrollPreview] = useState<{
+    groupId: string;
+    groupName: string;
+    recipients: Array<{ contactId: string; label: string; address: string; destinationChain: string }>;
+    excluded: Array<{ contactId?: string; label?: string; reason: string }>;
+    sourceChain: string;
+    recipientFingerprint: string;
+    recipientCount: number;
+    perRecipientAmount: string;
+    totalAmount: string;
+  } | null>(null);
+  const [payrollPreviewError, setPayrollPreviewError] = useState("");
   const manualMintSupported = gatewayManualMintSupported(previewDestinationChain);
   const manualMintUnavailableMessage = previewDestinationChain
     ? t("preview.manualMintUnavailable", {
@@ -6518,26 +6811,35 @@ function CommandPreviewCard({
     if (!isPayroll || !isActive) return;
 
     let cancelled = false;
-    setPayrollRecipientCount(null);
-    setPayrollRecipientError("");
-    void requestJson("/api/contacts")
+    setPayrollPreview(null);
+    setPayrollPreviewError("");
+    if (!draft.fields.groupName || !draft.fields.amount || !draft.fields.sourceChain) {
+      setPayrollPreviewError(t("preview.payrollLoadFailed"));
+      return;
+    }
+    void requestJson("/api/payroll/preview", {
+      method: "POST",
+      body: JSON.stringify({
+        groupName: draft.fields.groupName,
+        amount: draft.fields.amount,
+        sourceChain: draft.fields.sourceChain,
+      }),
+    })
       .then((result) => {
         if (cancelled) return;
-        const contacts: unknown[] = Array.isArray(result?.contacts) ? result.contacts : [];
-        const activeCount = contacts
-          .filter((contact) => recordFrom(contact).status === "active")
-          .slice(0, 25).length;
-        setPayrollRecipientCount(activeCount);
-        if (!activeCount) setPayrollRecipientError(t("preview.payrollLoadFailed"));
+        if (!result?.preview) throw new Error(t("preview.payrollLoadFailed"));
+        setPayrollPreview(result.preview);
       })
-      .catch(() => {
-        if (!cancelled) setPayrollRecipientError(t("preview.payrollLoadFailed"));
+      .catch((error) => {
+        if (!cancelled) {
+          setPayrollPreviewError(error instanceof Error ? error.message : t("preview.payrollLoadFailed"));
+        }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [isActive, isPayroll, t]);
+  }, [draft.fields.amount, draft.fields.groupName, draft.fields.sourceChain, isActive, isPayroll, t]);
 
   useEffect(() => {
     if (bridgeRecipientMode === "external" && bridgeMintMode === "manual_mint") {
@@ -6645,6 +6947,7 @@ function CommandPreviewCard({
     if (
       !hasMintGasChoice ||
       !isActive ||
+      transferRecipientBlocked ||
       !draft.fields.amount ||
       (effectiveGatewaySourceMode === "scoped" && !previewSourceChain) ||
       !previewDestinationChain
@@ -6717,6 +7020,7 @@ function CommandPreviewCard({
     selectedMintGasMode,
     selectedGatewaySources,
     t,
+    transferRecipientBlocked,
   ]);
   const mintGasModeText =
     selectedMintGasMode === "manual"
@@ -6736,10 +7040,7 @@ function CommandPreviewCard({
           destination: draft.fields.destinationChain,
         })
       : draft.summary;
-  const payrollTotal =
-    isPayroll && payrollRecipientCount !== null
-      ? formatDecimalAmount(Number(draft.fields.amount || 0) * payrollRecipientCount)
-      : null;
+  const payrollTotal = isPayroll ? payrollPreview?.totalAmount ?? null : null;
   const confirmedDraft: ParsedCommand = {
     ...draft,
     summary: isBridge
@@ -6761,10 +7062,12 @@ function CommandPreviewCard({
           ...draft.fields,
           token: "USDC",
           recipient:
-            payrollRecipientCount === null
+            payrollPreview === null
               ? t("preview.confirmPayrollPending")
-              : t("preview.activeRecipients", { count: payrollRecipientCount }),
+              : t("preview.activeRecipients", { count: payrollPreview.recipientCount }),
           totalExposure: payrollTotal ? `${payrollTotal} USDC` : "",
+          groupId: payrollPreview?.groupId ?? "",
+          recipientFingerprint: payrollPreview?.recipientFingerprint ?? "",
         }
       : isBridge
       ? {
@@ -6805,8 +7108,8 @@ function CommandPreviewCard({
       : confirmedDraft;
   const previewModel = buildTransactionPreviewModel(confirmedDraft);
   const confirmLabel = isPayroll
-    ? payrollTotal && payrollRecipientCount
-      ? t("preview.confirmPayroll", { total: payrollTotal, token: "USDC", count: payrollRecipientCount })
+    ? payrollTotal && payrollPreview
+      ? t("preview.confirmPayroll", { total: payrollTotal, token: "USDC", count: payrollPreview.recipientCount })
       : t("preview.confirmPayrollPending")
     : hasMintGasChoice && gatewayFallbackMode === "deposit"
       ? t("preview.gatewayConfirmDeposit", { amount: gatewayDepositAmount })
@@ -6844,6 +7147,7 @@ function CommandPreviewCard({
     Number(gatewayDepositAmount) > 0 && Number(gatewayDepositAmount) >= gatewayDepositMinimum;
   const gatewayConfirmDisabled =
     !isActive ||
+    transferRecipientBlocked ||
     gatewayEstimateLoading ||
     gatewayPreflightLoading ||
     !gatewayEstimate ||
@@ -6948,9 +7252,40 @@ function CommandPreviewCard({
         ) : null}
       </div>
       <TransactionPreviewFields model={previewModel} />
-      {isPayroll && payrollRecipientError ? (
+      {draft.command === "transfer" ? (
+        transferRecipientBlocked ? (
+          <div
+            role="alert"
+            className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-3 text-xs text-foreground"
+          >
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
+              <div className="min-w-0">
+                <div className="font-semibold">{t("transfer.recipientBlockedTitle")}</div>
+                <p className="mt-1 leading-5 text-muted-foreground">
+                  {t("transfer.recipientBlockedHelp", { recipient: unsupportedTransferRecipient })}
+                </p>
+                <div className="mt-2 text-muted-foreground">{t("transfer.usePayInstead")}</div>
+                <code className="mt-1 block overflow-x-auto rounded-md border border-amber-500/25 bg-background/80 px-2 py-1.5 font-mono text-[11px] text-foreground">
+                  {suggestedPayCommandFromTransfer(draft)}
+                </code>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-info/35 bg-info/10 px-3 py-3 text-xs text-info-foreground">
+            <div className="font-semibold">{t("transfer.selfOnlyTitle")}</div>
+            <p className="mt-1 leading-5 text-muted-foreground">
+              {t("transfer.selfOnlyHelp", {
+                chain: getChainMeta(previewDestinationChain)?.label ?? previewDestinationChain,
+              })}
+            </p>
+          </div>
+        )
+      ) : null}
+      {isPayroll && payrollPreviewError ? (
         <div role="alert" className="rounded-xl border border-danger/35 bg-danger/10 px-3 py-2 text-xs text-danger">
-          {payrollRecipientError}
+          {payrollPreviewError}
         </div>
       ) : null}
       <div className="space-y-2 rounded-lg border bg-background p-2 text-xs text-muted-foreground">
@@ -7288,6 +7623,18 @@ function CommandPreviewCard({
             </button>
           </div>
         ) : null}
+        {isPayroll && payrollPreview ? (
+          <TransactionPreviewSummary
+            title={t("preview.payrollSummary")}
+            subtitle={t("preview.payrollGroup", { group: payrollPreview.groupName })}
+            metrics={[
+              { label: t("preview.activeRecipients", { count: payrollPreview.recipientCount }), value: `${payrollPreview.perRecipientAmount} USDC` },
+              { label: t("preview.payrollTotal"), value: `${payrollPreview.totalAmount} USDC` },
+              { label: t("preview.payrollExcluded"), value: String(payrollPreview.excluded.length) },
+            ]}
+            details={payrollPreview.recipients.map((recipient) => `${recipient.label} · ${recipient.address}`)}
+          />
+        ) : null}
         {hasMintGasChoice ? (
           <>
             {scopedGatewayInsufficient ? (
@@ -7443,18 +7790,27 @@ function CommandPreviewCard({
         ) : null}
         {mintGasHelpText ? <div>{mintGasHelpText}</div> : null}
       </div>
-      {isActive ? (
-        <TransactionConfirmActions
-          confirmLabel={gatewayPreflightLoading ? t("preview.gatewayCheckingQuote") : confirmLabel}
-          cancelLabel={t("common.cancel")}
-          disabled={isBridge ? bridgeConfirmDisabled : isSwap ? swapConfirmDisabled : hasMintGasChoice ? gatewayConfirmDisabled : isPayroll ? payrollRecipientCount === null || payrollRecipientCount === 0 || Boolean(payrollRecipientError) : false}
-          onCancel={onCancel}
-          onConfirm={() => void confirmWithGatewayPreflight()}
-        />
+      {showExpired ? (
+        <div role="status" className="rounded-md border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
+          <div className="font-medium">{t("preview.expired")}</div>
+          <div className="mt-1 text-xs">{t("preview.resubmit")}</div>
+        </div>
+      ) : null}
+      {isActive && !showExpired ? (
+        <>
+          <PreviewLeaseTimer expiresAt={previewExpiresAt!} onExpire={() => onCancel("expired")} />
+          <TransactionConfirmActions
+            confirmLabel={gatewayPreflightLoading ? t("preview.gatewayCheckingQuote") : confirmLabel}
+            cancelLabel={t("common.cancel")}
+            disabled={!canConfirmLease || (isBridge ? bridgeConfirmDisabled : isSwap ? swapConfirmDisabled : hasMintGasChoice ? gatewayConfirmDisabled : isPayroll ? payrollPreview === null || payrollPreview.recipientCount === 0 || Boolean(payrollPreviewError) : false)}
+            onCancel={() => onCancel()}
+            onConfirm={() => void confirmWithGatewayPreflight()}
+          />
+        </>
       ) : (
         <Button className="w-full" disabled>
           <Check className="h-4 w-4" />
-          {previewStatusLabel}
+          {showExpired ? confirmLabel : previewStatusLabel}
         </Button>
       )}
     </div>

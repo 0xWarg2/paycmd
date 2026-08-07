@@ -60,6 +60,21 @@ export function isCircleWebhookTestNotification(input: unknown) {
   return (input as Record<string, unknown>).notificationType === "webhooks.test";
 }
 
+export type GatewayWebhookDepositDisposition =
+  | "retry"
+  | "settle"
+  | "already_settled"
+  | "reject";
+
+export function classifyGatewayWebhookDeposit(
+  status: string | null,
+): GatewayWebhookDepositDisposition {
+  if (status === null) return "retry";
+  if (status === "pending_gateway_finality") return "settle";
+  if (status === "success") return "already_settled";
+  return "reject";
+}
+
 const CIRCLE_GATEWAY_SUBSCRIPTIONS_URL =
   "https://api.circle.com/v2/notifications/subscriptions/permissionless";
 

@@ -21,6 +21,10 @@ export type PendingGatewayDeposit = {
   deposit_block_number?: number | string | null;
 };
 
+export type GatewayDepositRecord = PendingGatewayDeposit & {
+  status: string;
+};
+
 export type SettledGatewayDeposit = {
   id: string;
   userId: string;
@@ -211,15 +215,14 @@ export async function settleGatewayDeposit(params: {
   return settled;
 }
 
-export async function findPendingGatewayDepositByTxHash(
+export async function findGatewayDepositByTxHash(
   supabase: SupabaseClient,
   txHash: string,
-): Promise<PendingGatewayDeposit | null> {
+): Promise<GatewayDepositRecord | null> {
   const { data, error } = await supabase
     .from("transaction_history")
-    .select("id, user_id, amount, chain, tx_hash, created_at, deposit_block_number")
+    .select("id, user_id, amount, chain, tx_hash, created_at, deposit_block_number, status")
     .eq("tx_type", "deposit")
-    .eq("status", "pending_gateway_finality")
     .ilike("tx_hash", txHash)
     .maybeSingle();
 
@@ -227,5 +230,5 @@ export async function findPendingGatewayDepositByTxHash(
     throw new Error(`Failed to find Gateway deposit: ${error.message}`);
   }
 
-  return (data as PendingGatewayDeposit | null) ?? null;
+  return (data as GatewayDepositRecord | null) ?? null;
 }

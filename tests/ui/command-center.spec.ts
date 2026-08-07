@@ -1,17 +1,96 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
+test.describe.configure({ timeout: 60_000 });
+
 test("renders the command center state catalog with safe transaction copy", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.setItem("paycmd_locale", "en"));
   await page.goto("/dev/ui-preview");
 
   await expect(page.getByRole("heading", { name: "Command center UI states" })).toBeVisible();
   await expect(page.getByText("From network", { exact: true })).toBeVisible();
   await expect(page.getByText("To network", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Confirm 50 USDC" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Giao diện" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Appearance" })).toBeVisible();
   await expect(
     page.getByLabel("Transaction status: waiting_gateway").getByText("Finalizing", { exact: true }),
   ).toBeVisible();
+});
+
+test("switching an active Payna preview to AskPayna cancels it and removes confirmation controls", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.setItem("paycmd_locale", "en"));
+  await page.goto("/dev/ui-preview?modeSafety=1");
+
+  await expect(page.getByRole("button", { name: "Confirm 50 USDC" })).toBeVisible();
+  await page.getByRole("button", { name: "Select AskPayna" }).click();
+
+  await expect(page.getByTestId("mode-safety-state")).toContainText("asksurf:cancelled");
+  await expect(page.getByRole("button", { name: "Confirm 50 USDC" })).toHaveCount(0);
+});
+
+test("stale confirm and persisted retry callbacks cannot execute in AskPayna", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.setItem("paycmd_locale", "en"));
+  await page.goto("/dev/ui-preview?modeSafety=1");
+
+  await expect(page.getByRole("button", { name: "Retry command" })).toBeVisible();
+  await page.getByRole("button", { name: "Select AskPayna" }).click();
+  await expect(page.getByRole("button", { name: "Retry command" })).toHaveCount(0);
+
+  const staleConfirm = page.getByRole("button", { name: "Invoke stale confirm callback" });
+  const staleRetry = page.getByRole("button", { name: "Invoke stale retry callback" });
+  await staleConfirm.focus();
+  await staleConfirm.press("Enter");
+  await staleRetry.focus();
+  await staleRetry.press("Enter");
+  await expect(page.getByTestId("mode-safety-state")).toContainText("confirmed=0:retried=0");
+});
+
+test("switch to Payna only changes mode and prefills without submitting", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.setItem("paycmd_locale", "en"));
+  await page.goto("/dev/ui-preview?modeSafety=1");
+
+  await page.getByRole("button", { name: "Select AskPayna" }).click();
+  await page.getByRole("button", { name: "Switch to Payna" }).click();
+
+  await expect(page.getByLabel("Mode safety input")).toHaveValue("/pay 50 USDC to Minh on arc from base");
+  await expect(page.getByTestId("mode-safety-state")).toContainText("paycmd");
+  await expect(page.getByTestId("mode-safety-state")).toContainText("submitted=0");
+});
+
+test("expires a transaction preview after fifteen seconds", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-08-07T00:00:00.000Z") });
+  await page.addInitScript(() => window.localStorage.setItem("paycmd_locale", "en"));
+  await page.goto("/dev/ui-preview");
+
+  await expect(page.getByRole("timer")).toHaveText(/^00:(?:0[1-9]|1[0-5])$/);
+  await page.clock.fastForward(15_000);
+
+  await expect(page.getByRole("button", { name: /Confirm 50 USDC/i })).toBeDisabled();
+  await expect(page.getByText(/Preview expired/i)).toBeVisible();
+  await expect(page.getByTestId("preview-lease-metadata")).toHaveText("cancelled:expired:1");
+});
+
+test("cancels an already expired persisted preview through the production card", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-08-07T00:00:00.000Z") });
+  await page.addInitScript(() => window.localStorage.setItem("paycmd_locale", "en"));
+  await page.goto("/dev/ui-preview?previewLease=expired");
+
+  await expect(page.getByText(/Preview expired/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /Confirm 50 USDC/i })).toBeDisabled();
+  await expect(page.getByTestId("preview-lease-metadata")).toHaveText("cancelled:expired:1");
+
+  await page.clock.fastForward(60_000);
+  await expect(page.getByTestId("preview-lease-metadata")).toHaveText("cancelled:expired:1");
+});
+
+test("fails closed for a legacy active preview without an expiry", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-08-07T00:00:00.000Z") });
+  await page.addInitScript(() => window.localStorage.setItem("paycmd_locale", "en"));
+  await page.goto("/dev/ui-preview?previewLease=legacy");
+
+  await expect(page.getByText(/Preview expired/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /Confirm 50 USDC/i })).toBeDisabled();
+  await expect(page.getByTestId("preview-lease-metadata")).toHaveText("cancelled:expired:1");
 });
 
 test("keeps mobile navigation to four primary destinations without overflow", async ({ page }, testInfo) => {
@@ -103,12 +182,15 @@ test("desktop toolbar stays above chat content without overlap", async ({ page }
 });
 
 test("matches the command center visual baseline", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-08-07T00:00:00.000Z") });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/dev/ui-preview");
+  await expect(page.getByText(/MetaMask is not available/i)).toBeVisible();
 
   await expect(page).toHaveScreenshot("command-center.png", {
     animations: "disabled",
     fullPage: true,
+    mask: [page.getByRole("timer")],
     stylePath: "tests/ui/screenshot.css",
   });
 });

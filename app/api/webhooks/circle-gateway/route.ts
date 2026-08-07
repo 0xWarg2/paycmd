@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import {
+  classifyGatewayWebhookDeposit,
   fetchCircleNotificationPublicKey,
   isCircleWebhookTestNotification,
   parseGatewayDepositFinalized,
@@ -9,7 +10,7 @@ import {
 } from "@/lib/circle/gateway-webhook";
 import { GATEWAY_CHAIN_CONFIGS } from "@/lib/circle/gateway-sdk";
 import {
-  findPendingGatewayDepositByTxHash,
+  findGatewayDepositByTxHash,
   settleGatewayDeposit,
 } from "@/lib/paycmd/gateway-deposit-settlement";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -78,8 +79,9 @@ export async function POST(req: NextRequest) {
       throw new Error(`Failed to persist Circle webhook: ${auditError.message}`);
     }
 
-    const deposit = await findPendingGatewayDepositByTxHash(supabase, event.txHash);
-    if (!deposit) {
+    const deposit = await findGatewayDepositByTxHash(supabase, event.txHash);
+    const disposition = classifyGatewayWebhookDeposit(deposit?.status ?? null);
+    if (disposition === "retry") {
       await supabase
         .from("circle_gateway_webhook_events")
         .update({ processing_status: "unmatched" })
@@ -87,6 +89,20 @@ export async function POST(req: NextRequest) {
       // A fast-chain webhook can beat the deposit route's database insert. A retryable response
       // lets Circle deliver the same notification again; the audit row makes that retry safe.
       return NextResponse.json({ success: false, matched: false }, { status: 503 });
+    }
+
+    if (!deposit || disposition === "reject") {
+      await supabase
+        .from("circle_gateway_webhook_events")
+        .update({
+          processing_status: "failed",
+          error_message: `Gateway deposit is in unsupported status: ${deposit?.status ?? "missing"}.`,
+        })
+        .eq("notification_id", event.notificationId);
+      return NextResponse.json(
+        { error: "Gateway deposit cannot be finalized from its current status." },
+        { status: 409 },
+      );
     }
 
     const expectedDomain = GATEWAY_CHAIN_CONFIGS[deposit.chain]?.domain;
@@ -114,6 +130,24 @@ export async function POST(req: NextRequest) {
         })
         .eq("notification_id", event.notificationId);
       return NextResponse.json({ error: "Circle webhook does not match deposit." }, { status: 409 });
+    }
+
+    if (disposition === "already_settled") {
+      await supabase
+        .from("circle_gateway_webhook_events")
+        .update({
+          processing_status: "processed",
+          processed_at: new Date().toISOString(),
+          error_message: null,
+        })
+        .eq("notification_id", event.notificationId);
+
+      return NextResponse.json({
+        success: true,
+        matched: true,
+        settled: false,
+        alreadySettled: true,
+      });
     }
 
     const locale = process.env.PAYCMD_DEFAULT_LOCALE === "en" ? "en" : "vi";

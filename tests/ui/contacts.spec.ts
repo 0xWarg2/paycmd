@@ -81,3 +81,26 @@ test("keeps the contact confirmation accessible without horizontal overflow", as
     ),
   ).toBe(false);
 });
+
+test("creates a group and manages members without deleting contacts", async ({ page }) => {
+  await page.goto("/dev/contacts-preview");
+  await page.getByRole("button", { name: "Tạo nhóm" }).click();
+  await page.getByLabel("Tên nhóm").fill("Core Team");
+  await page.getByRole("button", { name: "Lưu nhóm" }).click();
+  await expect(page.getByRole("button", { name: /Core Team.*0 thành viên/ })).toBeVisible();
+
+  await page.getByRole("button", { name: /Quản lý thành viên Core Team/ }).click();
+  await page.getByRole("checkbox", { name: "Minh" }).check();
+  await page.getByRole("button", { name: "Lưu thành viên" }).click();
+  await expect(page.getByRole("button", { name: /Core Team.*1 thành viên/ })).toBeVisible();
+  await expect(page.getByText("Minh", { exact: true })).toBeVisible();
+});
+
+test("deleting a group keeps its contacts", async ({ page }) => {
+  await page.goto("/dev/contacts-preview?group=core-team");
+  await page.getByRole("button", { name: "Xoá nhóm Core Team" }).click();
+  await expect(page.getByRole("dialog")).toContainText("contact vẫn được giữ lại");
+  await page.getByRole("button", { name: "Xoá nhóm", exact: true }).click();
+  await expect(page.getByText("Core Team", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Minh", { exact: true })).toBeVisible();
+});

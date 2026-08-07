@@ -4,12 +4,14 @@ title: "Pay và contacts"
 description: "Resolve saved contact hoặc địa chỉ trực tiếp, preview hai chain và confirm USDC payment an toàn."
 section: "features"
 order: 41
-lastUpdated: "2026-08-05"
-keywords: ["pay", "contacts", "recipient", "preview"]
+lastUpdated: "2026-08-07"
+keywords: ["pay", "contacts", "recipient", "preview", "15 giây", "AskPayna"]
 tutorial: true
 aiSummary:
-  - "Payment Payna cần amount, recipient, source chain và destination chain, rồi resolve người nhận và hiện confirmation preview trước khi chạy Gateway."
+  - "Payment Payna cần amount, recipient, source chain và destination chain, rồi hiện confirmation preview 15 giây trước khi chạy Gateway."
+  - "AskPayna không biến /pay hay transfer-like text thành preview; hãy chuyển sang Payna rồi submit lại tại đó để chuẩn bị payment."
   - "Contact chỉ lưu identity và routing hint, không có quyền ký; luôn kiểm tra địa chỉ đã resolve và destination."
+  - "Payna hiểu các imperative contact-group rõ ràng bằng tiếng Việt/Anh, nhưng không biến câu hỏi về group thành hành động."
 ---
 
 ## Địa chỉ hay saved contact
@@ -24,6 +26,12 @@ Khi địa chỉ thuộc một tài khoản Payna, app có thể resolve nó nh�
 
 Nếu display name đã tồn tại trong danh bạ, việc add lại sẽ cập nhật contact đó. `/pay` tìm contact theo display name không phân biệt hoa thường. Destination chain ghi trong command sẽ ghi đè preferred chain đã lưu; preference chỉ là routing hint, không phải cam kết cố định.
 
+## Nhóm contact qua chat
+
+Bạn có thể quản lý nhóm bằng slash command: `/contacts group create Core Team`, `/contacts group list`, `/contacts group add Core Team Minh`, `/contacts group remove Core Team Minh`, và `/contacts group delete Core Team`. Xóa group chỉ xóa membership; contact trong directory vẫn còn.
+
+Trong Payna mode, AI cũng route các yêu cầu mệnh lệnh rõ ràng như “Tạo nhóm Core Team”, “thêm Minh vào nhóm Core Team”, “Xóa Lan khỏi nhóm Core Team”, hoặc “delete group Core Team” vào đúng command trên. AI chỉ nhận diện action khi câu yêu cầu rõ ràng; câu hỏi như “Làm sao tạo nhóm?” vẫn là câu hỏi, không tạo hoặc sửa group.
+
 ## Bắt buộc source và destination
 
 Command parser của Payna yêu cầu destination và một named source hoặc Unified Gateway. Ví dụ, `/pay 25 to Minh on arc from base` chọn source-scoped balance trên Base, còn `/pay 25 to Minh on arc from gateway` mở multi-source preview bằng `BurnIntentSet`. Preferred chain của contact chỉ là routing hint.
@@ -34,7 +42,11 @@ Payment này dùng Circle Gateway rail, không phải MetaMask CCTP. Nếu scope
 
 Preview phải hiện amount và token, source network, destination network và recipient đã resolve. Nó còn xác định rail, rủi ro cross-chain hoặc recipient, destination gas mode, cùng fee hoặc wallet estimate khi có. Mở advanced details trước khi duyệt forwarding choice.
 
-Confirmation label nhắc lại amount nhưng không thay cho việc kiểm tra địa chỉ đầy đủ. Với contact mới, đối chiếu địa chỉ qua kênh tin cậy thứ hai. Nếu destination hoặc recipient sai, hãy cancel và sửa draft. AI hiểu natural-language instruction không làm tiền di chuyển; user phải confirm execution rõ ràng.
+Mọi transaction preview đều có lease chính xác 15 giây. Chỉ confirm trong cửa sổ đó sau khi đã kiểm tra mọi field. Khi preview hết hạn, Payna disable confirmation, cancel preview với lý do expired và yêu cầu user submit lại command để lấy preview mới. Callback confirm cũ không thể execute, và sửa card cũ không kéo dài lease.
+
+Confirmation label nhắc lại amount nhưng không thay cho việc kiểm tra địa chỉ đầy đủ. Với contact mới, đối chiếu địa chỉ qua kênh tin cậy thứ hai. Nếu destination hoặc recipient sai, hãy cancel và sửa draft. AI hiểu natural-language instruction không làm tiền di chuyển; user phải confirm execution rõ ràng trong Payna mode.
+
+AskPayna vẫn không thực thi kể cả với `/pay 50 USDC to Minh on arc from base` hay transfer-like prose. Mode này không bao giờ parse, render, confirm hay execute payment preview. Phần giải thích có thể hiện **Chuyển sang Payna**; action đó chỉ đổi mode và prefill text. User vẫn phải submit trong Payna để tạo preview 15 giây mới.
 
 ## Điều xảy ra sau confirm
 

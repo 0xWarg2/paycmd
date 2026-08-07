@@ -4,17 +4,24 @@ title: "Wallet and balance commands"
 description: "Reference for wallet, link, fund, and balance."
 section: "commands"
 order: 60
-lastUpdated: "2026-08-05"
-keywords: ["wallet", "link", "fund", "balance"]
+lastUpdated: "2026-08-07"
+keywords: ["wallet", "link", "fund", "balance", "AskPayna", "wallet observations"]
 commands: ["wallet", "link", "fund", "balance"]
 tutorial: true
 aiSummary:
-  - "Wallet commands include /wallet, /link, /fund, and /balance; /fund only funds the SCA while /balance combines SCA and Gateway visibility."
+  - "Wallet commands include /wallet, /link, /fund, and /balance; /fund only funds the SCA while /balance labels SCA and Gateway visibility separately."
+  - "Authenticated AskPayna observations keep Gateway ready/pending, Circle SCA USDC, external-wallet USDC, and native gas separate and add no signing rail."
 ---
 
 ## Read wallet roles first
 
 These commands expose four distinct things: your Payna account, user-controlled MetaMask, the Circle SCA wallet, and source-scoped Circle Gateway balance. They do not merge ownership or move funds automatically. See [accounts and wallet roles](/docs/getting-started/account-and-wallets) for the conceptual model.
+
+## Wallet context in AskPayna
+
+For an authenticated user, AskPayna may read wallet observations only when the question is operationally relevant—for example, “Can I afford 50 USDC?” or “How can I send 50 USDC to Arc?” It does not load private wallet context for general protocol or educational questions. These observations describe a point in time and may be partial.
+
+AskPayna labels Gateway-ready USDC, Gateway-pending USDC, Circle SCA USDC, external-wallet USDC, and external-wallet native gas as separate families. It does not aggregate them into a rail-independent total, convert unavailable reads to zero, or imply that one family can fund another. Adding these read-only observations did not add a MetaMask signing or transaction rail to AskPayna; there is no preview, wallet prompt, signature, or transaction from a research answer.
 
 ## `/wallet`
 
@@ -57,5 +64,5 @@ These commands expose four distinct things: your Payna account, user-controlled 
 - **Prerequisites:** Sign in and create an SCA. No MetaMask connection, signature, or gas is needed.
 - **Preview:** This is an immediate read, not a transaction preview. Results list SCA `chainBalances`, Gateway domain balances, totals, failed chains, and Gateway availability.
 - **Confirmation boundary:** None; the command cannot spend funds.
-- **Success and persisted data:** Returns current fetched balances only; it does not write transaction history. An all-chain `totalUnified` adds visible SCA and Gateway values for display, not spendability.
+- **Success and persisted data:** Returns current fetched balances only; it does not write transaction history. In the `/balance` command result, an all-chain `totalUnified` adds visible SCA and Gateway values for display, not spendability; AskPayna wallet observations do not use that aggregation.
 - **Named errors and fixes:** **“No wallet address found”**: run `/wallet create`. **“Unsupported chain”**: correct the scope. A **partial** result or failed chain means the displayed total is only a lower bound; retry the read instead of treating unavailable data as zero.

@@ -7,7 +7,7 @@ Ra V1 mở rộng từ Gateway command console sang USDC payment copilot. Scope 
 - `/contacts add Minh 0x... on arc`: lưu contact để resolve tên sang wallet address và preferred chain.
 - `/pay 25 to Minh on arc from base`: chuyển USDC cho contact hoặc địa chỉ ví ngoài. API dùng `/api/payments/pay`, resolve contact rồi gọi lại `/api/gateway/transfer` với `recipientAddress`.
 - `/request 25 from Minh on arc`: tạo payment request link `/pay/request/:id` và QR image URL. Người trả mở link, login, preview và confirm.
-- `/payroll run team 25 from base`: tạo payroll batch từ active contacts và chạy tuần tự từng item qua Circle Gateway transfer.
+- `/payroll run team 25 from base`: tạo payroll batch từ group `team` rõ ràng (tối đa 25 recipient hợp lệ), snapshot fingerprint và chạy tuần tự từng item qua Circle Gateway transfer.
 
 ## Data
 
@@ -23,6 +23,6 @@ Ra không tự custody tiền ngoài chain. Tiền nằm ở Circle wallet addre
 ## Limitations
 
 - V1 chưa dùng MetaMask-first. User cần fund Ra/Circle wallet.
-- Payroll chạy tuần tự trong request để demo nhanh, chưa có queue/cron.
+- Payroll chạy tuần tự trong request để demo nhanh: item fail không rollback item trước và không dừng item sau; chưa có retry, queue, resume batch, parallel worker hay cron.
 - QR dùng link request và external QR image URL; payment source of truth vẫn là `payment_requests`.
 - Notification cho requester khi B trả request cần service-role hoặc worker ở bản sau; hiện route ghi notification cho payer.
