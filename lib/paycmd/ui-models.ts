@@ -96,6 +96,8 @@ const hiddenPreviewFields = new Set([
   "recipientMode",
 ]);
 
+const suppressedPreviewFields = new Set(["unsupportedRecipient"]);
+
 const advancedFieldLabels: Record<string, string> = {
   mintGasMode: "Destination gas",
   bridgeMintMode: "Mint mode",
@@ -113,7 +115,8 @@ function transactionRail(command: string) {
 }
 
 function transactionRisk(draft: PreviewDraft) {
-  if (draft.command === "bridge" || draft.command === "transfer") return "Cross-chain finality";
+  if (draft.command === "transfer") return "Your wallet only — contacts are not used";
+  if (draft.command === "bridge") return "Cross-chain finality";
   if (draft.command === "swap") return "Price movement and slippage";
   if (draft.fields.recipientAddress || draft.fields.recipient) return "Verify the recipient before signing";
   return "Wallet approval required";
@@ -124,7 +127,9 @@ export function buildTransactionPreviewModel(draft: PreviewDraft): TransactionPr
   const amount = draft.fields.amount;
   const sourceChain = draft.fields.sourceChain || draft.fields.chain;
   const destinationChain = draft.fields.destinationChain;
-  const recipient = draft.fields.recipient || draft.fields.recipientAddress;
+  const recipient = draft.command === "transfer"
+    ? "Your Circle wallet (same wallet)"
+    : draft.fields.recipient || draft.fields.recipientAddress;
   const confirmLabel = amount
     ? `Confirm ${amount}${token ? ` ${token}` : ""}`
     : "Confirm command";
@@ -143,6 +148,7 @@ export function buildTransactionPreviewModel(draft: PreviewDraft): TransactionPr
     .filter(([key, value]) =>
       Boolean(value) &&
       !hiddenPreviewFields.has(key) &&
+      !suppressedPreviewFields.has(key) &&
       !stablePreviewFieldKeys.has(key) &&
       key !== "estimatedFee" &&
       key !== "fee",
@@ -154,7 +160,9 @@ export function buildTransactionPreviewModel(draft: PreviewDraft): TransactionPr
     })),
   ];
   const advancedDetails = Object.entries(draft.fields)
-    .filter(([key, value]) => Boolean(value) && hiddenPreviewFields.has(key))
+    .filter(([key, value]) =>
+      Boolean(value) && hiddenPreviewFields.has(key) && !suppressedPreviewFields.has(key),
+    )
     .map(([key, value]) => ({
       key,
       label: advancedFieldLabels[key] ?? humanizePreviewKey(key),

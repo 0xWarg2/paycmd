@@ -4,6 +4,7 @@ import { createAdapterFromProvider } from "@circle-fin/adapter-viem-v2";
 import { BridgeKit } from "@circle-fin/bridge-kit";
 import {
   BadgeDollarSign,
+  AlertTriangle,
   Bot,
   Brain,
   Check,
@@ -106,6 +107,8 @@ import {
   parsePayCmd,
   ParsedCommand,
   requiresConfirmation,
+  suggestedPayCommandFromTransfer,
+  unsupportedTransferRecipientFrom,
 } from "@/lib/paycmd/commands";
 import { chainCommandAlias, isSupportedChain, type PayCmdChain } from "@/lib/paycmd/chains";
 import {
@@ -3631,6 +3634,17 @@ export function PayCmdApp() {
     }
 
     const parsed = parsePayCmd(value, locale);
+    const suggestedPayCommand = suggestedPayCommandFromTransfer(parsed);
+
+    if (suggestedPayCommand) {
+      setSuggestionChips([suggestedPayCommand]);
+      await saveMessage({
+        role: "assistant",
+        text: t("transfer.recommendPay", { recipient: parsed.fields.unsupportedRecipient }),
+        provider: "paycmd",
+      });
+      return;
+    }
 
     if (parsed.missingFields.length) {
       const missingBothPaymentChains =
@@ -6430,6 +6444,11 @@ function CommandPreviewCard({
   const isBridge = draft.command === "bridge";
   const isSwap = draft.command === "swap";
   const isPayroll = draft.command === "payroll";
+  const unsupportedTransferRecipient =
+    draft.command === "transfer"
+      ? draft.fields.unsupportedRecipient?.trim() || unsupportedTransferRecipientFrom(draft.raw)
+      : "";
+  const transferRecipientBlocked = Boolean(unsupportedTransferRecipient);
   const [selectedMintGasMode, setSelectedMintGasMode] = useState<"auto_forwarding" | "manual">(
     draft.fields.mintGasMode === "manual"
       ? "manual"
@@ -6645,6 +6664,7 @@ function CommandPreviewCard({
     if (
       !hasMintGasChoice ||
       !isActive ||
+      transferRecipientBlocked ||
       !draft.fields.amount ||
       (effectiveGatewaySourceMode === "scoped" && !previewSourceChain) ||
       !previewDestinationChain
@@ -6717,6 +6737,7 @@ function CommandPreviewCard({
     selectedMintGasMode,
     selectedGatewaySources,
     t,
+    transferRecipientBlocked,
   ]);
   const mintGasModeText =
     selectedMintGasMode === "manual"
@@ -6844,6 +6865,7 @@ function CommandPreviewCard({
     Number(gatewayDepositAmount) > 0 && Number(gatewayDepositAmount) >= gatewayDepositMinimum;
   const gatewayConfirmDisabled =
     !isActive ||
+    transferRecipientBlocked ||
     gatewayEstimateLoading ||
     gatewayPreflightLoading ||
     !gatewayEstimate ||
@@ -6948,6 +6970,37 @@ function CommandPreviewCard({
         ) : null}
       </div>
       <TransactionPreviewFields model={previewModel} />
+      {draft.command === "transfer" ? (
+        transferRecipientBlocked ? (
+          <div
+            role="alert"
+            className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-3 text-xs text-foreground"
+          >
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
+              <div className="min-w-0">
+                <div className="font-semibold">{t("transfer.recipientBlockedTitle")}</div>
+                <p className="mt-1 leading-5 text-muted-foreground">
+                  {t("transfer.recipientBlockedHelp", { recipient: unsupportedTransferRecipient })}
+                </p>
+                <div className="mt-2 text-muted-foreground">{t("transfer.usePayInstead")}</div>
+                <code className="mt-1 block overflow-x-auto rounded-md border border-amber-500/25 bg-background/80 px-2 py-1.5 font-mono text-[11px] text-foreground">
+                  {suggestedPayCommandFromTransfer(draft)}
+                </code>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-info/35 bg-info/10 px-3 py-3 text-xs text-info-foreground">
+            <div className="font-semibold">{t("transfer.selfOnlyTitle")}</div>
+            <p className="mt-1 leading-5 text-muted-foreground">
+              {t("transfer.selfOnlyHelp", {
+                chain: getChainMeta(previewDestinationChain)?.label ?? previewDestinationChain,
+              })}
+            </p>
+          </div>
+        )
+      ) : null}
       {isPayroll && payrollRecipientError ? (
         <div role="alert" className="rounded-xl border border-danger/35 bg-danger/10 px-3 py-2 text-xs text-danger">
           {payrollRecipientError}

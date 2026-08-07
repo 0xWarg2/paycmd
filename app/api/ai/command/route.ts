@@ -7,7 +7,13 @@ import { AiAccessError, runDeepSeekWithQuota } from "@/lib/paycmd/ai/access";
 import { commandRouterModel, commandRouterModelProfile } from "@/lib/paycmd/ai/models";
 import { aiCommandResponseSchema } from "@/lib/paycmd/ai/schema";
 import { requestLocale, tr, type PayCmdLocale } from "@/lib/i18n/server";
-import { commandRegistry, parsePayCmd, type CommandName } from "@/lib/paycmd/commands";
+import {
+  commandRegistry,
+  parsePayCmd,
+  suggestedPayCommandFromTransfer,
+  unsupportedTransferRecipientFrom,
+  type CommandName,
+} from "@/lib/paycmd/commands";
 import {
   completePaymentChainFollowUp,
   paymentWaitingForChains,
@@ -470,6 +476,22 @@ function deterministicCommandFallback(
   locale: PayCmdLocale,
   recentMessages: { role: string; text: string }[] = [],
 ) {
+  const parsedInput = parsePayCmd(input, locale);
+  const transferPaySuggestion = suggestedPayCommandFromTransfer(parsedInput);
+  if (transferPaySuggestion) {
+    return {
+      intent: "clarify" as const,
+      canonicalCommand: "",
+      assistantText: tr(locale, "ai.transferRecommendPay", {
+        recipient: parsedInput.fields.unsupportedRecipient,
+      }),
+      missingFields: [],
+      suggestions: [transferPaySuggestion],
+      parsedCommand: null,
+      modelProfile: "paycmd-rules-fallback",
+    };
+  }
+
   const deterministicContact = deterministicContactCommand(input, recentMessages, locale);
   if (deterministicContact) {
     const parsedCommand = parsePayCmd(deterministicContact.canonicalCommand, locale);
@@ -541,6 +563,35 @@ function commandRouterResult(
 
   const canonicalCommand = preserveNamedBalanceChain(aiResult.canonicalCommand, input ?? "");
   const parsedCommand = parsePayCmd(canonicalCommand, locale);
+  const recipientFromOriginalInput = parsedCommand.command === "transfer"
+    ? unsupportedTransferRecipientFrom(input ?? "")
+    : "";
+  const recommendationDraft = recipientFromOriginalInput && !parsedCommand.fields.unsupportedRecipient
+    ? {
+        ...parsedCommand,
+        raw: input ?? parsedCommand.raw,
+        fields: {
+          ...parsedCommand.fields,
+          unsupportedRecipient: recipientFromOriginalInput,
+        },
+      }
+    : parsedCommand;
+  const suggestedPayCommand = suggestedPayCommandFromTransfer(recommendationDraft);
+
+  if (suggestedPayCommand) {
+    return {
+      intent: "clarify",
+      canonicalCommand: "",
+      assistantText: tr(locale, "ai.transferRecommendPay", {
+        recipient: recommendationDraft.fields.unsupportedRecipient,
+      }),
+      missingFields: [],
+      suggestions: [suggestedPayCommand],
+      parsedCommand: null,
+      modelProfile,
+      reasoning: reasoning || undefined,
+    };
+  }
 
   if (parsedCommand.missingFields.length || parsedCommand.status !== "draft_ready") {
     return {
@@ -647,6 +698,7 @@ export async function POST(req: NextRequest) {
       "If the message could be a Payna action such as pay, transfer, swap, fund, deposit, withdraw, balance, wallet, contact, gas, payroll, or payment request, prefer command or clarify over crypto_research.",
       "For a balance request that names a chain or testnet, canonicalCommand must be /balance on <that chain>; never widen it to /balance.",
       "All payment/fund/deposit/withdraw/transfer/payroll commands will be previewed and confirmed by the user later.",
+      "Transfer is self-transfer only: it moves Gateway funds to the current user's Circle wallet. If the user names a contact or another wallet address, recommend /pay and never silently discard that recipient.",
       `Gateway chains: ${gatewayChainPromptHints()}.`,
       `Bridge chains (testnet MetaMask rail): ${cctpBridgeChainConfigs.map((chain) => `${chain.aliases[0]} -> ${chain.key}`).join(", ")}.`,
       "Swap is Arc Testnet only and supports USDC, EURC, and cirBTC. Canonical swap format: /swap <amount> <tokenIn> to <tokenOut>.",

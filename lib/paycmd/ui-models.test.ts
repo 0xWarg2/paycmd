@@ -88,6 +88,25 @@ test("payroll preview makes recipient exposure explicit and defaults to USDC", (
   ]);
 });
 
+test("transfer preview makes the self-recipient boundary explicit", () => {
+  const model = buildTransactionPreviewModel({
+    command: "transfer",
+    summary: "Transfer 5 USDC",
+    fields: {
+      amount: "5",
+      token: "USDC",
+      sourceChain: "arcTestnet",
+      destinationChain: "arcTestnet",
+      unsupportedRecipient: "Lecter Vu",
+    },
+  });
+
+  assert.equal(model.recipient, "Your Circle wallet (same wallet)");
+  assert.equal(model.risk, "Your wallet only — contacts are not used");
+  assert.equal(model.fields.some((field) => field.value === "Lecter Vu"), false);
+  assert.equal(model.advancedDetails.some((field) => field.value === "Lecter Vu"), false);
+});
+
 test("gateway waiting only marks finalizing after submission is confirmed", () => {
   const beforeSubmission = executionStepsForStatus("waiting_gateway");
   const afterSubmission = executionStepsForStatus("waiting_gateway", { submitted: true });
