@@ -1,4 +1,5 @@
 import { circleDeveloperSdk } from "@/lib/circle/sdk";
+import { CIRCLE_CHAIN_NAMES } from "@/lib/circle/gateway-sdk";
 
 type SupabaseClientLike = {
   from: (table: string) => any;
@@ -47,7 +48,7 @@ export async function ensureUserCircleWallet(supabase: SupabaseClientLike, userI
   const walletSetId = walletSetResponse.data.walletSet.id;
   const walletsResponse = await circleDeveloperSdk.createWallets({
     accountType: "SCA",
-    blockchains: ["ARC-TESTNET", "BASE-SEPOLIA", "AVAX-FUJI"],
+    blockchains: Object.values(CIRCLE_CHAIN_NAMES),
     count: 1,
     walletSetId,
   });

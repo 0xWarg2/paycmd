@@ -84,6 +84,10 @@ export function ConnectDialog({ children }: { children: React.ReactNode }) {
         circle_wallet_id: createdWallet.id,
         wallet_set_id: createdWalletSet.id,
         wallet_address: createdWallet.address,
+        address: createdWallet.address,
+        blockchain: "MULTICHAIN",
+        type: "sca",
+        name: "Multichain SCA Wallet",
       });
 
       if (insertError) {

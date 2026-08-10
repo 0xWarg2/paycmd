@@ -18,6 +18,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { circleDeveloperSdk } from "@/lib/circle/sdk";
+import { CIRCLE_CHAIN_NAMES } from "@/lib/circle/gateway-sdk";
 
 export async function POST(req: NextRequest) {
   try {
@@ -31,8 +32,8 @@ export async function POST(req: NextRequest) {
     }
 
     const response = await circleDeveloperSdk.createWallets({
-      accountType: "EOA",
-      blockchains: ["ARC-TESTNET", "BASE-SEPOLIA", "AVAX-FUJI"],
+      accountType: "SCA",
+      blockchains: Object.values(CIRCLE_CHAIN_NAMES),
       count: 1,
       walletSetId,
     });

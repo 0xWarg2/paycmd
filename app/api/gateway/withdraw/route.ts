@@ -28,10 +28,8 @@ import {
   executeMintCircle,
   fetchGatewayBalance,
   getCircleWalletAddress,
-  initiateDepositFromCustodialWallet,
-  isGatewaySignerAuthorized,
   supportedGatewayChains,
-  transferGatewayBalanceWithEOA,
+  transferGatewayBalanceWithSCA,
   type SupportedChain,
 } from "@/lib/circle/gateway-sdk";
 import { circleDeveloperSdk } from "@/lib/circle/sdk";
@@ -215,9 +213,7 @@ export async function POST(req: NextRequest) {
       ((wallet.address || wallet.wallet_address) as Address | undefined) ??
       (await getCircleWalletAddress(walletId));
 
-    const { getOrCreateGatewayEOAWallet } = await import("@/lib/circle/create-gateway-eoa-wallets");
-    const { address: eoaAddress } = await getOrCreateGatewayEOAWallet(user.id, chain);
-    const sourceSignerAddress = eoaAddress as Address;
+    const sourceSignerAddress = walletAddress;
 
     const estimatedGatewayFee = await estimateGatewayTransferFeeAtomic(
       buildBurnIntentPreview({
@@ -268,32 +264,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    let isAuthorized: boolean | null = null;
-    try {
-      isAuthorized = await isGatewaySignerAuthorized(walletAddress, sourceSignerAddress, chain);
-    } catch (authorizationError) {
-      console.warn("Gateway signer authorization check failed; continuing to withdraw attempt.", authorizationError);
-    }
-
-    if (isAuthorized === false) {
-      const delegateTxHash = await initiateDepositFromCustodialWallet(
-        walletId,
-        chain,
-        0n,
-        sourceSignerAddress,
-      );
-
-      return gatewayWithdrawPendingResponse({
-        amount,
-        chain,
-        txHash: delegateTxHash,
-        stage: "delegate",
-        locale,
-      });
-    }
-
-    const { transferId, attestation, attestationSignature } = await transferGatewayBalanceWithEOA(
-      user.id,
+    const { transferId, attestation, attestationSignature } = await transferGatewayBalanceWithSCA(
+      walletId,
       amountInAtomicUnits,
       chain,
       chain,

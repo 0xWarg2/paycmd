@@ -24,6 +24,7 @@ export type GatewayAllocationExclusion = {
     | "no_usable_capacity"
     | "intent_limit"
     | "delegate_not_supported_by_current_circle_sdk"
+    | "sca_not_supported_by_current_circle_sdk"
     | "authorization_check_unavailable";
 };
 

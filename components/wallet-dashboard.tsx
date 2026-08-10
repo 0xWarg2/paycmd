@@ -61,19 +61,12 @@ export function WalletDashboard() {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        // Initialize EOA wallets for Gateway signing
-        try {
-          await fetch("/api/gateway/init-eoa-wallets", { method: "POST" });
-        } catch (error) {
-          console.error("Failed to initialize EOA wallets:", error);
-        }
-
-        // Check for Circle Wallet (exclude EOA signer wallets from UI)
+        // Check for the user's Circle SCA wallet.
         const { data, error } = await supabase
           .from("wallets")
           .select("wallet_address, type")
           .eq("user_id", user.id)
-          .neq("type", "gateway_signer"); // Exclude EOA signer wallets
+          .eq("type", "sca");
 
         if (data && data.length > 0 && !error) {
           setHasCircleWallet(true);
@@ -361,7 +354,7 @@ export function WalletDashboard() {
           toast.error("Insufficient Gas", {
             description: (
               <div className="space-y-2">
-                <p>Your EOA wallet needs {nativeToken} on {chainName} to execute the mint.</p>
+                <p>Your Circle SCA needs {nativeToken} on {chainName} to execute the mint.</p>
                 <div className="flex items-center gap-2 bg-muted p-2 rounded text-xs font-mono">
                   <span className="flex-1 truncate">{error.walletAddress}</span>
                   <Button

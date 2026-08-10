@@ -16,7 +16,9 @@ import {
   gatewayForwardingSettlementFrom,
   gatewayForwardingTransferId,
   gatewayForwardedMintReceiptMatches,
+  gatewayBurnIntentTransferPayload,
   gatewayBurnIntentSetTransferPayload,
+  gatewayScaSigningGroups,
   gatewayMintGasModeFrom,
   gatewayTransferAmounts,
   gatewayTransferExecutionPlan,
@@ -24,8 +26,43 @@ import {
   parseGatewayFeeEstimateSet,
   requestGatewayFeeEstimate,
   requestGatewayFeeEstimateSet,
+  requestGatewaySignedTransfer,
   usdcAmountToAtomic,
 } from "./gateway-transfer.ts";
+
+test("groups SCA burn intents per source chain while preserving first-seen order", () => {
+  const baseA = { id: "base-a", spec: { sourceDomain: 6 } };
+  const arc = { id: "arc", spec: { sourceDomain: 26 } };
+  const baseB = { id: "base-b", spec: { sourceDomain: 6 } };
+  const avax = { id: "avax", spec: { sourceDomain: 1 } };
+
+  assert.deepEqual(gatewayScaSigningGroups([baseA, arc, baseB, avax]), [
+    [baseA, baseB],
+    [arc],
+    [avax],
+  ]);
+});
+
+test("submits all per-chain SCA signatures in one atomic Gateway request", async () => {
+  const payloads = [
+    { burnIntent: { spec: { sourceDomain: 6 } }, signature: "0xbase", contractSigner: true },
+    { burnIntent: { spec: { sourceDomain: 26 } }, signature: "0xarc", contractSigner: true },
+    { burnIntent: { spec: { sourceDomain: 1 } }, signature: "0xavax", contractSigner: true },
+  ];
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const result = await requestGatewaySignedTransfer(payloads, {
+    enableForwarder: true,
+    fetchImpl: (async (url, init) => {
+      calls.push({ url: String(url), init });
+      return new Response(JSON.stringify({ transferId: "atomic-transfer" }), { status: 200 });
+    }) as typeof fetch,
+  });
+
+  assert.equal(calls.length, 1);
+  assert.match(calls[0]!.url, /\/v1\/transfer\?enableForwarder=true$/);
+  assert.deepEqual(JSON.parse(String(calls[0]!.init?.body)), payloads);
+  assert.deepEqual(result, { transferId: "atomic-transfer" });
+});
 
 test("uses Circle fees.total for a forwarding quote", () => {
   assert.deepEqual(
@@ -340,6 +377,51 @@ test("serializes one signed BurnIntentSet transfer with a shared signature", () 
     },
     signature: "0x1234",
   }]);
+});
+
+test("marks only SCA transfer payloads for ERC-1271 contract verification", () => {
+  const burnIntent = {
+    maxBlockHeight: 100n,
+    maxFee: 7_000n,
+    spec: { sourceDomain: 0, value: 3_000_000n },
+  };
+
+  assert.deepEqual(gatewayBurnIntentTransferPayload(burnIntent, "0x1234"), [{
+    burnIntent: {
+      maxBlockHeight: "100",
+      maxFee: "7000",
+      spec: { sourceDomain: 0, value: "3000000" },
+    },
+    signature: "0x1234",
+  }]);
+
+  assert.deepEqual(
+    gatewayBurnIntentTransferPayload(burnIntent, "0x1234", { contractSigner: true }),
+    [{
+      burnIntent: {
+        maxBlockHeight: "100",
+        maxFee: "7000",
+        spec: { sourceDomain: 0, value: "3000000" },
+      },
+      signature: "0x1234",
+      contractSigner: true,
+    }],
+  );
+});
+
+test("can mark a contract-signed intent set without changing the legacy payload", () => {
+  const intents = [
+    { maxBlockHeight: 100n, maxFee: 7_000n, spec: { sourceDomain: 0, value: 3_000_000n } },
+  ];
+
+  assert.equal(
+    "contractSigner" in gatewayBurnIntentSetTransferPayload(intents, "0x1234")[0],
+    false,
+  );
+  assert.equal(
+    gatewayBurnIntentSetTransferPayload(intents, "0x1234", { contractSigner: true })[0].contractSigner,
+    true,
+  );
 });
 
 test("fails closed when Circle Gateway estimate returns an error", async () => {

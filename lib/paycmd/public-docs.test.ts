@@ -196,7 +196,6 @@ test("the public Gateway support matrix exposes all configured domains without p
       domain,
       label: chain,
       circleBlockchain: domain % 2 === 0 ? "supported" : null,
-      eoaWalletBlockchain: domain % 2 === 0 ? "supported" : null,
     }])),
   );
 

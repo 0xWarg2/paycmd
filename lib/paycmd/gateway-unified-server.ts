@@ -6,7 +6,6 @@ import {
   estimateGatewayTransferSetFee,
   fetchGatewayBalance,
   GATEWAY_CHAIN_CONFIGS,
-  isGatewaySignerAuthorized,
   supportedGatewayChains,
   type BurnIntentData,
   type SupportedChain,
@@ -67,7 +66,6 @@ export type UnifiedGatewayQuote = {
 
 async function loadUnifiedGatewaySourceStatuses(input: {
   sourceDepositor: Address;
-  sourceSigner?: Address;
 }) {
   const gatewayBalances = await fetchGatewayBalance(input.sourceDepositor);
   const balanceByChain = new Map<SupportedChain, bigint>();
@@ -79,25 +77,14 @@ async function loadUnifiedGatewaySourceStatuses(input: {
   return Promise.all(supportedGatewayChains.map(async (chain) => {
     const balanceAtomic = balanceByChain.get(chain) ?? 0n;
     const authorizationSupported = Boolean(GATEWAY_CHAIN_CONFIGS[chain].circleBlockchain);
-    if (balanceAtomic <= 0n || !input.sourceSigner) {
-      return { chain, balanceAtomic, authorized: false, authorizationSupported };
-    }
-    try {
-      return {
-        chain,
-        balanceAtomic,
-        authorized: await isGatewaySignerAuthorized(input.sourceDepositor, input.sourceSigner, chain),
-        authorizationSupported,
-      };
-    } catch {
-      return {
-        chain,
-        balanceAtomic,
-        authorized: false,
-        authorizationSupported,
-        authorizationCheckUnavailable: true,
-      };
-    }
+    return {
+      chain,
+      balanceAtomic,
+      // The depositor SCA signs directly through ERC-1271. There is no delegate state to
+      // query; readiness is determined by Circle wallet support for the source chain.
+      authorized: balanceAtomic > 0n && authorizationSupported,
+      authorizationSupported,
+    };
   }));
 }
 
@@ -106,7 +93,6 @@ export async function quoteUnifiedGatewayTransfer(input: {
   destinationChain: SupportedChain;
   recipient: Address;
   sourceDepositor: Address;
-  sourceSigner?: Address;
   mintGasMode: unknown;
   selectedSourceChains?: SupportedChain[];
 }): Promise<UnifiedGatewayQuote> {
@@ -126,9 +112,7 @@ export async function quoteUnifiedGatewayTransfer(input: {
     if (!source.authorized && !source.authorizationSupported) {
       exclusions.push({
         sourceChain: source.chain,
-        reason: source.authorizationCheckUnavailable
-          ? "authorization_check_unavailable"
-          : "delegate_not_supported_by_current_circle_sdk",
+        reason: "sca_not_supported_by_current_circle_sdk",
       });
       return false;
     }
@@ -145,7 +129,7 @@ export async function quoteUnifiedGatewayTransfer(input: {
     );
   }
 
-  const signerForPreview = input.sourceSigner ?? input.sourceDepositor;
+  const signerForPreview = input.sourceDepositor;
   const probeIntents = buildGatewayBurnIntentSetPreview({
     allocations: eligible.map((source) => ({
       sourceChain: source.chain,
@@ -271,7 +255,6 @@ export async function revalidateUnifiedGatewayTransfer(input: {
   destinationChain: SupportedChain;
   recipient: Address;
   sourceDepositor: Address;
-  sourceSigner?: Address;
   mintGasMode: unknown;
 }): Promise<UnifiedGatewayQuote> {
   const executionPlan = gatewayTransferExecutionPlan({
@@ -291,7 +274,6 @@ export async function revalidateUnifiedGatewayTransfer(input: {
     loadSourceStates: async (sourceChains) => {
       sourceStatuses = await loadUnifiedGatewaySourceStatuses({
         sourceDepositor: input.sourceDepositor,
-        sourceSigner: input.sourceSigner,
       });
       const requested = new Set(sourceChains);
       return sourceStatuses
@@ -311,7 +293,7 @@ export async function revalidateUnifiedGatewayTransfer(input: {
         })),
         destinationChain: input.destinationChain,
         recipient: input.recipient,
-        sourceSigner: input.sourceSigner ?? input.sourceDepositor,
+        sourceSigner: input.sourceDepositor,
       });
       const quote = await estimateGatewayTransferSetFee(burnIntents, {
         enableForwarder: executionPlan.forwarding,

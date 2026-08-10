@@ -4,7 +4,6 @@ type PublicGatewayConfig = Record<
     domain: number;
     label: string;
     circleBlockchain: unknown | null;
-    eoaWalletBlockchain: unknown | null;
   }
 >;
 
@@ -13,6 +12,6 @@ export function projectPublicGatewaySupport(configs: PublicGatewayConfig) {
     key,
     label: config.label,
     domain: config.domain,
-    walletSdk: Boolean(config.circleBlockchain && config.eoaWalletBlockchain),
+    walletSdk: Boolean(config.circleBlockchain),
   }));
 }

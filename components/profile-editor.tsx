@@ -72,7 +72,6 @@ type ProfileEditorProps = {
   userEmail: string;
   initialProfile: ProfileRecord | null;
   scaWallet: WalletRecord | null;
-  gatewaySigner: WalletRecord | null;
   externalWallet: ExternalWalletRecord | null;
   contactsCount: number;
 };
@@ -140,13 +139,11 @@ export function ProfileEditor({
   userEmail,
   initialProfile,
   scaWallet,
-  gatewaySigner,
   externalWallet,
   contactsCount,
 }: ProfileEditorProps) {
   const { t } = useI18n();
   const scaAddress = scaWallet?.address ?? scaWallet?.wallet_address ?? "";
-  const gatewaySignerAddress = gatewaySigner?.address ?? gatewaySigner?.wallet_address ?? "";
   const externalWalletAddress = externalWallet?.wallet_address ?? "";
   const notConnected = t("profile.notConnected");
   const defaultName = initialProfile?.display_name || userEmail || t("profile.defaultName");
@@ -435,15 +432,6 @@ export function ProfileEditor({
                 copyValue={userId}
                 copied={copiedKey === "payna-access-id"}
                 onCopy={() => copyValue("payna-access-id", userId)}
-              />
-              <InfoPanel
-                icon={ShieldCheck}
-                label={t("profile.gatewaySignerEoa")}
-                value={shortAddress(gatewaySignerAddress, notConnected)}
-                detail={gatewaySignerAddress ? t("profile.gatewaySignerDetail") : t("profile.gatewaySignerPending")}
-                copyValue={gatewaySignerAddress}
-                copied={copiedKey === "gateway-signer"}
-                onCopy={() => copyValue("gateway-signer", gatewaySignerAddress)}
               />
               </div>
             </div>

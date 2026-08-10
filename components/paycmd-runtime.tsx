@@ -534,21 +534,13 @@ export function resultText(draft: ParsedCommand, result: any, t?: Translator) {
 
   if (draft.command === "gas") {
     const sca = result?.wallets?.sca;
-    const signer = result?.wallets?.gatewaySigner;
-
-    if (sca || signer || result?.gatewaySignerError) {
+    if (sca) {
       const scaText = sca
         ? sca.hasGas
           ? translate("runtime.gasScaHas", { balance: formatNativeGasBalance(sca.balance, result.chain) })
           : translate("runtime.gasScaMissing", { address: sca.address })
         : translate("runtime.gasScaNoWallet");
-      const signerText = signer
-        ? signer.hasGas
-          ? translate("runtime.gasSignerHas", { balance: formatNativeGasBalance(signer.balance, result.chain) })
-          : translate("runtime.gasSignerMissing", { address: signer.address })
-        : translate("runtime.gasSignerUnknown", { error: result?.gatewaySignerError ? `: ${result.gatewaySignerError}` : "" });
-
-      return `${result.chain}: ${scaText}. ${signerText}.`;
+      return `${result.chain}: ${scaText}.`;
     }
 
     return result?.hasGas

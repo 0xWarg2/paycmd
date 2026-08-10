@@ -32,13 +32,10 @@ export type UnifiedGatewaySourceSelectorProps = {
   customSourceChains: string[] | null;
   quoteLoading: boolean;
   active: boolean;
-  delegateLoading: boolean;
-  delegateMessage: string;
   onCustomize: () => void;
   onToggleSource: (sourceChain: string) => void;
   onRestoreRecommended: () => void;
   onBackToScoped?: () => void;
-  onAuthorizeSources: () => void;
 };
 
 export function UnifiedGatewaySourceSelector({
@@ -53,13 +50,10 @@ export function UnifiedGatewaySourceSelector({
   customSourceChains,
   quoteLoading,
   active,
-  delegateLoading,
-  delegateMessage,
   onCustomize,
   onToggleSource,
   onRestoreRecommended,
   onBackToScoped,
-  onAuthorizeSources,
 }: UnifiedGatewaySourceSelectorProps) {
   const { t } = useI18n();
   const rows = useMemo(() => gatewaySourceSelectionRows({
@@ -71,7 +65,6 @@ export function UnifiedGatewaySourceSelector({
   const otherSourceCount = rows.length - allocatedRows.length;
   const destinationLabel = getChainMeta(destinationChain)?.label ?? destinationChain;
   const automaticMode = customSourceChains === null;
-  const delegateRows = allocatedRows.filter((row) => row.allocation?.delegateRequired);
 
   return (
     <section
@@ -179,11 +172,6 @@ export function UnifiedGatewaySourceSelector({
                     />
                     <h3 className="font-medium text-foreground">{sourceLabel}</h3>
                     <Check className="h-4 w-4 text-primary" aria-hidden="true" />
-                    {allocation.delegateRequired ? (
-                      <Badge variant="outline" className="border-amber-500/40 text-amber-600 dark:text-amber-300">
-                        {t("preview.gatewaySources.authorizationRequired")}
-                      </Badge>
-                    ) : null}
                   </div>
                   <dl className="mt-3 grid gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-4">
                     <div>
@@ -249,11 +237,6 @@ export function UnifiedGatewaySourceSelector({
                     </div>
                     {row.allocation ? (
                       <>
-                        {row.allocation.delegateRequired ? (
-                          <Badge variant="outline" className="mt-2 border-amber-500/40 text-amber-600 dark:text-amber-300">
-                            {t("preview.gatewaySources.authorizationRequired")}
-                          </Badge>
-                        ) : null}
                         <dl className="mt-3 grid gap-x-4 gap-y-2 sm:grid-cols-3">
                         <div>
                           <dt className="text-muted-foreground">{t("preview.gatewaySources.send")}</dt>
@@ -316,27 +299,6 @@ export function UnifiedGatewaySourceSelector({
         </div>
       )}
 
-      {delegateRows.length > 0 ? (
-        <div className="rounded-lg border border-amber-500/35 bg-amber-500/10 p-3 text-foreground">
-          <p>{t("preview.gatewayDelegateConsent")}</p>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="mt-3"
-            disabled={!active || quoteLoading || delegateLoading}
-            onClick={onAuthorizeSources}
-          >
-            {delegateLoading ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : null}
-            {delegateLoading ? t("preview.gatewayAuthorizing") : t("preview.gatewayAuthorizeSources")}
-          </Button>
-        </div>
-      ) : null}
-      {delegateMessage ? (
-        <p role="status" aria-live="polite" className="text-muted-foreground">{delegateMessage}</p>
-      ) : null}
     </section>
   );
 }
