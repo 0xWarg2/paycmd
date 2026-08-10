@@ -3310,21 +3310,13 @@ export function PayCmdApp() {
 
     if (draft.command === "gas") {
       const sca = result?.wallets?.sca;
-      const signer = result?.wallets?.gatewaySigner;
-
-      if (sca || signer || result?.gatewaySignerError) {
+      if (sca) {
         const scaText = sca
           ? sca.hasGas
             ? t("runtime.gasScaHas", { balance: formatNativeGasBalance(sca.balance, result.chain) })
             : t("runtime.gasScaMissing", { address: sca.address })
           : t("runtime.gasScaNoWallet");
-        const signerText = signer
-          ? signer.hasGas
-            ? t("runtime.gasSignerHas", { balance: formatNativeGasBalance(signer.balance, result.chain) })
-            : t("runtime.gasSignerMissing", { address: signer.address })
-          : t("runtime.gasSignerUnknown", { error: result?.gatewaySignerError ? `: ${result.gatewaySignerError}` : "" });
-
-        return `${result.chain}: ${scaText}. ${signerText}.`;
+        return `${result.chain}: ${scaText}.`;
       }
 
       return result?.hasGas
@@ -6749,8 +6741,6 @@ export function CommandPreviewCard({
   );
   const [gatewayDepositAmount, setGatewayDepositAmount] = useState("");
   const [selectedGatewaySources, setSelectedGatewaySources] = useState<string[] | null>(null);
-  const [gatewayDelegateLoading, setGatewayDelegateLoading] = useState(false);
-  const [gatewayDelegateMessage, setGatewayDelegateMessage] = useState("");
   const [gatewayPreflightLoading, setGatewayPreflightLoading] = useState(false);
   const [gatewayRefreshMessage, setGatewayRefreshMessage] = useState("");
   const [payrollPreview, setPayrollPreview] = useState<{
@@ -7139,9 +7129,6 @@ export function CommandPreviewCard({
   const scopedGatewayInsufficient =
     gatewayEstimate?.sourceMode === "scoped" &&
     gatewayEstimate.sufficientGatewayBalance === false;
-  const unifiedDelegateSources = gatewayEstimate?.sourceMode === "unified"
-    ? (gatewayEstimate.allocations ?? []).filter((allocation) => allocation.delegateRequired)
-    : [];
   const gatewayDepositMinimum = Number(gatewayEstimate?.minimumDepositAmount ?? 0);
   const gatewayDepositValid =
     Number(gatewayDepositAmount) > 0 && Number(gatewayDepositAmount) >= gatewayDepositMinimum;
@@ -7157,27 +7144,8 @@ export function CommandPreviewCard({
     (gatewayFallbackMode === "deposit" && !gatewayDepositValid) ||
     (effectiveGatewaySourceMode === "unified" && (
       !gatewayEstimate.fingerprint ||
-      !(gatewayEstimate.allocations?.length) ||
-      unifiedDelegateSources.length > 0
+      !(gatewayEstimate.allocations?.length)
     ));
-  const authorizeGatewaySources = async () => {
-    if (unifiedDelegateSources.length === 0) return;
-    setGatewayDelegateLoading(true);
-    setGatewayDelegateMessage("");
-    try {
-      const result = await requestJson("/api/gateway/delegate", {
-        method: "POST",
-        body: JSON.stringify({
-          sourceChains: unifiedDelegateSources.map((source) => source.sourceChain),
-        }),
-      });
-      setGatewayDelegateMessage(result?.message ?? t("preview.gatewayDelegatePending"));
-    } catch (error) {
-      setGatewayDelegateMessage(error instanceof Error ? error.message : t("preview.gatewayDelegateFailed"));
-    } finally {
-      setGatewayDelegateLoading(false);
-    }
-  };
   const confirmWithGatewayPreflight = async () => {
     if (
       effectiveGatewaySourceMode !== "unified" ||
@@ -7707,8 +7675,6 @@ export function CommandPreviewCard({
             customSourceChains={selectedGatewaySources}
             quoteLoading={gatewayEstimateLoading}
             active={isActive}
-            delegateLoading={gatewayDelegateLoading}
-            delegateMessage={gatewayDelegateMessage}
             onCustomize={() => {
               setSelectedGatewaySources(recommendedGatewaySourceChains(gatewayEstimate?.allocations ?? []));
             }}
@@ -7723,7 +7689,6 @@ export function CommandPreviewCard({
               setGatewayFallbackMode("none");
               setSelectedGatewaySources(null);
             } : undefined}
-            onAuthorizeSources={() => void authorizeGatewaySources()}
           />
         ) : null}
         {hasMintGasChoice ? (

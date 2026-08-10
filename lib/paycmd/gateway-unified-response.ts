@@ -33,20 +33,20 @@ export function gatewayUnifiedEstimateResponse(
         maxBlockHeight: unified.quote.intents[index]!.maxBlockHeight.toString(),
         priorityReason: allocation.priorityReason,
         authorized: source?.authorized ?? false,
-        delegateRequired: !(source?.authorized ?? false),
+        delegateRequired: false,
       };
     }),
     sources: unified.sourceStatuses
       .filter((source) => source.balanceAtomic > 0n)
       .map((source) => {
-        const usable = source.authorized || source.authorizationSupported;
+        const usable = source.authorized;
         return {
           sourceChain: source.chain,
           readyBalance: atomicUsdc(source.balanceAtomic),
           authorized: source.authorized,
           authorizationSupported: source.authorizationSupported,
           usable,
-          exclusionReason: usable ? null : "delegate_not_supported_by_current_circle_sdk",
+          exclusionReason: usable ? null : "sca_not_supported_by_current_circle_sdk",
           selected: usable && (selectedSources ? selectedSources.has(source.chain) : true),
           allocated: unified.allocations.some((allocation) => allocation.sourceChain === source.chain),
         };

@@ -14,7 +14,7 @@ export default async function ProfilePage() {
     redirect("/auth/login?next=/profile");
   }
 
-  const [profileResult, scaWalletResult, gatewaySignerResult, externalWalletResult, contactsResult] = await Promise.all([
+  const [profileResult, scaWalletResult, externalWalletResult, contactsResult] = await Promise.all([
     supabase
       .from("user_profiles")
       .select("*")
@@ -25,13 +25,6 @@ export default async function ProfilePage() {
       .select("circle_wallet_id, address, wallet_address")
       .eq("user_id", user.id)
       .eq("type", "sca")
-      .limit(1)
-      .maybeSingle(),
-    supabase
-      .from("wallets")
-      .select("circle_wallet_id, address, wallet_address")
-      .eq("user_id", user.id)
-      .eq("type", "gateway_signer")
       .limit(1)
       .maybeSingle(),
     supabase
@@ -55,7 +48,6 @@ export default async function ProfilePage() {
         userEmail={user.email ?? ""}
         initialProfile={profileResult.data}
         scaWallet={scaWalletResult.data}
-        gatewaySigner={gatewaySignerResult.data}
         externalWallet={externalWalletResult.data}
         contactsCount={contactsResult.count ?? 0}
       />

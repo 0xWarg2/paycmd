@@ -17,6 +17,7 @@
  */
 
 import { handleDeposit } from '@/lib/deposit';
+import { expect } from '@playwright/test';
 
 describe('handleDeposit', () => {
   it('returns success for valid deposit', async () => {

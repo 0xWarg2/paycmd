@@ -16,6 +16,7 @@ export async function GET() {
     .from("wallets")
     .select("id, circle_wallet_id, wallet_set_id, wallet_address, address, blockchain, type, name, created_at")
     .eq("user_id", user.id)
+    .eq("type", "sca")
     .order("created_at", { ascending: true });
 
   if (error) {
@@ -24,13 +25,11 @@ export async function GET() {
 
   const wallets = data ?? [];
   const scaWallet = wallets.find((wallet) => wallet.type === "sca") ?? null;
-  const gatewaySigner = wallets.find((wallet) => wallet.type === "gateway_signer") ?? null;
 
   return NextResponse.json({
     success: true,
     hasWallet: Boolean(scaWallet),
     scaWallet,
-    gatewaySigner,
     wallets,
   });
 }

@@ -5,7 +5,6 @@ import {
   fetchGatewayInfo,
   fetchGatewayPendingDeposits,
 } from "@/lib/circle/gateway-sdk";
-import { getGatewayEOAWalletId } from "@/lib/circle/create-gateway-eoa-wallets";
 import { requestLocale } from "@/lib/i18n/server";
 import {
   archivePendingGatewayNotifications,
@@ -83,13 +82,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // `GatewayWallet.deposit()` credits the *calling* wallet, and `/deposit` calls it from the
-    // user's SCA — the Gateway signer EOA only signs burn intents. This route used to ask Circle
-    // about the signer EOA alone, so `available` was always 0 and the guard below `continue`d
-    // silently: no error, no log, no notification, and rows sat in `pending_gateway_finality`
-    // forever. Meanwhile `app/api/gateway/balance/route.ts` reads the SCA, which is why the UI
-    // showed the credited balance while the transaction row hung. Ask about both addresses so
-    // older rows settle regardless of which one deposited at the time.
+    // Deposits are made by the SCA, so only SCA depositors can own Payna Gateway balances.
     const depositors: Address[] = [];
 
     const { data: scaWallets, error: scaError } = await supabase
@@ -109,17 +102,6 @@ export async function POST(req: NextRequest) {
     for (const wallet of scaWallets ?? []) {
       const address = wallet.address || wallet.wallet_address;
       if (address) depositors.push(address as Address);
-    }
-
-    try {
-      const eoaWallet = await getGatewayEOAWalletId(user.id, "MULTICHAIN");
-      if (eoaWallet.address) depositors.push(eoaWallet.address as Address);
-    } catch (walletError) {
-      // Missing signer EOA is not fatal here: it never receives deposit credit. Only log it.
-      console.warn(
-        "Gateway signer EOA unavailable during deposit sync:",
-        walletError instanceof Error ? walletError.message : walletError,
-      );
     }
 
     if (depositors.length === 0) {

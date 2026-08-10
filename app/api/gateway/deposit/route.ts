@@ -106,16 +106,10 @@ export async function POST(req: NextRequest) {
 
     const wallet = wallets[0];
 
-    // Get or create EOA signer wallet (multichain)
-    const { getOrCreateGatewayEOAWallet } = await import("@/lib/circle/create-gateway-eoa-wallets");
-    const { address: eoaAddress } = await getOrCreateGatewayEOAWallet(user.id, chain);
-
-    // Deposit to Gateway and add EOA as delegate (allows EOA to sign burn intents)
     const txHash = await initiateDepositFromCustodialWallet(
       wallet.circle_wallet_id,
       chain as SupportedChain,
       amountInAtomicUnits,
-      eoaAddress as `0x${string}`
     );
 
     let depositBlockNumber: string | null = null;
@@ -155,6 +149,7 @@ export async function POST(req: NextRequest) {
       blockNumber: depositBlockNumber,
       chain,
       amount: parseFloat(amount),
+      authorizationMode: "sca_erc1271",
       message: tr(locale, "gateway.depositPending", { amount: parseFloat(amount), chain }),
     });
   } catch (error: any) {

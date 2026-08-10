@@ -83,6 +83,10 @@ export function ConnectWallet({ onAccountsChange }: { onAccountsChange?: (accoun
         circle_wallet_id: createdWallet.id,
         wallet_set_id: createdWalletSet.id,
         wallet_address: createdWallet.address,
+        address: createdWallet.address,
+        blockchain: "MULTICHAIN",
+        type: "sca",
+        name: "Multichain SCA Wallet",
       });
 
       if (insertError) {
@@ -112,7 +116,7 @@ export function ConnectWallet({ onAccountsChange }: { onAccountsChange?: (accoun
           .from("wallets")
           .select("wallet_address, type")
           .eq("user_id", user.id)
-          .neq("type", "gateway_signer"); // Exclude EOA signer wallets from UI
+          .eq("type", "sca");
         if (data && !error) {
           setCircleWallets(data);
         }

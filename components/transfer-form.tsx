@@ -78,8 +78,8 @@ export function TransferForm({ onSuccess }: TransferFormProps) {
           const chainName = CHAIN_NAMES[destinationChain];
           const nativeToken = NATIVE_TOKENS[destinationChain];
           throw new Error(
-            `Insufficient gas in EOA wallet: Your EOA signing wallet needs ${nativeToken} on ${chainName} to execute the mint transaction.\n\n` +
-            `EOA Wallet Address: ${error.walletAddress}\n\n` +
+            `Insufficient gas in Circle SCA: Your SCA needs ${nativeToken} on ${chainName} to execute the mint transaction.\n\n` +
+            `SCA Wallet Address: ${error.walletAddress}\n\n` +
             `Please send some ${nativeToken} to this address on ${chainName} and try again.`
           );
         }

@@ -46,10 +46,9 @@ const allocations: GatewayAllocationEstimate[] = [
   },
 ];
 
-export function UnifiedGatewaySourceSelectorPreview({ delegateRequired = false }: { delegateRequired?: boolean }) {
+export function UnifiedGatewaySourceSelectorPreview() {
   const [customSourceChains, setCustomSourceChains] = useState<string[] | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
-  const [delegateMessage, setDelegateMessage] = useState("");
   const quoteTimer = useRef<number | null>(null);
 
   useEffect(() => () => {
@@ -78,23 +77,16 @@ export function UnifiedGatewaySourceSelectorPreview({ delegateRequired = false }
           maximumDebit="5.07"
           mintGasMode="auto_forwarding"
           sources={sources}
-          allocations={allocations.map((allocation, index) => (
-            index === 0 && delegateRequired
-              ? { ...allocation, authorized: false, delegateRequired: true }
-              : allocation
-          ))}
+          allocations={allocations}
           customSourceChains={customSourceChains}
           quoteLoading={quoteLoading}
           active
-          delegateLoading={false}
-          delegateMessage={delegateMessage}
           onCustomize={() => setCustomSourceChains(recommendedGatewaySourceChains(allocations))}
           onToggleSource={toggleSource}
           onRestoreRecommended={() => {
             setCustomSourceChains(null);
             setQuoteLoading(false);
           }}
-          onAuthorizeSources={() => setDelegateMessage("Authorization submitted. Wait for Gateway finality and preview again; no burn was sent.")}
         />
       </div>
     </main>

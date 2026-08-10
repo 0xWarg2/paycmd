@@ -74,11 +74,10 @@ export async function POST(req: NextRequest) {
       .from("wallets")
       .select("type, address")
       .eq("user_id", user.id)
-      .in("type", ["sca", "gateway_signer"]);
+      .eq("type", "sca");
 
     if (walletError) throw walletError;
     const sourceDepositor = wallets?.find((wallet) => wallet.type === "sca")?.address as Address | undefined;
-    const sourceSigner = wallets?.find((wallet) => wallet.type === "gateway_signer")?.address as Address | undefined;
 
     if (!sourceDepositor) {
       return NextResponse.json(
@@ -100,7 +99,6 @@ export async function POST(req: NextRequest) {
         destinationChain,
         recipient,
         sourceDepositor,
-        sourceSigner,
         mintGasMode,
         selectedSourceChains: requestedSources,
       });
@@ -120,7 +118,7 @@ export async function POST(req: NextRequest) {
       sourceDepositor,
       // Estimation is read-only and fees do not depend on this address. Avoid creating a
       // Gateway signer merely to render a preview for a new wallet.
-      sourceSigner: sourceSigner ?? sourceDepositor,
+      sourceSigner: sourceDepositor,
     });
     const preflight = await gatewayTransferPreflight(
       { amountAtomic: amountInAtomicUnits, sourceChain, destinationChain, mintGasMode },

@@ -56,6 +56,18 @@ export type GatewayBurnIntentSetEstimate = GatewayFeeEstimate & {
   intents: GatewayBurnIntentEstimate[];
 };
 
+export function gatewayScaSigningGroups<T extends { spec: { sourceDomain: number } }>(
+  intents: readonly T[],
+): T[][] {
+  const groups = new Map<number, T[]>();
+  for (const intent of intents) {
+    const group = groups.get(intent.spec.sourceDomain) ?? [];
+    group.push(intent);
+    groups.set(intent.spec.sourceDomain, group);
+  }
+  return [...groups.values()];
+}
+
 const manualMintChains = new Set<PayCmdChain>([
   "arcTestnet",
   "arbitrumSepolia",
@@ -647,6 +659,7 @@ function serializeBigInts(value: unknown): unknown {
 export function gatewayBurnIntentSetTransferPayload(
   burnIntents: Record<string, unknown>[],
   signature: string,
+  options?: { contractSigner?: boolean },
 ) {
   if (burnIntents.length === 0 || burnIntents.length > 16) {
     throw new Error("Circle Gateway BurnIntentSet transfers require between 1 and 16 intents.");
@@ -658,7 +671,24 @@ export function gatewayBurnIntentSetTransferPayload(
   return serializeBigInts([{
     burnIntentSet: { intents: burnIntents },
     signature,
-  }]);
+    ...(options?.contractSigner ? { contractSigner: true } : {}),
+  }]) as Array<Record<string, unknown>>;
+}
+
+export function gatewayBurnIntentTransferPayload(
+  burnIntent: Record<string, unknown>,
+  signature: string,
+  options?: { contractSigner?: boolean },
+) {
+  if (!/^0x[0-9a-f]+$/i.test(signature)) {
+    throw new Error("Circle Gateway BurnIntent signature must be hex encoded.");
+  }
+
+  return serializeBigInts([{
+    burnIntent,
+    signature,
+    ...(options?.contractSigner ? { contractSigner: true } : {}),
+  }]) as Array<Record<string, unknown>>;
 }
 
 export async function requestGatewayFeeEstimate(
@@ -724,4 +754,25 @@ export async function requestGatewayFeeEstimateSet(
   return parseGatewayFeeEstimateSet(await response.json(), {
     enableForwarder: options.enableForwarder,
   });
+}
+
+export async function requestGatewaySignedTransfer(
+  payloads: readonly Record<string, unknown>[],
+  options: { enableForwarder?: boolean; fetchImpl?: typeof fetch } = {},
+): Promise<unknown> {
+  if (payloads.length === 0 || payloads.length > 16) {
+    throw new Error("Circle Gateway signed transfers require between 1 and 16 payloads.");
+  }
+  const transferUrl = new URL("https://gateway-api-testnet.circle.com/v1/transfer");
+  if (options.enableForwarder) transferUrl.searchParams.set("enableForwarder", "true");
+  const response = await (options.fetchImpl ?? fetch)(transferUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(serializeBigInts(payloads)),
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Gateway signed transfer API error: ${response.status} - ${detail}`);
+  }
+  return response.json();
 }

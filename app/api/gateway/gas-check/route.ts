@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import {
-  CIRCLE_CHAIN_NAMES,
-  GATEWAY_CHAIN_CONFIGS,
   checkWalletGasBalance,
   supportedGatewayChains,
   type SupportedChain,
 } from "@/lib/circle/gateway-sdk";
-import { getGatewayEOAWalletId } from "@/lib/circle/create-gateway-eoa-wallets";
 import { createClient } from "@/lib/supabase/server";
 
 const validChains = supportedGatewayChains;
@@ -51,34 +48,6 @@ export async function POST(req: NextRequest) {
   }
 
   const scaGas = await checkWalletGasBalance(wallet.circle_wallet_id, chain);
-  let gatewaySigner:
-    | {
-        walletId: string;
-        address: string;
-        balance: string;
-        hasGas: boolean;
-      }
-    | null = null;
-  let gatewaySignerError: string | undefined;
-
-  try {
-    const blockchain = CIRCLE_CHAIN_NAMES[chain];
-    if (!blockchain) {
-      throw new Error(`${GATEWAY_CHAIN_CONFIGS[chain].label} is listed by Circle Gateway, but the current Circle wallet SDK cannot check signer gas on it yet.`);
-    }
-    const signer = await getGatewayEOAWalletId(user.id, blockchain);
-    const signerGas = await checkWalletGasBalance(signer.walletId, chain);
-    gatewaySigner = {
-      walletId: signer.walletId,
-      ...signerGas,
-    };
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Gateway signer wallet could not be checked.";
-    gatewaySignerError = message.includes("Gateway EOA wallet not found")
-      ? "Gateway signer wallet is not created yet."
-      : message;
-  }
 
   return NextResponse.json({
     success: true,
@@ -93,8 +62,6 @@ export async function POST(req: NextRequest) {
         balance: scaGas.balance,
         hasGas: scaGas.hasGas,
       },
-      gatewaySigner,
     },
-    gatewaySignerError,
   });
 }

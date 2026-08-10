@@ -19,8 +19,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
 import {
-  transferGatewayBalanceWithEOA,
-  transferGatewayBurnIntentSetWithEOA,
+  transferGatewayBalanceWithSCA,
+  transferGatewayBurnIntentSetWithSCA,
   executeMintCircle,
   fetchGatewayBalance,
   getUsdcBalance,
@@ -29,7 +29,6 @@ import {
   buildGatewayBurnIntentPreview,
   estimateGatewayTransferFee,
   GatewayForwardingSettlementError,
-  isGatewaySignerAuthorized,
   type SupportedChain,
   CIRCLE_CHAIN_NAMES,
   CHAIN_BY_DOMAIN,
@@ -252,6 +251,7 @@ function gatewayFinalityPendingResponse(params: {
 }
 
 export async function POST(req: NextRequest) {
+  const authorizationMode = "sca_erc1271" as const;
   const locale = requestLocale(req);
   const supabase = await createClient();
   const {
@@ -325,7 +325,7 @@ export async function POST(req: NextRequest) {
       .from("wallets")
       .select("circle_wallet_id, address, type")
       .eq("user_id", user.id)
-      .in("type", ["sca", "gateway_signer"]);
+      .eq("type", "sca");
 
     if (walletError) {
       console.error("Database error fetching wallets:", walletError);
@@ -336,7 +336,6 @@ export async function POST(req: NextRequest) {
     }
 
     const scaWallet = wallets?.find((candidate) => candidate.type === "sca");
-    const existingSignerWallet = wallets?.find((candidate) => candidate.type === "gateway_signer");
     if (!scaWallet?.circle_wallet_id) {
       console.log(`No SCA wallet found for user ${user.id}`);
       return NextResponse.json(
@@ -351,16 +350,13 @@ export async function POST(req: NextRequest) {
     const recipient = recipientAddress || walletAddress;
     let autoDepositTxHash: string | undefined;
     let autoDepositedAmount = 0;
-    let sourceSignerAddress = existingSignerWallet?.address as Address | undefined;
+    const sourceSignerAddress = walletAddress;
     let unifiedQuote: UnifiedGatewayQuote | undefined;
     let estimatedGatewayFee: bigint;
     let maximumGatewayFee: bigint;
     let requiredGatewayBalance: bigint;
     let feeEstimateKind: "quoted_total" | "max_fee_reserve";
     let feeBreakdown: ReturnType<typeof gatewayFeeBreakdownToDecimal>;
-
-    // Determine if we're using external recipient
-    const isExternalRecipient = recipientAddress && recipientAddress.toLowerCase() !== walletAddress.toLowerCase();
 
     try {
       if (unifiedSource) {
@@ -390,7 +386,6 @@ export async function POST(req: NextRequest) {
             destinationChain: destinationChainKey,
             recipient: recipient as Address,
             sourceDepositor: walletAddress,
-            sourceSigner: sourceSignerAddress,
             mintGasMode: effectiveMintGasMode,
             selectedSourceChains: normalizedSelectedSources,
           });
@@ -405,25 +400,6 @@ export async function POST(req: NextRequest) {
           }, { status: 409 });
         }
 
-        if (!sourceSignerAddress) {
-          return NextResponse.json({
-            error: "GATEWAY_DELEGATE_REQUIRED",
-            message: "Initialize the persistent Gateway signer, authorize it on every selected source, then wait for finality and preview again.",
-            status: "pending_gateway_authorization",
-            sources: parsedGuard.allocations.map((allocation) => ({
-              sourceChain: allocation.sourceChain,
-              authorizationSupported: Boolean(
-                GATEWAY_CHAIN_CONFIGS[allocation.sourceChain as SupportedChain].circleBlockchain,
-              ),
-              action: GATEWAY_CHAIN_CONFIGS[allocation.sourceChain as SupportedChain].circleBlockchain
-                ? "authorize_delegate"
-                : "exclude_source",
-            })),
-            delegateEndpoint: "/api/gateway/delegate",
-            partialBurnSubmitted: false,
-          }, { status: 409 });
-        }
-
         try {
           unifiedQuote = await revalidateUnifiedGatewayTransfer({
             guard: parsedGuard,
@@ -431,7 +407,6 @@ export async function POST(req: NextRequest) {
             destinationChain: destinationChainKey,
             recipient: recipient as Address,
             sourceDepositor: walletAddress,
-            sourceSigner: sourceSignerAddress,
             mintGasMode: effectiveMintGasMode,
           });
         } catch (error) {
@@ -441,7 +416,6 @@ export async function POST(req: NextRequest) {
             destinationChain: destinationChainKey,
             recipient: recipient as Address,
             sourceDepositor: walletAddress,
-            sourceSigner: sourceSignerAddress,
             mintGasMode: effectiveMintGasMode,
             selectedSourceChains: parsedGuard.allocations.map(
               (allocation) => allocation.sourceChain as SupportedChain,
@@ -520,54 +494,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!sourceSignerAddress && !unifiedSource) {
-      const { getOrCreateGatewayEOAWallet } = await import("@/lib/circle/create-gateway-eoa-wallets");
-      const { address: eoaAddress } = await getOrCreateGatewayEOAWallet(
-        user.id,
-        unifiedSource ? "MULTICHAIN" : sourceChain,
-      );
-      sourceSignerAddress = eoaAddress as Address;
-    }
-
     if (executionPlan.destinationGasPreflight) {
       // PRE-FLIGHT CHECK: Verify gas balance on destination chain BEFORE burning
-      const { getGatewayEOAWalletId } = await import("@/lib/circle/create-gateway-eoa-wallets");
-
       try {
-        let minterWalletId: string;
-
-        if (isExternalRecipient) {
-          // For external recipients, EOA wallet will execute mint
-          const destinationBlockchain = GATEWAY_CHAIN_CONFIGS[destinationChainKey].eoaWalletBlockchain;
-          if (!destinationBlockchain) {
-            throw new Error(`${GATEWAY_CHAIN_CONFIGS[destinationChainKey].label} cannot use the Circle EOA signing wallet with the current SDK version.`);
-          }
-          const { walletId: eoaWalletId } = await getGatewayEOAWalletId(user.id, destinationBlockchain);
-          minterWalletId = eoaWalletId;
-        } else {
-          // For own wallet, SCA wallet will execute mint
-          minterWalletId = walletId;
-        }
-
-        // Check if the minter wallet has gas
-        const gasCheck = await checkWalletGasBalance(minterWalletId, destinationChainKey);
+        const gasCheck = await checkWalletGasBalance(walletId, destinationChainKey);
 
         if (!gasCheck.hasGas) {
-          const walletRole = isExternalRecipient ? "gateway_signer" : "sca";
-
           return NextResponse.json(
             {
               error: "INSUFFICIENT_GAS",
-              walletId: minterWalletId,
+              walletId,
               walletAddress: gasCheck.address,
-              walletRole,
+              walletRole: "sca",
               blockchain: CIRCLE_CHAIN_NAMES[destinationChainKey] ?? GATEWAY_CHAIN_CONFIGS[destinationChainKey].label,
               chain: destinationChain,
               stage: "mint",
-              message:
-                walletRole === "gateway_signer"
-                  ? `Insufficient gas: Gateway signer wallet ${gasCheck.address} needs native tokens on ${destinationChain} to execute the mint transaction.`
-                  : `Insufficient gas: Circle SCA wallet ${gasCheck.address} needs native tokens on ${destinationChain} to execute the mint transaction.`,
+              message: `Insufficient gas: Circle SCA wallet ${gasCheck.address} needs native tokens on ${destinationChain} to execute the mint transaction.`,
             },
             { status: 400 }
           );
@@ -674,7 +616,6 @@ export async function POST(req: NextRequest) {
           walletId,
           sourceChainKey,
           missingAmount,
-          sourceSignerAddress,
         );
         autoDepositedAmount = Number(missingAmount) / 1_000_000;
 
@@ -708,26 +649,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (unifiedSource) {
-      const selectedStatuses = unifiedQuote!.allocations.map((allocation) =>
-        unifiedQuote!.sourceStatuses.find((status) => status.chain === allocation.sourceChain)!);
-      const delegateRequired = selectedStatuses.filter((status) => !status.authorized);
-      if (delegateRequired.length > 0) {
-        return NextResponse.json({
-          error: "GATEWAY_DELEGATE_REQUIRED",
-          message: "Confirm the persistent Gateway signer delegate on every selected source, then wait for finality and preview again.",
-          status: "pending_gateway_authorization",
-          sources: delegateRequired.map((status) => ({
-            sourceChain: status.chain,
-            authorizationSupported: status.authorizationSupported,
-            action: status.authorizationSupported ? "authorize_delegate" : "exclude_source",
-          })),
-          delegateEndpoint: "/api/gateway/delegate",
-          partialBurnSubmitted: false,
-        }, { status: 409 });
-      }
-    }
-
     if (unifiedSource && preflightOnly) {
       return NextResponse.json({
         valid: true,
@@ -738,67 +659,33 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    if (!sourceSignerAddress) {
-      const { getOrCreateGatewayEOAWallet } = await import("@/lib/circle/create-gateway-eoa-wallets");
-      const { address: eoaAddress } = await getOrCreateGatewayEOAWallet(user.id, "MULTICHAIN");
-      sourceSignerAddress = eoaAddress as Address;
-    }
-
-    let isAuthorized: boolean | null = null;
-
-    try {
-      if (unifiedSource) {
-        isAuthorized = true;
-      } else {
-        isAuthorized = await isGatewaySignerAuthorized(walletAddress, sourceSignerAddress, sourceChainKey);
-      }
-    } catch (authorizationError) {
-      console.warn("Gateway signer authorization check failed; continuing to burn attempt.", authorizationError);
-    }
-
-    if (isAuthorized === false) {
-      return NextResponse.json({
-        error: "GATEWAY_DELEGATE_REQUIRED",
-        message: `Confirm the persistent Gateway signer delegate on ${sourceChain}, then wait for finality and preview again.`,
-        status: "pending_gateway_authorization",
-        sources: [{
-          sourceChain,
-          authorizationSupported: Boolean(GATEWAY_CHAIN_CONFIGS[sourceChainKey].circleBlockchain),
-          action: GATEWAY_CHAIN_CONFIGS[sourceChainKey].circleBlockchain ? "authorize_delegate" : "exclude_source",
-        }],
-        delegateEndpoint: "/api/gateway/delegate",
-        partialBurnSubmitted: false,
-      }, { status: 409 });
-    }
-
-    // Use EOA-signed burn/mint process for all transfers (same-chain and cross-chain)
     const transferResult = unifiedSource
       ? await (() => {
           const burnIntents = unifiedQuote!.burnIntents.map((intent) => ({
             ...intent,
             spec: {
               ...intent.spec,
-              sourceSigner: sourceSignerAddress!,
+              sourceSigner: sourceSignerAddress,
               salt: `0x${randomBytes(32).toString("hex")}` as `0x${string}`,
             },
           }));
-          return transferGatewayBurnIntentSetWithEOA(
-            user.id,
+          return transferGatewayBurnIntentSetWithSCA(
+            walletId,
             burnIntents,
             destinationChainKey,
             recipient as Address,
             { enableForwarder: useForwarding },
           );
         })()
-      : await transferGatewayBalanceWithEOA(
-          user.id,
-          amountInAtomicUnits,
-          sourceChainKey,
-          destinationChainKey,
-          recipient as Address,
-          walletAddress,
-          { enableForwarder: useForwarding, maxFee: maximumGatewayFee },
-        );
+      : await transferGatewayBalanceWithSCA(
+            walletId,
+            amountInAtomicUnits,
+            sourceChainKey,
+            destinationChainKey,
+            recipient as Address,
+            walletAddress,
+            { enableForwarder: useForwarding, maxFee: maximumGatewayFee },
+          );
     const {
       attestation,
       attestationSignature,
@@ -814,15 +701,11 @@ export async function POST(req: NextRequest) {
         throw new Error(`Gateway attestation missing for manual mint. Transfer ID: ${transferId}`);
       }
 
-      // Execute mint on destination chain
-      // If recipient is external (not the user's wallet), use EOA to execute mint
-      // Otherwise use the user's Circle SCA wallet
       const mintTx: Transaction = await executeMintCircle(
-        isExternalRecipient ? user.id : walletId,
+        walletId,
         destinationChainKey,
         attestation,
         attestationSignature,
-        isExternalRecipient // Pass true if using userId instead of walletId
       );
 
       mintTxHash = mintTx.txHash;
@@ -898,6 +781,7 @@ export async function POST(req: NextRequest) {
             forwarding: useForwarding,
             forwardingDetails: forwardingDetails ?? null,
             mintGasMode: effectiveMintGasMode,
+            authorizationMode,
             sourceMode: unifiedSource ? "unified" : "scoped",
             sourceAllocations: unifiedQuote?.allocations.map((allocation) => ({
               sourceChain: allocation.sourceChain,
@@ -921,6 +805,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
+      authorizationMode,
       transactionId: transaction?.id,
       attestation: attestationHash,
       mintTxHash,
@@ -1014,24 +899,13 @@ export async function POST(req: NextRequest) {
     }
 
     if (isSignerNotAuthorizedError(error)) {
-      if (sourceMode === "unified") {
-        return NextResponse.json({
-          error: "GATEWAY_DELEGATE_REQUIRED",
-          message: "A selected source is no longer authorized. Re-authorize the persistent delegate and preview the whole set again.",
-          sources: Array.isArray(selectedSourceChains)
-            ? selectedSourceChains.map((sourceChain) => ({ sourceChain, action: "authorize_delegate" }))
-            : [],
-          partialBurnSubmitted: false,
-        }, { status: 409 });
-      }
-      return gatewayFinalityPendingResponse({
-        amount,
-        sourceChain: sourceChain as SupportedChain,
-        destinationChain: destinationChain as SupportedChain,
-        recipient: recipientAddress as Address,
-        stage: "burn_intent",
-        locale,
-      });
+      return NextResponse.json({
+        error: "GATEWAY_SCA_AUTHORIZATION_REJECTED",
+        message: "Gateway rejected the SCA ERC-1271 authorization. No EOA delegate or fallback was attempted.",
+        authorizationMode,
+        fundsMoved: false,
+        transferSubmitted: false,
+      }, { status: 422 });
     }
 
     // Check if this is an insufficient gas error
