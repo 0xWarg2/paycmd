@@ -17,6 +17,7 @@ import Image from "next/image";
 import Link from "next/link";
 
 import { LanguageSwitcher } from "@/components/language-switcher";
+import { PublicPlatformMetrics } from "@/components/public-platform-metrics";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { Button } from "@/components/ui/button";
 
@@ -166,6 +167,8 @@ export default function Home() {
           />
         </div>
       </section>
+
+      <PublicPlatformMetrics />
 
       <section id="product" className="relative z-10 border-y border-border bg-card/35 py-20 backdrop-blur">
         <div className="mx-auto max-w-7xl px-5 md:px-8">
