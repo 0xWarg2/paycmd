@@ -76,24 +76,26 @@ type PublicPlatformMetrics = {
 
 ### Variants and states
 
-- `success`: render metric grid.
-- `unavailable`: neutral bordered panel, không dùng error red vì visitor không thể khắc phục.
+- `success`: render compact metric strip.
+- `unavailable`: inline neutral message, không dùng error red vì visitor không thể khắc phục.
 - Future `stale`: warning badge nếu `asOf` cũ hơn 24 giờ.
 
-### Metric cards
+### Compact metric strip
 
 | Metric | Label | Definition |
 |---|---|---|
 | registeredUsers | Users joined | Count của `user_profiles` |
-| completedPayments | Verified movements | Successful `transfer`/`bridge` có tx hash |
+| completedPayments | Movements | Successful `transfer`/`bridge` có tx hash |
 | usdcMoved | USDC moved | Sum amount của verified movements; testnet label bắt buộc |
-| researchAnswers | AskPayna answers | Persisted assistant research responses |
+| researchAnswers | AskPayna | Persisted assistant research responses |
+
+The homepage presentation is intentionally a short, non-interactive strip rather than a dashboard section. It keeps the live status label, four metrics, network provenance and update time on one compact row without card chrome. Detailed metric definitions remain available to assistive technology.
 
 ### Responsive behavior
 
-- `<640px`: 2 cột; label wrap tối đa hai dòng.
-- `640–1024px`: 4 cột nếu đủ rộng, nếu không 2 cột.
-- `>1024px`: 4 cột, metadata trên một hàng riêng.
+- `<640px`: status trên một hàng; metric grid 2×2; network và timestamp wrap bên dưới.
+- `640–1024px`: bốn metric trên một hàng; status và provenance ở hai hàng gọn.
+- `>1024px`: status, bốn metric và provenance cùng một strip ngang.
 
 ### Accessibility
 
@@ -114,8 +116,8 @@ type PublicPlatformMetrics = {
 
 - Tái sử dụng `bg-card`, `border-border`, `text-muted-foreground`, `text-primary` và radius hiện có.
 - Không thêm brand palette mới trong phase này.
-- Metric number dùng hierarchy tương đương `text-3xl`/`text-4xl`; metadata `text-xs`/`text-sm`.
-- Hover chỉ là subtle lift, không làm card trông clickable nếu card không có action.
+- Metric number dùng hierarchy `text-2xl`; metadata `text-xs`/`text-sm`.
+- Không có card hover hoặc affordance clickable vì strip chỉ cung cấp social proof.
 
 ## Implementation target
 
