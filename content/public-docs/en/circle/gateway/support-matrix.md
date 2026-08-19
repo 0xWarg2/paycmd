@@ -16,7 +16,7 @@ A network can be listed by Circle Gateway while Payna's current Circle Wallet SD
 
 **Gateway listed** means Payna has a public Gateway configuration entry containing the chain label, Circle domain, native USDC address, and viem chain definition. It does not by itself promise that every Payna workflow can create Circle wallet transactions.
 
-**Wallet SDK operations** means both Circle blockchain mappings used by Payna are available: one for SCA contract execution and one for the managed EOA signer. A “No” can still allow public reads such as balances through configured RPCs, but deposit, delegate authorization, manual mint, or other managed-wallet actions are unavailable through the current SDK path.
+**Wallet SDK operations** means Circle SCA contract execution is available for that chain. A “No” can still allow public reads such as balances through configured RPCs, but deposit, direct ERC-1271 signing, Manual mint, or other managed-wallet actions are unavailable through the current SDK path.
 
 ## What a domain means
 

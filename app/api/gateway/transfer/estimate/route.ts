@@ -9,7 +9,6 @@ import {
   isSupportedGatewayChain,
   type SupportedChain,
 } from "@/lib/circle/gateway-sdk";
-import { GatewayUnifiedInsufficientBalanceError } from "@/lib/paycmd/gateway-allocation";
 import {
   GatewayManualMintUnsupportedError,
   gatewayFeeBreakdownToDecimal,
@@ -19,9 +18,15 @@ import {
   gatewayTransferPreflight,
   usdcAmountToAtomic,
 } from "@/lib/paycmd/gateway-transfer";
-import { quoteUnifiedGatewayTransfer } from "@/lib/paycmd/gateway-unified-server";
-import { gatewayUnifiedEstimateResponse } from "@/lib/paycmd/gateway-unified-response";
 import { createClient } from "@/lib/supabase/server";
+import { ArcAddressSafetyError, assertArcAddressTransferable } from "@/lib/paycmd/arc-security";
+import {
+  GatewayCircleKitError,
+  circleKitAtomicToUsdc,
+  circleKitUsdcToAtomic,
+  estimateCircleKitUnifiedSpend,
+  isCircleKitGatewayChain,
+} from "@/lib/circle/unified-balance-kit";
 
 function decimalUsdcToAtomic(value: unknown) {
   const normalized = String(value ?? "0").trim();
@@ -86,38 +91,60 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const recipient = typeof body.recipientAddress === "string" && /^0x[0-9a-f]{40}$/i.test(body.recipientAddress)
+      ? body.recipientAddress as Address
+      : sourceDepositor;
+    if (sourceMode !== "unified" && destinationChain === "arcTestnet") {
+      await assertArcAddressTransferable(recipient);
+    }
+
     if (sourceMode === "unified") {
-      const requestedSources = Array.isArray(body.selectedSourceChains)
-        ? body.selectedSourceChains.filter((chain: unknown): chain is SupportedChain =>
-            typeof chain === "string" && isSupportedGatewayChain(chain))
-        : undefined;
-      const recipient = typeof body.recipientAddress === "string" && /^0x[0-9a-f]{40}$/i.test(body.recipientAddress)
-        ? body.recipientAddress as Address
-        : sourceDepositor;
-      const unified = await quoteUnifiedGatewayTransfer({
-        amountAtomic: amountInAtomicUnits,
+      if (!isCircleKitGatewayChain(destinationChain)) {
+        throw new GatewayCircleKitError(
+          "GATEWAY_DESTINATION_UNSUPPORTED_BY_CIRCLE_KIT",
+          "This destination is not enabled for HeyPayna SCA-only Unified Balance.",
+          422,
+          { destinationChain },
+        );
+      }
+      const unified = await estimateCircleKitUnifiedSpend({
+        userId: user.id,
+        amount: circleKitAtomicToUsdc(amountInAtomicUnits),
         destinationChain,
         recipient,
-        sourceDepositor,
-        mintGasMode,
-        selectedSourceChains: requestedSources,
+        scaAddress: sourceDepositor,
+        mintGasMode: body.mintGasMode,
       });
-
-      return NextResponse.json(gatewayUnifiedEstimateResponse(
-        unified,
-        amountInAtomicUnits,
-        { selectedSourceChains: requestedSources },
-      ));
+      const { data: movingOperations, error: movingError } = await supabase
+        .from("transaction_history")
+        .select("amount")
+        .eq("user_id", user.id)
+        .eq("gateway_engine", "circle_kit")
+        .in("gateway_state", [
+          "transfer_submitted",
+          "pending_forwarding",
+          "pending_mint",
+          "reconciliation_required",
+        ]);
+      if (movingError) throw movingError;
+      const fundsInMotionAtomic = (movingOperations ?? []).reduce((total, operation) => {
+        const value = String(operation.amount ?? "0");
+        return total + (value === "0" ? 0n : circleKitUsdcToAtomic(value));
+      }, 0n);
+      return NextResponse.json({
+        ...unified,
+        fundsInMotionBalance: circleKitAtomicToUsdc(fundsInMotionAtomic),
+      });
     }
 
     const burnIntentPreview = buildGatewayBurnIntentPreview({
       amount: amountInAtomicUnits,
       sourceChain: sourceChain as SupportedChain,
       destinationChain,
-      recipient: sourceDepositor,
+      recipient,
       sourceDepositor,
       // Estimation is read-only and fees do not depend on this address. Avoid creating a
-      // Gateway signer merely to render a preview for a new wallet.
+      // Circle SCA merely to render a preview for a new wallet.
       sourceSigner: sourceDepositor,
     });
     const preflight = await gatewayTransferPreflight(
@@ -159,15 +186,17 @@ export async function POST(req: NextRequest) {
       manualMintSupported: gatewayManualMintSupported(destinationChain),
     });
   } catch (error) {
-    if (error instanceof GatewayUnifiedInsufficientBalanceError) {
-      return NextResponse.json({
-        error: error.code,
-        message: error.message,
-        readyBalance: atomicUsdc(error.readyBalanceAtomic),
-        maximumUsableCapacity: atomicUsdc(error.maximumUsableCapacityAtomic),
-        shortfall: atomicUsdc(error.shortfallAtomic),
-        exclusions: error.exclusions,
-      }, { status: 400 });
+    if (error instanceof ArcAddressSafetyError) {
+      return NextResponse.json(
+        { error: error.code, message: error.message },
+        { status: error.status },
+      );
+    }
+    if (error instanceof GatewayCircleKitError) {
+      return NextResponse.json(
+        { error: error.code, message: error.message, ...error.details },
+        { status: error.status },
+      );
     }
     if (error instanceof GatewayManualMintUnsupportedError) {
       return NextResponse.json(

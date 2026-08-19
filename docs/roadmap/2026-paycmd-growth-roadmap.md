@@ -119,7 +119,7 @@ Các branch được tạo độc lập từ cùng commit `dev` để review/mer
 
 ### Compatibility constraints
 
-- Circle Gateway Unified Balance với Circle Wallet SCA cần delegate EOA cho spend ở các flow không thể tự ký.
+- Circle Gateway Unified Balance dùng Circle Wallet SCA ký trực tiếp qua ERC-1271; không thêm delegate EOA hay signer dự phòng.
 - Circle MCP ghi nhận Bridge Kit chưa hỗ trợ trực tiếp Circle Wallets; không thiết kế một adapter giả định hoạt động.
 - Arc transaction memo không nhận smart-contract wallet làm direct caller; metadata cần lưu application-layer hoặc EOA-signed path.
 

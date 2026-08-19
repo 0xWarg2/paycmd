@@ -34,7 +34,7 @@ After a successful transfer, Payna sets the request to `paid`, stores the payer 
 
 Create a group in Contacts or with `/contacts group create Team`, then add people with `/contacts group add Team Minh`. Payroll always requires one explicit group name; it never falls back to every active contact. Up to 25 members with `active` status, a valid EVM address, and a stored destination chain are included in the snapshot. Inactive or invalid-address members are excluded without failing a batch that still has eligible recipients.
 
-Each item snapshots contact ID, label, wallet address, preferred destination chain, the common per-recipient amount, and USDC token. The snapshot has a recipient fingerprint: if membership or an eligible recipient changes after review, Payna rejects the old batch, creates a fresh 15-second preview, and requires confirmation again.
+Each item snapshots contact ID, label, wallet address, preferred destination chain, the common per-recipient amount, and USDC token. The snapshot has a recipient fingerprint: if membership or an eligible recipient changes after review, Payna rejects the old batch, creates a fresh 50-second preview, and requires confirmation again.
 
 There is no CSV upload control in the current command flow. If a team begins with a CSV, validate it outside Payna, then add and review the contacts before creating the batch. Check required names, complete EVM addresses, destination chains, duplicates, active status, and whether each identity is internal or external. A spreadsheet row does not override the contact stored in Payna.
 

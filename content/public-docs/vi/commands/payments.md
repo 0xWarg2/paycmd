@@ -32,11 +32,11 @@ Contacts resolve identity; `/pay` và payroll chuyển Gateway USDC; request t�
 - **Mục đích:** Gửi USDC từ một scoped Gateway domain hoặc unified allocation đã chọn rõ tới contact/address được resolve.
 - **Syntax và variants:** `/pay <amount> [USDC] to <recipient> on <destination> from <source> [manual]`; dùng `from gateway` cho BurnIntentSet allocation.
 - **Ví dụ:** `/pay 25 to Minh on arc from base`; nếu Base thiếu, chọn minimum deposit hoặc bảng unified source. `/pay 25 to Minh on arc from gateway` vào unified ngay.
-- **Điều kiện:** Recipient resolve được, quote hợp lệ, ready capacity sau fee reserve, delegate đã authorize trên selected source và destination gas chỉ khi manual mint.
+- **Điều kiện:** Recipient resolve được, signed quote hợp lệ, confirmed capacity sau fee reserve và destination gas chỉ khi Manual mint không được sponsor.
 - **Preview:** Verify recipient, destination, mint mode, từng source allocation, total estimated fee, maximum reserve/debit, exclusion và quote fingerprint. Không auto-deposit.
-- **Ranh giới confirm:** Deposit và persistent delegate consent là confirmation riêng. Final payment confirmation ký BurnIntent/BurnIntentSet bị giới hạn; MetaMask không ký.
+- **Ranh giới confirm:** Deposit là confirmation riêng. Final payment confirmation yêu cầu Circle SCA ký Burn Intent trực tiếp bằng ERC-1271; MetaMask không ký.
 - **Kết quả và dữ liệu lưu:** Response gồm recipient resolution, một transfer ID, source allocation, settled fee, history ID, destination explorer/proof link và notification.
-- **Lỗi và cách sửa:** **“Contact not found”**: add contact hoặc dùng full address. **`GATEWAY_INSUFFICIENT_SCOPED_BALANCE`**: chọn deposit hoặc unified. **`GATEWAY_DELEGATE_REQUIRED`**: authorize rồi chờ. **`GATEWAY_QUOTE_CHANGED`**: review lại. **`INSUFFICIENT_GAS`**: nạp wallet được nêu hoặc chọn forwarding.
+- **Lỗi và cách sửa:** **“Contact not found”**: add contact hoặc dùng full address. **`GATEWAY_INSUFFICIENT_SCOPED_BALANCE`**: chọn deposit hoặc unified. **`GATEWAY_QUOTE_EXPIRED`**: review lại. **`INSUFFICIENT_GAS`**: nạp SCA được nêu hoặc chọn forwarding.
 
 ## `/request`
 

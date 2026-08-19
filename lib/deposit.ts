@@ -46,7 +46,7 @@ export async function handleDeposit(
     return { error: 'Missing amount' };
   }
 
-  // TODO: Integrate Circle Paymaster API for gas abstraction
+  // Circle SCA gas sponsorship is configured through Gas Station, not Paymaster.
   // Placeholder for deposit logic with gas paid in USDC
   const depositResult = {
     txHash: 'mock-tx-hash',

@@ -17,9 +17,9 @@ aiSummary:
 - **Purpose:** Move USDC from your Circle SCA into the Gateway depositor balance on one source domain.
 - **Syntax and variants:** `/deposit <amount> [USDC] from <source-chain>`; amount must be positive with up to six decimals.
 - **Example:** `/deposit 50 from base`; natural language: “Deposit 50 Base USDC into Gateway.”
-- **Prerequisites:** SCA, sufficient chain-scoped SCA USDC, native gas for delegate/approval/deposit calls, and supported Gateway/Wallet SDK chain.
+- **Prerequisites:** SCA, sufficient chain-scoped SCA USDC, native gas for approval/deposit calls when not sponsored, and a supported Gateway/Wallet SDK chain.
 - **Preview:** Check amount, token, source, SCA/depositor, rail, and gas. This preview does not claim funds are ready.
-- **Confirmation boundary:** Payna confirmation authorizes Circle-wallet contract execution; MetaMask is not the signer. Delegate and approval can occur before the final deposit call.
+- **Confirmation boundary:** Payna confirmation authorizes Circle-wallet contract execution; MetaMask is not the signer. Approval can occur before the final deposit call.
 - **Success and persisted data:** A confirmed hash is stored as `pending_gateway_finality`, with block data when available. It becomes `success` only after verified webhook or recovery sync evidence.
 - **Named errors and fixes:** **“Insufficient USDC balance”**: `/fund` the SCA first. **“Insufficient gas or gas estimation failed”**: fund the named SCA's native gas. **`GATEWAY_FINALITY_PENDING`**: wait/sync the existing hash; never duplicate the deposit. See [deposit and finality](/docs/circle/gateway/deposit-and-finality).
 
@@ -28,7 +28,7 @@ aiSummary:
 - **Purpose:** Burn ready Gateway USDC on a source domain and mint the same requested amount back to your SCA on that same domain.
 - **Syntax and variants:** `/withdraw <amount> [USDC] from <source-chain>`.
 - **Example:** `/withdraw 5 from base`; natural language: “Return 5 Base Gateway USDC to my SCA.”
-- **Prerequisites:** SCA, authorized Gateway signer, ready source-scoped balance for amount plus quoted fee, and destination mint gas in the wallet Payna names.
+- **Prerequisites:** SCA, ready source-scoped balance for amount plus quoted fee, and destination mint gas when Manual mint is not sponsored.
 - **Preview:** Review amount, source, same-domain SCA recipient, and withdraw rail. Current preview does not fetch the fee; execution quotes after confirmation and returns estimate/required balance.
 - **Confirmation boundary:** Payna confirmation starts signer initialization if needed, estimate, checks, burn-intent signature, attestation, and manual mint; MetaMask does not sign.
 - **Success and persisted data:** Result includes transfer ID, fee/source debit, mint hash, wallet, and a `withdraw` history row.
@@ -39,11 +39,11 @@ aiSummary:
 - **Purpose:** Move scoped Gateway USDC, or explicitly combine ready balances with one BurnIntentSet.
 - **Syntax and variants:** `/transfer <amount> [USDC] from <source> to <destination> [manual]`; `/transfer <amount> from gateway to <destination> [manual]` starts unified mode.
 - **Example:** `/transfer 10 from base to arc`; if Base is short, choose the proposed minimum deposit or **Use Unified Gateway**.
-- **Prerequisites:** SCA/depositor, a valid Circle quote, enough ready capacity after every intent's `maxFee`, and separately confirmed delegates on selected sources.
+- **Prerequisites:** SCA/depositor, a valid signed Circle Kit quote, and enough confirmed capacity after fee reserves.
 - **Preview:** Scoped preview shows ready balance, required maximum debit, and two explicit fallback choices. Unified preview shows checkboxes, allocations, per-source reserves, total fee, maximum debit, mint mode, exclusions, and fingerprint.
-- **Confirmation boundary:** Deposit is a separate command and never auto-sends the original transfer. Persistent delegate authorization is also confirmed separately. Final transfer confirmation signs one EIP-712 BurnIntent or BurnIntentSet; MetaMask does not sign.
+- **Confirmation boundary:** Deposit is a separate command and never auto-sends the original transfer. Final transfer confirmation asks the Circle SCA to sign directly with ERC-1271; MetaMask does not sign.
 - **Success and persisted data:** Unified history stores `source_mode`, allocation JSON, one transfer ID, settled fee when available, destination hash, and optional Arc proof.
-- **Named errors and fixes:** **`GATEWAY_INSUFFICIENT_SCOPED_BALANCE`**: choose deposit or unified. **`GATEWAY_INSUFFICIENT_UNIFIED_BALANCE`**: select more usable sources or reduce amount. **`GATEWAY_DELEGATE_REQUIRED`**: authorize, wait for finality, and preview again. **`GATEWAY_QUOTE_CHANGED`**: review the refreshed fingerprint. **`GATEWAY_FORWARDING_FAILED`**: reconcile the existing transfer ID. See [Gateway transfer](/docs/circle/gateway/transfer).
+- **Named errors and fixes:** **`GATEWAY_INSUFFICIENT_SCOPED_BALANCE`**: choose deposit or unified. **`GATEWAY_INSUFFICIENT_UNIFIED_BALANCE`**: reduce amount. **`GATEWAY_QUOTE_EXPIRED`**: review a fresh estimate. **`GATEWAY_FORWARDING_FAILED`**: continue only the stored Manual mint or reconcile the existing transfer ID. See [Gateway transfer](/docs/circle/gateway/transfer).
 
 ## `/gas`
 

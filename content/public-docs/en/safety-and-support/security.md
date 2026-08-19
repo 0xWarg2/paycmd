@@ -5,10 +5,10 @@ description: "Private-key safety, previews, confirmations, and testnet recovery 
 section: "safety-and-support"
 order: 70
 lastUpdated: "2026-08-07"
-keywords: ["security", "seed phrase", "confirmation", "testnet", "preview expiry", "15 seconds"]
+keywords: ["security", "seed phrase", "confirmation", "testnet", "preview expiry", "50 seconds"]
 tutorial: true
 aiSummary:
-  - "Every transaction preview expires after exactly 15 seconds; expiry disables and cancels it, so resubmit for a fresh preview."
+  - "Every transaction preview expires after exactly 50 seconds; expiry disables and cancels it, so resubmit for a fresh preview."
   - "Payna is testnet-oriented: never share wallet secrets, verify every preview and signature, and inspect submitted work before retrying."
 ---
 
@@ -24,15 +24,15 @@ A public address, transaction hash, transfer ID, chain, time, and sanitized erro
 
 ## Verify the wallet prompt itself
 
-Before approving a MetaMask authentication, `/fund`, CCTP, or swap prompt, check account, chain, contract/spender, amount, and gas. Payna confirmation is separate from a wallet signature. Circle SCA/Gateway operations instead use their named Circle wallet and Gateway signer roles. Reject unexpected signatures or network additions; compare proposed network name, chain ID, and RPC with the guide.
+Before approving a MetaMask authentication, `/fund`, CCTP, or swap prompt, check account, chain, contract/spender, amount, and gas. Payna confirmation is separate from a wallet signature. Gateway operations use the authenticated user's Circle SCA and direct ERC-1271 authorization. Reject unexpected signatures or network additions; compare proposed network name, chain ID, and RPC with the guide.
 
-The Circle SCA, Gateway depositor, delegated Gateway signer, and MetaMask account have different roles. In particular, SCA USDC is not ready Gateway balance, and a Gateway signer is not automatically the balance owner. See [wallet roles](/docs/getting-started/account-and-wallets) and the [Gateway overview](/docs/circle/gateway/overview) before moving funds.
+The Circle SCA and MetaMask account have different roles. The SCA is the Gateway depositor and direct signer, but ordinary SCA USDC is still not confirmed Gateway balance. See [wallet roles](/docs/getting-started/account-and-wallets) and the [Gateway overview](/docs/circle/gateway/overview) before moving funds.
 
 ## Treat previews as a required checkpoint
 
 Natural language and parsers prepare intent; they cannot bypass explicit confirmation. Check amount, token, rail, chains, full recipient, mint mode, estimated fee, source debit, and gas payer. For swaps, inspect route, minimum output, and slippage; for payments/transfers, verify the named source.
 
-Every transaction preview lease lasts exactly 15 seconds. At expiry Payna disables its confirmation control and cancels the preview as expired; no stale confirmation can execute. Submit the command again to create a fresh 15-second preview. Changing text or switching modes does not revive the expired one.
+Every transaction preview lease lasts exactly 50 seconds. At expiry Payna disables its confirmation control and cancels the preview as expired; no stale confirmation can execute. Submit the command again to create a fresh 50-second preview. Changing text or switching modes does not revive the expired one.
 
 Cancel when any field differs from your request. Re-open a fresh preview after changing amount, recipient, route, source, destination, or mint mode: quotes and balances can become stale. The deeper [Gateway fees and forwarding](/docs/circle/gateway/fees-gas-and-forwarding), [CCTP bridge](/docs/circle/cctp-bridge), and [Arc swap](/docs/arc/overview-and-swap) guides explain each rail's extra confirmation steps.
 
@@ -48,7 +48,7 @@ An ERC-20 approval authorizes a spender and is a separate gas-using action. Read
 
 It is normally safe to correct and retry a validation error, rejected wallet request, read-only balance check, or transfer quote error when no transaction, deposit hash, burn hash, or transfer ID exists. Refreshing Gateway deposit recovery, checking status, or reopening Activity is also safe because it does not submit another transfer.
 
-Once a deposit, approval, delegate, CCTP burn, Gateway transfer, forwarding, manual mint, or swap hash exists, state may have changed. Do not repeat it because chat/history/proof is late. A burn can await mint, a deposit can be `pending_gateway_finality`, and Arc proof never moves funds. Reconcile identifiers in [Activity](/docs/features/activity-and-notifications).
+Once a deposit, approval, CCTP burn, Gateway transfer, forwarding, Manual mint, or swap hash exists, state may have changed. Do not repeat it because chat/history/proof is late. A burn can await mint, a deposit can be `pending_gateway_finality`, and Arc proof never moves funds. Reconcile identifiers in [Activity](/docs/features/activity-and-notifications).
 
 ## Incident checklist
 

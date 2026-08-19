@@ -34,7 +34,6 @@ const allocation = (
   maxBlockHeight: "100",
   priorityReason: "lowest_quoted_fee",
   authorized: true,
-  delegateRequired: false,
 });
 
 test("puts allocated sources first in BurnIntentSet order and checks only allocations in automatic mode", () => {

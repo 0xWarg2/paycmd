@@ -10,9 +10,9 @@ import {
   stringToHex,
   zeroAddress,
   type Address,
-  type Chain,
   type Hash,
 } from "viem";
+import { ARC_PRIMARY_RPC_URL, arcTestnetChain } from "@/lib/paycmd/arc-rpc";
 import { privateKeyToAccount } from "viem/accounts";
 import { normalizeChain } from "@/lib/paycmd/chains";
 import { web3Chains } from "@/lib/paycmd/web3-chains";
@@ -90,28 +90,7 @@ const actionTypesV2: Record<RaReceiptActionV2, number> = {
   swap: 4,
 };
 
-const arcRpcKey =
-  process.env.ARC_TESTNET_RPC_KEY ||
-  process.env.NEXT_PUBLIC_ARC_TESTNET_RPC_KEY ||
-  "c0ca2582063a5bbd5db2f98c139775e982b16919";
-
-const raArcTestnet = {
-  id: 5042002,
-  name: "Arc Testnet",
-  nativeCurrency: {
-    decimals: 6,
-    name: "USD Coin",
-    symbol: "USDC",
-  },
-  rpcUrls: {
-    default: { http: [`https://rpc.testnet.arc.network/${arcRpcKey}`] },
-    public: { http: [`https://rpc.testnet.arc.network/${arcRpcKey}`] },
-  },
-  blockExplorers: {
-    default: { name: "ArcScan", url: "https://testnet.arcscan.app" },
-  },
-  testnet: true,
-} as const satisfies Chain;
+const raArcTestnet = arcTestnetChain;
 
 function receiptEnabled() {
   return process.env.RA_RECEIPT_ENABLED === "true";
@@ -191,7 +170,7 @@ export async function recordRaReceipt(input: RaReceiptInput): Promise<RaReceiptR
   }
 
   const account = privateKeyToAccount(privateKey as Hash);
-  const transport = http(raArcTestnet.rpcUrls.default.http[0]);
+  const transport = http(ARC_PRIMARY_RPC_URL);
   const publicClient = createPublicClient({ chain: raArcTestnet, transport });
   const walletClient = createWalletClient({ account, chain: raArcTestnet, transport });
   const txHash = await walletClient.writeContract({

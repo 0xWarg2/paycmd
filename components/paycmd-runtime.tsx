@@ -305,8 +305,12 @@ export function balanceBreakdownText(result: any, translate: Translator, chain?:
     // key rather than dropping the row, so a new chain still shows up before it has an icon.
     const label = getChainMeta(row.chain)?.label ?? row.chain;
     // "SCA" and "Gateway" stay literal: both are product names, untranslated in every other key.
+    // An unreadable SCA read prints as such instead of being omitted like a zero: the row exists
+    // precisely to say the number is missing, and printing nothing reads as "nothing there".
     const parts = [
-      row.sca > 0 ? `SCA ${formatDecimalAmount(row.sca)}` : "",
+      row.scaUnreadable
+        ? `SCA ${translate("common.balanceUnavailable")}`
+        : row.sca > 0 ? `SCA ${formatDecimalAmount(row.sca)}` : "",
       row.gateway > 0 ? `Gateway ${formatDecimalAmount(row.gateway)}` : "",
     ].filter(Boolean);
     lines.push(`    ${label}: ${parts.join(" · ")} USDC`);
@@ -365,9 +369,7 @@ function gatewayFinalityPendingText(data: any, draft: ParsedCommand, t: Translat
       ? data?.pendingAmount
         ? t("runtime.gatewayFinalityPending.autoDeposit", { amount: formatDecimalAmount(amount), chain })
         : t("runtime.gatewayFinalityPending.autoDepositSubmitted", { amount: formatDecimalAmount(amount), chain })
-      : data?.stage === "delegate"
-        ? t("runtime.gatewayFinalityPending.delegate", { chain })
-        : t("runtime.gatewayFinalityPending.burnIntent", { chain });
+      : t("runtime.gatewayFinalityPending.burnIntent", { chain });
   const balance =
     data?.currentGatewayBalance !== undefined && data?.requiredGatewayBalance !== undefined
       ? t("runtime.gatewayFinalityPending.balance", {
@@ -638,6 +640,8 @@ async function executeServerCommand(draft: ParsedCommand) {
           : undefined,
         allocationFingerprint: draft.fields.allocationFingerprint || undefined,
         allocationGuard: parseGatewayAllocationGuardDraftField(draft.fields.allocationGuard),
+        quoteFingerprint: draft.fields.quoteFingerprint || undefined,
+        operationId: draft.fields.gatewayOperationId || undefined,
       }),
     });
   }
@@ -657,6 +661,8 @@ async function executeServerCommand(draft: ParsedCommand) {
           : undefined,
         allocationFingerprint: draft.fields.allocationFingerprint || undefined,
         allocationGuard: parseGatewayAllocationGuardDraftField(draft.fields.allocationGuard),
+        quoteFingerprint: draft.fields.quoteFingerprint || undefined,
+        operationId: draft.fields.gatewayOperationId || undefined,
       }),
     });
   }

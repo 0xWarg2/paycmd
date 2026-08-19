@@ -34,7 +34,7 @@ Sau transfer thành công, Payna chuyển request sang `paid`, lưu payer và pa
 
 Tạo group trong Contacts hoặc bằng `/contacts group create Team`, sau đó thêm contact bằng `/contacts group add Team Minh`. Payroll luôn yêu cầu một group name rõ ràng; không có fallback “toàn bộ contacts active”. Tối đa 25 thành viên có status `active`, địa chỉ EVM hợp lệ và destination chain đã lưu được đưa vào snapshot. Inactive hoặc địa chỉ không hợp lệ hiện là excluded; không làm batch fail nếu vẫn còn recipient hợp lệ.
 
-Mỗi item snapshot contact ID, label, wallet address, preferred destination chain, common per-recipient amount và token USDC. Snapshot cũng có recipient fingerprint: nếu membership hoặc recipient hợp lệ đổi sau lúc review, Payna từ chối batch cũ, tạo preview mới 15 giây và bắt confirm lại.
+Mỗi item snapshot contact ID, label, wallet address, preferred destination chain, common per-recipient amount và token USDC. Snapshot cũng có recipient fingerprint: nếu membership hoặc recipient hợp lệ đổi sau lúc review, Payna từ chối batch cũ, tạo preview mới 50 giây và bắt confirm lại.
 
 Command flow hiện chưa có CSV upload control. Nếu team bắt đầu từ CSV, hãy validate ngoài Payna, rồi add và review contacts trước khi tạo batch. Kiểm tra tên bắt buộc, địa chỉ EVM đầy đủ, destination chain, dòng trùng, active status và identity internal hay external. Một spreadsheet row không ghi đè contact đã lưu trong Payna.
 

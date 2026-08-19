@@ -9,7 +9,7 @@ keywords: ["fee", "gas", "auto forwarding", "manual mint"]
 tutorial: true
 aiSummary:
   - "`fees.total` is the current estimated/settled charge; per-intent `maxFee` is a signed cap, and their sum is maximum reserve rather than expected fee."
-  - "Unified allocation subtracts each maxFee from usable balance; deposit and persistent delegate authorization are separate confirmations."
+  - "Unified allocation uses confirmed balance and fee reserves; deposit remains a separate confirmation."
 ---
 
 ## Four costs that must stay separate
@@ -18,8 +18,8 @@ A Gateway operation can involve four different cost categories:
 
 1. **Gateway protocol fee** is charged in USDC against the source balance. Circle describes it as source burn gas plus a transfer fee based on amount.
 2. **Forwarding fee** is additional source-side USDC when Circle's Forwarding Service relays the destination mint. It includes the forwarding service and destination gas component.
-3. **Source native gas** pays for explicit SCA on-chain actions such as adding a delegate, approving USDC, or depositing. It is held by the transaction-sending SCA, not deducted from Gateway USDC.
-4. **Destination native gas** is paid by the SCA or Gateway signer when Payna performs a manual mint. With forwarding, Circle covers destination execution and charges the forwarding fee in source USDC instead.
+3. **Source native gas** pays for explicit SCA on-chain actions such as approving USDC or depositing when Gas Station does not sponsor them. It is not deducted from Gateway USDC.
+4. **Destination native gas** is paid by the SCA for an unsponsored Manual mint. With forwarding, Circle covers destination execution and charges the forwarding fee in source USDC instead.
 
 “Fee” in a receipt should identify which category it means. Adding a USDC fee to a source debit is different from checking a wallet's native-token balance.
 
@@ -43,7 +43,7 @@ This behavior should be distinguished from Circle's general API schema, where `m
 
 ## Preview timing and quote freshness
 
-For `/transfer` and `/pay`, Payna estimates before signer creation, delegate authorization, deposit, or burn signing. Preview may use an existing signer or a read-only placeholder. That ordering makes quote failure read-only and prevents an unavailable preview from leaving wallet or balance mutations.
+For `/transfer` and `/pay`, Payna estimates before deposit or Burn Intent signing. Preview is read-only, so quote failure leaves no wallet or balance mutation.
 
 `/withdraw` has a different boundary. Its UI preview confirms only amount, source, and the same-domain SCA recipient model. After confirmation, the withdraw route resolves the SCA and finds or creates the signer **before** requesting the fee estimate; balance, mint gas, and authorization checks follow. A withdraw quote failure can therefore occur after signer initialization, although no burn intent has been submitted.
 
@@ -53,9 +53,9 @@ At execution, Payna signs the quoted atomic fee as the burn intent's `maxFee`. W
 
 ## Source gas
 
-The Gateway transfer request itself is signed as typed data by a Circle-managed EOA, but surrounding Payna operations can submit source-chain transactions. A first explicit deposit can require `addDelegate`, USDC `approve`, and Gateway `deposit`. An existing depositor whose signer is not authorized may require another delegate call. Payna shows these actions separately and does not start a shortfall deposit without user confirmation.
+The Gateway transfer request is signed directly by the Circle SCA through ERC-1271. A first explicit deposit can require USDC `approve` and Gateway `deposit`. Payna shows these actions separately and does not start a shortfall deposit without user confirmation.
 
-Those operations require native gas on the source SCA and current Circle Wallet SDK support for that chain. `addDelegate` is persistent, so Payna asks separately and submits no partial burn while authorization is pending. An already-authorized balance can still be eligible on a source where the SDK cannot submit a new delegate. An unauthorized balance on such a source is excluded. Fund only the public address/network named by the error.
+Those operations require native gas on the source SCA and current Circle Wallet SDK support unless Gas Station sponsors them. Payna submits no partial burn while prerequisites are unavailable. Fund only the public address and network named by the error.
 
 ## Automatic forwarding
 
@@ -69,7 +69,7 @@ If Circle reports `failed`, `expired`, times out, or omits the destination hash 
 
 ## Manual mint
 
-Add `manual` or `no forwarding` to choose manual mode. The quote excludes the forwarding service path, but the wallet executing `gatewayMint` must have destination native gas. Payna checks this before burning. For a transfer to the user's own address, the SCA is the minter wallet; for an external recipient, the Gateway signer is the transaction submitter. The recipient still receives the USDC.
+Add `manual` or `no forwarding` to choose Manual mode. The quote excludes the forwarding service path, and the SCA executing `gatewayMint` needs destination native gas unless Gas Station sponsors it. The recipient still receives the USDC.
 
 Manual mode waits for an attestation and signature, submits the destination contract call, and returns `mintTxHash`. That hash becomes `destinationTxHash`; `forwardingDetails` can be absent. If destination gas cannot be verified, Payna stops before the burn with `DESTINATION_GAS_CHECK_UNAVAILABLE` rather than taking source balance into an unexecutable path.
 
@@ -86,7 +86,7 @@ For either transfer mode, verify source, destination, recipient, source debit, a
 - Quote unavailable: a transfer preview has not performed stateful work; a confirmed withdrawal may already have initialized its signer, but neither path has submitted a burn intent at this point.
 - Scoped source short: explicitly confirm the proposed minimum deposit, or review unified allocation. Deposit never auto-sends the transfer.
 - Unified capacity short: inspect ready balance, maximum usable capacity, and exclusions; Payna never auto-deposits.
-- Source gas short: fund the SCA for the named delegate/deposit operation.
+- Source gas short: fund the SCA for the named approval/deposit operation.
 - Manual destination gas short: fund the identified SCA or signer, or switch modes and re-estimate.
 - Forwarded transfer submitted: preserve `transferId`; inspect Circle status before any retry.
 - Manual attestation obtained: check whether a destination mint transaction or challenge already exists.

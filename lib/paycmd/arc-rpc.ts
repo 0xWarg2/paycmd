@@ -1,23 +1,41 @@
 import { createPublicClient, fallback, http, type Chain, type Transport } from "viem";
 
-import { web3Chains } from "./web3-chains";
+import { web3Chains } from "./web3-chains.ts";
 
 const arcChain = web3Chains.arcTestnet;
 
-// Measured on the Arc testnet RPC, 40 requests each way:
-//
-//   keyed, 40 concurrent    -> 28x 200, 12x 429
-//   keyless, 40 concurrent  ->  8x 200, 32x 429
-//   keyed, 40 sequential    -> 39x 200,  1x 429
-//
-// Two conclusions drive everything below. First, *concurrency* is what trips the limit, not
-// total volume — the same 40 requests spread out almost entirely succeed. Second, the keyless
-// endpoint is roughly 3.5x tighter than the keyed one (it is a shared global bucket, not a
-// private quota), so it belongs behind the keyed endpoint as a spare, never in front of it.
-export const ARC_KEYED_RPC_URL = arcChain.rpcUrl;
+export const ARC_TESTNET_CHAIN_ID = 5_042_002;
+export const ARC_OFFICIAL_RPC_URL = "https://rpc.testnet.arc.io";
+export const ARC_PRIMARY_RPC_URL = process.env.ARC_RPC_URL?.trim() || arcChain.rpcUrl;
+export const ARC_FALLBACK_RPC_URL = process.env.ARC_RPC_FALLBACK_URL?.trim() || null;
 
-// Same chain id, no key required — verified answering `eth_chainId` with 0x4cef52.
-export const ARC_KEYLESS_RPC_URL = "https://rpc.testnet.arc.network/";
+const ARC_MAINNET_REQUIRED_ENV = [
+  "ARC_MAINNET_CHAIN_ID",
+  "ARC_MAINNET_RPC_URL",
+  "ARC_MAINNET_EXPLORER_URL",
+  "ARC_MAINNET_USDC_ADDRESS",
+  "ARC_MAINNET_GATEWAY_WALLET_ADDRESS",
+  "ARC_MAINNET_GATEWAY_MINTER_ADDRESS",
+  "ARC_MAINNET_CCTP_DOMAIN",
+  "ARC_MAINNET_TOKEN_MESSENGER_ADDRESS",
+  "ARC_MAINNET_MESSAGE_TRANSMITTER_ADDRESS",
+] as const;
+
+export function arcMainnetReadiness(env: NodeJS.ProcessEnv = process.env) {
+  const missing = ARC_MAINNET_REQUIRED_ENV.filter((name) => !env[name]?.trim());
+  return { ready: missing.length === 0, missing };
+}
+
+export function assertArcNetworkEnabled(env: NodeJS.ProcessEnv = process.env) {
+  const network = env.ARC_NETWORK?.trim() || "testnet";
+  if (network === "testnet") return "testnet" as const;
+  const readiness = arcMainnetReadiness(env);
+  throw new Error(
+    `ARC_MAINNET_NOT_ENABLED: HeyPayna is testnet-only. Missing or unverified mainnet fields: ${readiness.missing.join(", ") || "none"}.`,
+  );
+}
+
+assertArcNetworkEnabled();
 
 const MULTICALL3_ADDRESS = "0xcA11bde05977b3631167028862bE2a173976CA11" as const;
 
@@ -26,10 +44,10 @@ const MULTICALL3_ADDRESS = "0xcA11bde05977b3631167028862bE2a173976CA11" as const
 // testnet (3808 bytes of code). `nativeCurrency` is inlined rather than mapped from `web3Chains`
 // because viem only uses it for formatting, and nothing here formats native value.
 export const arcTestnetChain = {
-  id: arcChain.id,
+  id: ARC_TESTNET_CHAIN_ID,
   name: arcChain.name,
-  nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 6 },
-  rpcUrls: { default: { http: [ARC_KEYED_RPC_URL] } },
+  nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
+  rpcUrls: { default: { http: [ARC_PRIMARY_RPC_URL] } },
   contracts: { multicall3: { address: MULTICALL3_ADDRESS } },
   testnet: true,
 } as const satisfies Chain;
@@ -122,10 +140,9 @@ function throttled(inner: Transport): Transport {
 // same exhausted one.
 export const arcTransport = throttled(
   fallback(
-    [
-      http(ARC_KEYED_RPC_URL, { timeout: 15_000, retryCount: 3, retryDelay: 1_200 }),
-      http(ARC_KEYLESS_RPC_URL, { timeout: 15_000, retryCount: 2, retryDelay: 1_500 }),
-    ],
+    [ARC_PRIMARY_RPC_URL, ARC_FALLBACK_RPC_URL]
+      .filter((url, index, urls): url is string => Boolean(url) && urls.indexOf(url) === index)
+      .map((url) => http(url, { timeout: 15_000, retryCount: 3, retryDelay: 1_200 })),
     { retryCount: 0, rank: false },
   ),
 );

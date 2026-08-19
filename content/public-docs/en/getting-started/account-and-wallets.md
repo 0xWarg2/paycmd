@@ -1,14 +1,14 @@
 ---
 slug: "getting-started/account-and-wallets"
 title: "Accounts and wallet roles"
-description: "Understand the Payna account, MetaMask, Circle SCA wallet, and Gateway signer."
+description: "Understand the Payna account, MetaMask, and Circle SCA wallet."
 section: "getting-started"
 order: 11
 lastUpdated: "2026-08-05"
-keywords: ["account", "MetaMask", "SCA", "Gateway signer"]
+keywords: ["account", "MetaMask", "SCA", "ERC-1271"]
 tutorial: true
 aiSummary:
-  - "A Payna account can link MetaMask, a Circle SCA wallet, and a Gateway signer; each wallet has a separate role and balance."
+  - "A Payna account can link MetaMask and one Circle SCA wallet; the SCA signs Gateway operations directly with ERC-1271."
 ---
 
 ## Your Payna account identity
@@ -23,13 +23,13 @@ MetaMask is the user-controlled wallet outside Payna. You select the account in 
 
 The Circle SCA wallet is the on-chain wallet Payna orchestrates for Circle-wallet and payment operations. `/wallet create` provisions it, `/fund` sends USDC to it from MetaMask, and `/wallet balance [chain]` reads its chain-scoped USDC balance. The SCA address can receive the funds shown by an SCA-oriented preview. Its balance is not automatically available to Circle Gateway; `/deposit` is the separate action that moves eligible SCA USDC into that liquidity layer.
 
-## Gateway signer authorizes Gateway intents
+## Circle SCA authorizes Gateway intents
 
-The Gateway signer is a separate multichain EOA used in Gateway flows for delegation and required burn-intent signatures. It is not a replacement for the SCA and should not be treated as a default receiving address. Gateway also tracks deposited USDC by depositor and domain, so a signer address, a depositor record, and an SCA address may all appear in one status view. This separation lets Payna show the correct source, authorization, and destination for each Gateway preview.
+The Circle SCA is both the Gateway depositor and direct ERC-1271 Burn Intent signer. Payna does not create, authorize, or fall back to a separate EOA. Gateway still tracks deposited USDC by depositor and domain, so confirmed Gateway balance remains distinct from ordinary USDC held by the same SCA.
 
 ## Addresses you may see
 
-Use `/wallet status` to identify the Circle SCA, Gateway signer, and Circle wallets; the command does not report whether MetaMask is linked. Check the linked MetaMask address and status badge in **Profile**. Use `/gateway info` for Gateway configuration such as depositor and signer information. `/balance` separates SCA and Gateway views; `/gateway balance [chain]` reads the Gateway side without adding USDC that remains in SCA. Copy an address only from the field labeled for the intended action. A recipient address for a MetaMask CCTP bridge, an SCA receiving address, and Gateway configuration are not interchangeable just because they are associated with the same Payna account.
+Use `/wallet status` to identify the Circle SCA and Circle wallets; the command does not report whether MetaMask is linked. Check the linked MetaMask address and status badge in **Profile**. Use `/gateway info` for Gateway depositor configuration. `/balance` separates SCA and Gateway views; `/gateway balance [chain]` reads the Gateway side without adding USDC that remains in SCA. Copy an address only from the field labeled for the intended action.
 
 ## Recovery and re-linking behavior
 
@@ -46,7 +46,7 @@ Never enter a seed phrase or private key into Payna, chat, or a support request.
 | Payna account | Authenticated user session | Groups related records and history | It is not an on-chain balance |
 | MetaMask | You, through the extension | Login, fund, CCTP bridge, Arc swap | MetaMask USDC and native gas |
 | Circle SCA wallet | Circle-wallet flow orchestrated by Payna | Hold funded USDC and Payna payment actions | `/wallet balance [chain]` |
-| Gateway signer | Gateway flow signer | Authorization and burn-intent signatures | Use `/gateway info` and `/gas check <chain>` when requested |
+| Circle SCA | Gateway depositor and signer | Direct ERC-1271 Burn Intent signatures | Use `/gateway info` and `/gas check <chain>` when requested |
 | Gateway depositor balance | Circle Gateway by depositor and domain | Ready Gateway transfer liquidity | `/gateway balance [chain]` |
 
 When deciding what to do next, follow the rail rather than the shortest-looking address. Fund MetaMask USDC into the SCA with `/fund`; deposit SCA USDC with `/deposit` before Gateway use; use CCTP only when the preview says MetaMask is the source. That distinction keeps the visible addresses and balances understandable.

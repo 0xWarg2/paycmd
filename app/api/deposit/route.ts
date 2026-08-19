@@ -20,6 +20,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { handleDeposit } from '@/lib/deposit';
 
 export async function POST(req: NextRequest) {
+  if (process.env.NODE_ENV === "production" || process.env.NEXT_PUBLIC_PAYCMD_DEMO_MODE !== "true") {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
   const params = await req.json();
   const result = await handleDeposit(params);
   if ('error' in result) {

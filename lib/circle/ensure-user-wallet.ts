@@ -75,6 +75,17 @@ export async function ensureUserCircleWallet(supabase: SupabaseClientLike, userI
     .select("circle_wallet_id, wallet_set_id, wallet_address, address, blockchain, type, name")
     .single();
 
+  if (insertError?.code === "23505") {
+    const { data: racedWallet, error: racedError } = await supabase
+      .from("wallets")
+      .select("circle_wallet_id, wallet_set_id, wallet_address, address, blockchain, type, name")
+      .eq("user_id", userId)
+      .eq("type", "sca")
+      .limit(1)
+      .maybeSingle();
+    if (racedError || !racedWallet) throw racedError ?? insertError;
+    return { wallet: racedWallet, created: false };
+  }
   if (insertError) {
     throw insertError;
   }

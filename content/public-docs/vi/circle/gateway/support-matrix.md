@@ -16,7 +16,7 @@ Một network có thể được Circle Gateway liệt kê nhưng current Circle
 
 **Gateway listed** nghĩa là Payna có public Gateway configuration entry chứa chain label, Circle domain, native USDC address và viem chain definition. Riêng điều này chưa hứa mọi Payna workflow đều tạo được Circle wallet transaction.
 
-**Wallet SDK operations** nghĩa là cả hai Circle blockchain mapping Payna dùng đều available: một cho SCA contract execution và một cho managed EOA signer. “No” vẫn có thể cho phép public read như balance qua configured RPC, nhưng deposit, delegate authorization, manual mint hoặc managed-wallet action khác chưa khả dụng qua current SDK path.
+**Wallet SDK operations** nghĩa là Circle SCA contract execution khả dụng trên chain đó. “No” vẫn có thể cho phép public read như balance qua configured RPC, nhưng deposit, ký ERC-1271 trực tiếp, Manual mint hoặc managed-wallet action khác chưa khả dụng qua current SDK path.
 
 ## Domain có nghĩa gì
 

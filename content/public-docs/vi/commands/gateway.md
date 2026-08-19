@@ -17,9 +17,9 @@ aiSummary:
 - **Mục đích:** Chuyển USDC từ Circle SCA vào Gateway depositor balance trên một source domain.
 - **Syntax và variants:** `/deposit <amount> [USDC] from <source-chain>`; amount phải dương với tối đa sáu decimals.
 - **Ví dụ:** `/deposit 50 from base`; natural language: “Deposit 50 Base USDC vào Gateway.”
-- **Điều kiện:** Có SCA, đủ SCA USDC theo chain, native gas cho delegate/approval/deposit và chain được Gateway/Wallet SDK hỗ trợ.
+- **Điều kiện:** Có SCA, đủ SCA USDC theo chain, native gas cho approval/deposit khi không được sponsor và chain được Gateway/Wallet SDK hỗ trợ.
 - **Preview:** Kiểm tra amount, token, source, SCA/depositor, rail và gas. Preview không khẳng định funds ready.
-- **Ranh giới confirm:** Payna confirmation authorize Circle-wallet contract execution; MetaMask không phải signer. Delegate và approval có thể xảy ra trước deposit call cuối.
+- **Ranh giới confirm:** Payna confirmation authorize Circle-wallet contract execution; MetaMask không phải signer. Approval có thể xảy ra trước deposit call cuối.
 - **Kết quả và dữ liệu lưu:** Confirmed hash được lưu ở `pending_gateway_finality`, kèm block data nếu có. Chỉ thành `success` sau webhook hoặc recovery sync evidence đã verify.
 - **Lỗi và cách sửa:** **“Insufficient USDC balance”**: `/fund` SCA trước. **“Insufficient gas or gas estimation failed”**: nạp native gas cho SCA được nêu. **`GATEWAY_FINALITY_PENDING`**: chờ/sync hash cũ; không deposit lặp. Xem [deposit và finality](/docs/circle/gateway/deposit-and-finality).
 
@@ -39,11 +39,11 @@ aiSummary:
 - **Mục đích:** Chuyển scoped Gateway USDC hoặc combine ready balance có chủ đích bằng một BurnIntentSet.
 - **Syntax và variants:** `/transfer <amount> [USDC] from <source> to <destination> [manual]`; `/transfer <amount> from gateway to <destination> [manual]` vào unified mode ngay.
 - **Ví dụ:** `/transfer 10 from base to arc`; nếu Base thiếu, chọn minimum deposit được đề xuất hoặc **Dùng Unified Gateway**.
-- **Điều kiện:** Có SCA/depositor, Circle quote hợp lệ, đủ ready capacity sau `maxFee` từng intent và delegate đã confirm riêng trên selected source.
+- **Điều kiện:** Có SCA/depositor, signed Circle Kit quote hợp lệ và đủ confirmed capacity sau fee reserve.
 - **Preview:** Scoped preview hiện ready balance, required maximum debit và hai fallback rõ ràng. Unified preview hiện checkbox, allocation, per-source reserve, total fee, maximum debit, mint mode, exclusion và fingerprint.
-- **Ranh giới confirm:** Deposit là command riêng và không tự gửi transfer cũ. Persistent delegate cũng confirm riêng. Final transfer confirmation ký một EIP-712 BurnIntent hoặc BurnIntentSet; MetaMask không ký.
+- **Ranh giới confirm:** Deposit là command riêng và không tự gửi transfer cũ. Final transfer confirmation yêu cầu Circle SCA ký trực tiếp bằng ERC-1271; MetaMask không ký.
 - **Kết quả và dữ liệu lưu:** Unified history lưu `source_mode`, allocation JSON, một transfer ID, settled fee khi có, destination hash và optional Arc proof.
-- **Lỗi và cách sửa:** **`GATEWAY_INSUFFICIENT_SCOPED_BALANCE`**: chọn deposit hoặc unified. **`GATEWAY_INSUFFICIENT_UNIFIED_BALANCE`**: chọn thêm usable source hoặc giảm amount. **`GATEWAY_DELEGATE_REQUIRED`**: authorize, chờ finality rồi preview lại. **`GATEWAY_QUOTE_CHANGED`**: review fingerprint mới. **`GATEWAY_FORWARDING_FAILED`**: reconcile transfer ID hiện có. Xem [Gateway transfer](/docs/circle/gateway/transfer).
+- **Lỗi và cách sửa:** **`GATEWAY_INSUFFICIENT_SCOPED_BALANCE`**: chọn deposit hoặc unified. **`GATEWAY_INSUFFICIENT_UNIFIED_BALANCE`**: giảm amount. **`GATEWAY_QUOTE_EXPIRED`**: review estimate mới. **`GATEWAY_FORWARDING_FAILED`**: chỉ tiếp tục Manual mint đã lưu hoặc reconcile transfer ID hiện có. Xem [Gateway transfer](/docs/circle/gateway/transfer).
 
 ## `/gas`
 

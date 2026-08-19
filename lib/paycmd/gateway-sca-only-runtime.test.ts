@@ -54,12 +54,13 @@ test("Gateway runtime contains no managed EOA signer or delegate fallback", () =
 });
 
 test("wallet onboarding creates SCA wallets from the configured Circle chain list", () => {
-  for (const file of ["app/api/wallet/route.ts", "lib/circle/ensure-user-wallet.ts"]) {
-    const contents = source(file);
-    assert.match(contents, /accountType\s*:\s*["']SCA["']/);
-    assert.match(contents, /Object\.values\(CIRCLE_CHAIN_NAMES\)/);
-    assert.doesNotMatch(contents, /accountType\s*:\s*["']EOA["']/);
-  }
+  const route = source("app/api/wallet/route.ts");
+  const provisioner = source("lib/circle/ensure-user-wallet.ts");
+  assert.match(route, /ensureUserCircleWallet\(supabase, user\.id\)/);
+  assert.match(route, /Unauthorized/);
+  assert.match(provisioner, /accountType\s*:\s*["']SCA["']/);
+  assert.match(provisioner, /Object\.values\(CIRCLE_CHAIN_NAMES\)/);
+  assert.doesNotMatch(`${route}\n${provisioner}`, /accountType\s*:\s*["']EOA["']/);
 });
 
 test("Gateway execution binds depositor, signer, multi-source and manual mint to the SCA", () => {
@@ -67,13 +68,49 @@ test("Gateway execution binds depositor, signer, multi-source and manual mint to
   const unifiedServer = source("lib/paycmd/gateway-unified-server.ts");
   const withdrawRoute = source("app/api/gateway/withdraw/route.ts");
 
-  assert.match(transferRoute, /const sourceSignerAddress = walletAddress;/);
   assert.match(transferRoute, /transferGatewayBalanceWithSCA\s*\(/);
-  assert.match(transferRoute, /transferGatewayBurnIntentSetWithSCA\s*\(/);
+  assert.doesNotMatch(transferRoute, /transferGatewayBurnIntentSetWithSCA\s*\(/);
+  assert.match(source("lib/circle/unified-balance-kit.ts"), /spendCircleKitUnified/);
   assert.match(transferRoute, /executeMintCircle\(\s*walletId,/s);
   assert.match(unifiedServer, /sourceSigner:\s*input\.sourceDepositor/);
   assert.match(withdrawRoute, /transferGatewayBalanceWithSCA\s*\(/);
   assert.match(withdrawRoute, /executeMintCircle\(\s*walletId,/s);
+});
+
+test("Circle Kit Unified execution is auto-allocation and SCA-only", () => {
+  const circleKit = source("lib/circle/unified-balance-kit.ts");
+  const transferRoute = source("app/api/gateway/transfer/route.ts");
+  const spendParams = circleKit.slice(
+    circleKit.indexOf("function spendParams"),
+    circleKit.indexOf("export async function estimateCircleKitUnifiedSpend"),
+  );
+
+  assert.match(circleKit, /allocationPolicy:\s*"circle_auto"/);
+  assert.match(circleKit, /createScaOnlyAdapter/);
+  assert.match(circleKit, /readBytecode/);
+  assert.match(circleKit, /GATEWAY_SCA_CONTRACT_REQUIRED/);
+  assert.doesNotMatch(spendParams, /sourceAccount\s*:/);
+  assert.doesNotMatch(spendParams, /allocations\s*:/);
+  assert.match(transferRoute, /gateway_operation_id/);
+  assert.match(transferRoute, /GATEWAY_OPERATION_ALREADY_EXISTS/);
+  assert.match(transferRoute, /safeToRetry:\s*!spendError\.transferSubmitted/);
+});
+
+test("every UI Gateway execution path forwards quote and operation identity without an engine selector", () => {
+  for (const file of ["components/paycmd-app.tsx", "components/paycmd-runtime.tsx"]) {
+    const contents = source(file);
+    assert.equal(
+      contents.match(/quoteFingerprint:\s*draft\.fields\.quoteFingerprint/g)?.length,
+      2,
+      `${file} must forward the quote for transfer and pay`,
+    );
+    assert.equal(
+      contents.match(/operationId:\s*draft\.fields\.gatewayOperationId/g)?.length,
+      2,
+      `${file} must forward the operation id for transfer and pay`,
+    );
+    assert.doesNotMatch(contents, /engine:\s*draft\.fields\.gatewayEngine/);
+  }
 });
 
 test("retired Gateway EOA endpoints are immutable 410 tombstones", () => {

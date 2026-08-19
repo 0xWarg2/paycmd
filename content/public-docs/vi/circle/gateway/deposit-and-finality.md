@@ -20,13 +20,13 @@ aiSummary:
 
 Dùng `/balance` giữa các operation. Xác nhận funding xuất hiện trong phần SCA trước khi deposit, rồi xác nhận deposited amount cuối cùng xuất hiện trong phần Gateway ready. Không mong `/fund` bỏ qua deposit finality.
 
-## Allowance, delegate và deposit transaction
+## Allowance và deposit transaction
 
 Circle hỗ trợ nhiều protocol deposit method: allowance rồi `deposit`, EIP-2612 permit và ERC-3009 authorization, cùng variant credit cho depositor khác. Các cách này được mô tả trong [Gateway technical guide](https://developers.circle.com/gateway/references/technical-guide#deposit).
 
-**Current Payna implementation behavior:** `/deposit` dùng allowance path. Trước khi chuyển fund, nó tạo hoặc tìm Gateway signer EOA cho người dùng. SCA trước tiên submit `addDelegate` để EOA có thể ký burn intent về sau. Sau đó SCA submit `approve(GatewayWallet, amount)` đến USDC và cuối cùng gọi `deposit(token, amount)` từ SCA. Đây là Circle developer-controlled wallet contract-execution transaction; route chờ state confirmed hoặc complete.
+**Current Payna implementation behavior:** `/deposit` dùng allowance path. SCA submit `approve(GatewayWallet, amount)` đến USDC rồi gọi `deposit(token, amount)`. Đây là Circle developer-controlled wallet contract-execution transaction; route chờ state confirmed hoặc complete.
 
-SCA gọi contract là depositor được Gateway credit. Delegated EOA ký future transfer request nhưng không nhận balance này. Delegate initialization hoặc approval có thể tiêu source native gas dù hai action đó chưa chuyển requested USDC vào Gateway.
+SCA gọi contract là depositor được Gateway credit và sau đó ký Burn Intent trực tiếp bằng ERC-1271. Approval có thể tiêu source native gas dù action đó chưa chuyển requested USDC vào Gateway.
 
 ## Không gửi USDC trực tiếp vào Gateway
 
@@ -73,9 +73,9 @@ Tìm deposit hash trong history và chain explorer. Nếu transaction success, g
 ## Diagnostic checklist
 
 1. Kiểm tra command: `/deposit <positive amount> from <supported source>`.
-2. Xác nhận Circle SCA tồn tại, đủ USDC và có native gas cho delegate, approval, deposit.
+2. Xác nhận Circle SCA tồn tại, đủ USDC và có native gas cho approval, deposit nếu Gas Station không sponsor.
 3. Phân biệt signer EOA với SCA depositor; query balance theo depositor.
-4. Xác định on-chain step cuối: delegate, approval hay deposit. Chỉ deposit hash theo dõi USDC đã chuyển.
+4. Xác định on-chain step cuối: approval hay deposit. Chỉ deposit hash theo dõi USDC đã chuyển.
 5. Nếu có deposit hash, kiểm tra chain success và block number; không resubmit.
 6. Khi status là `pending_gateway_finality`, kiểm tra Circle pending list và chờ required confirmation.
 7. Refresh hoặc gọi recovery sync. Duplicate refresh an toàn; duplicate deposit không an toàn.

@@ -26,11 +26,27 @@ namespace NodeJS {
     // Circle
     CIRCLE_API_KEY: string
     CIRCLE_ENTITY_SECRET: string
+    GATEWAY_QUOTE_SIGNING_SECRET?: string
     CIRCLE_GATEWAY_WEBHOOK_ENABLED?: string
     CIRCLE_GATEWAY_ENVIRONMENT?: "TEST" | "LIVE"
     CIRCLE_GATEWAY_WEBHOOK_URL?: string
     CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_ID?: string
     CIRCLE_GATEWAY_DOMAINS?: string
     PAYCMD_DEFAULT_LOCALE?: "vi" | "en"
+
+    // Arc remains testnet-only until the mainnet registry is complete and verified.
+    ARC_NETWORK?: "testnet" | "mainnet"
+    ARC_RPC_URL?: string
+    ARC_RPC_FALLBACK_URL?: string
+    NEXT_PUBLIC_ARC_RPC_URL?: string
+    ARC_MAINNET_CHAIN_ID?: string
+    ARC_MAINNET_RPC_URL?: string
+    ARC_MAINNET_EXPLORER_URL?: string
+    ARC_MAINNET_USDC_ADDRESS?: string
+    ARC_MAINNET_GATEWAY_WALLET_ADDRESS?: string
+    ARC_MAINNET_GATEWAY_MINTER_ADDRESS?: string
+    ARC_MAINNET_CCTP_DOMAIN?: string
+    ARC_MAINNET_TOKEN_MESSENGER_ADDRESS?: string
+    ARC_MAINNET_MESSAGE_TRANSMITTER_ADDRESS?: string
   }
 }

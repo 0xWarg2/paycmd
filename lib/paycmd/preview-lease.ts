@@ -1,4 +1,4 @@
-export const PREVIEW_LEASE_MS = 15_000;
+export const PREVIEW_LEASE_MS = 50_000;
 
 export type PreviewDraftState = "active" | "cancelled" | "confirmed";
 

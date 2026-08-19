@@ -21,15 +21,15 @@ Chọn **Sign in with MetaMask** rồi xác nhận login signature trong extensi
 
 ## Liên kết ví MetaMask bằng `/link metamask`
 
-Sau khi đăng nhập, chạy `/link metamask`. Command này liên kết external address đang connect với Payna account hiện tại; nó không trao quyền custody ví cho Payna. MetaMask account phải trùng với login session. Liên kết này giúp Payna chuẩn bị fund, CCTP bridge và swap flow cần chữ ký người dùng. Kiểm tra MetaMask đã liên kết bằng địa chỉ và status badge trong **Profile**; `/wallet status` chỉ báo Circle SCA, Gateway signer và các Circle wallet.
+Sau khi đăng nhập, chạy `/link metamask`. Command này liên kết external address đang connect với Payna account hiện tại; nó không trao quyền custody ví cho Payna. MetaMask account phải trùng với login session. Liên kết này giúp Payna chuẩn bị fund, CCTP bridge và swap flow cần chữ ký người dùng. Kiểm tra MetaMask đã liên kết bằng địa chỉ và status badge trong **Profile**; `/wallet status` báo Circle SCA và các Circle wallet.
 
 ## Tạo Circle wallet bằng `/wallet create`
 
-Chạy `/wallet create` để tạo hoặc trả về Circle SCA wallet. Command này idempotent: nếu SCA đã có, nó trả current status thay vì tạo trùng. Thông tin Gateway signer có thể chưa xuất hiện cho đến khi một Gateway flow khởi tạo signer. Chờ status response trước khi thử command chuyển tiền. Tạo ví thành công không đưa USDC vào SCA và cũng không tạo Gateway balance.
+Chạy `/wallet create` để tạo hoặc trả về Circle SCA wallet. Command này authenticated và idempotent: nếu SCA đã có, nó trả current status thay vì tạo trùng. Chính SCA ký Gateway Burn Intent trực tiếp bằng ERC-1271. Tạo ví thành công không đưa USDC vào SCA và cũng không tạo Gateway balance.
 
 ## Lấy faucet USDC và native gas
 
-Lấy testnet USDC từ [Circle Faucet](https://faucet.circle.com/) trên chain bạn muốn fund. Xác nhận faucet deposit đến linked MetaMask address, không phải SCA hoặc Gateway address đã copy từ màn hình khác. MetaMask cần cả USDC và native gas cho `/fund`, CCTP bridge và Arc swap. Gas cho Circle SCA hoặc Gateway signer chỉ liên quan Circle-wallet transaction hay manual branch được UI nêu rõ; dùng `/gas check <chain>` khi Gateway flow yêu cầu kiểm tra.
+Lấy testnet USDC từ [Circle Faucet](https://faucet.circle.com/) trên chain bạn muốn fund. Xác nhận faucet deposit đến đúng address dự định. MetaMask cần cả USDC và native gas cho `/fund`, CCTP bridge và Arc swap. Circle SCA cần gas cho Circle-wallet transaction không được sponsor hoặc Manual mint branch được UI nêu rõ; dùng `/gas check <chain>` khi được yêu cầu.
 
 ## Fund Circle wallet bằng `/fund`
 

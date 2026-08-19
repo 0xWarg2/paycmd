@@ -16,44 +16,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { circleDeveloperSdk } from "@/lib/circle/sdk";
+import { NextResponse } from "next/server";
 import { ensureUserCircleWallet } from "@/lib/circle/ensure-user-wallet";
 import { createClient } from "@/lib/supabase/server";
 
-export async function PUT(req: NextRequest) {
-  try {
-    const { entityName } = await req.json();
-
-    if (!entityName.trim()) {
-      return NextResponse.json(
-        { error: "entityName is required" },
-        { status: 400 }
-      );
-    }
-
-    const response = await circleDeveloperSdk.createWalletSet({
-      name: entityName,
-    });
-
-    if (!response.data) {
-      return NextResponse.json(
-        "The response did not include a valid wallet set",
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ ...response.data.walletSet }, { status: 201 });
-  } catch (error: any) {
-    console.error(`Wallet set creation failed: ${error.message}`);
-    return NextResponse.json(
-      { error: "Failed to create wallet set" },
-      { status: 500 }
-    );
-  }
-}
-
-export async function POST(req: NextRequest) {
+async function ensureWalletForAuthenticatedUser() {
   try {
     const supabase = await createClient();
     const {
@@ -79,4 +46,12 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+export async function PUT() {
+  return ensureWalletForAuthenticatedUser();
+}
+
+export async function POST() {
+  return ensureWalletForAuthenticatedUser();
 }

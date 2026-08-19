@@ -445,14 +445,22 @@ export function gatewayTransferAmounts(
   const quotedDebit = finiteNonNegative(transfer.requiredGatewayBalance);
   const estimatedSourceDebit = quotedDebit ?? amount + estimatedFee;
   const explicitlyPending = transfer.actualFeeStatus === "pending";
+  const directActualFee = explicitlyPending
+    ? undefined
+    : finiteNonNegative(transfer.actualGatewayFee);
+  const directActualDebit = explicitlyPending
+    ? undefined
+    : finiteNonNegative(transfer.actualSourceDebit);
   const parsedActualFeeAtomic = explicitlyPending
     ? undefined
     : gatewayActualFeeAtomic(fees);
-  const actualFee = phase === "receipt" && parsedActualFeeAtomic !== undefined
-    ? Number(parsedActualFeeAtomic) / 1_000_000
+  const actualFee = phase === "receipt"
+    ? directActualFee ?? (parsedActualFeeAtomic !== undefined
+      ? Number(parsedActualFeeAtomic) / 1_000_000
+      : undefined)
     : undefined;
   const actualSourceDebit = phase === "receipt" && actualFee !== undefined
-    ? amount + actualFee
+    ? directActualDebit ?? amount + actualFee
     : undefined;
 
   return {
