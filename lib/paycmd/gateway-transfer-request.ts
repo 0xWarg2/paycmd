@@ -2,6 +2,8 @@ export function gatewayUnifiedRequestFields(body: Record<string, unknown>) {
   const fields: {
     allocationGuard?: Record<string, unknown>;
     allocationFingerprint?: string;
+    quoteFingerprint?: string;
+    operationId?: string;
     preflightOnly?: true;
   } = {};
 
@@ -10,6 +12,12 @@ export function gatewayUnifiedRequestFields(body: Record<string, unknown>) {
   }
   if (typeof body.allocationFingerprint === "string" && body.allocationFingerprint.trim()) {
     fields.allocationFingerprint = body.allocationFingerprint;
+  }
+  if (typeof body.quoteFingerprint === "string" && body.quoteFingerprint.trim()) {
+    fields.quoteFingerprint = body.quoteFingerprint;
+  }
+  if (typeof body.operationId === "string" && body.operationId.trim()) {
+    fields.operationId = body.operationId;
   }
   if (body.preflightOnly === true) fields.preflightOnly = true;
 

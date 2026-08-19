@@ -19,10 +19,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, ReceiptText } from "lucide-react";
 
 import {
   ChainRoute,
+  ChainIcon,
   ExplorerTxLink,
   RailBadge,
   getChainMeta,
@@ -41,6 +42,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -75,8 +83,19 @@ export interface Transaction {
   source_allocations?: Array<{
     sourceChain: string;
     amount: number;
-    maximumFeeReserve: number;
-    maximumDebit: number;
+    circleChain?: string;
+    sourceAccount?: string;
+    maximumFeeReserve?: number;
+    maximumDebit?: number;
+  }> | null;
+  gateway_engine?: "legacy" | "circle_kit" | null;
+  gateway_transfer_id?: string | null;
+  gateway_actual_fee?: number | string | null;
+  gateway_fees?: Array<{
+    type: string;
+    token: string;
+    amount: string;
+    allocations?: Array<{ chain: string; sourceChain?: string | null; amount: string }>;
   }> | null;
 }
 
@@ -172,6 +191,7 @@ export function TransactionHistory({
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sortOrder, setSortOrder] = useState<"none" | "asc" | "desc">("desc");
   const [currentPage, setCurrentPage] = useState(1);
+  const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const rowsPerPage = 10;
 
   useEffect(() => {
@@ -334,6 +354,7 @@ export function TransactionHistory({
                     <TableHead>Amount</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Explorer</TableHead>
+                    <TableHead>Details</TableHead>
                     <TableHead>
                       <Button variant="ghost" onClick={handleSort} className="h-8 p-0">
                         Date
@@ -346,14 +367,14 @@ export function TransactionHistory({
                   {loading ? (
                     Array.from({ length: 5 }).map((_, index) => (
                       <TableRow key={index}>
-                        <TableCell colSpan={6}>
+                          <TableCell colSpan={7}>
                           <Skeleton className="h-8 w-full" />
                         </TableCell>
                       </TableRow>
                     ))
                   ) : error ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center text-red-500">
+                      <TableCell colSpan={7} className="text-center text-red-500">
                         Error: {error}
                       </TableCell>
                     </TableRow>
@@ -402,6 +423,12 @@ export function TransactionHistory({
                           <TableCell>
                             <ExplorerTxLink chain={explorerChain} txHash={tx.tx_hash} compact />
                           </TableCell>
+                          <TableCell>
+                            <Button type="button" variant="outline" size="sm" onClick={() => setSelectedTransaction(tx)}>
+                              <ReceiptText className="h-4 w-4" aria-hidden="true" />
+                              Details
+                            </Button>
+                          </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
                             {formatDate(tx.created_at)}
                           </TableCell>
@@ -410,7 +437,7 @@ export function TransactionHistory({
                     })
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center text-muted-foreground">
+                      <TableCell colSpan={7} className="text-center text-muted-foreground">
                         No transactions found.
                       </TableCell>
                     </TableRow>
@@ -475,6 +502,10 @@ export function TransactionHistory({
                         </time>
                         <ExplorerTxLink chain={explorerChain} txHash={tx.tx_hash} compact />
                       </div>
+                      <Button type="button" variant="outline" className="mt-3 w-full" onClick={() => setSelectedTransaction(tx)}>
+                        <ReceiptText className="h-4 w-4" aria-hidden="true" />
+                        View details
+                      </Button>
                     </article>
                   );
                 })
@@ -518,6 +549,69 @@ export function TransactionHistory({
           </div>
         </CardContent>
       </Card>
+      <TransactionDetailDialog
+        transaction={selectedTransaction}
+        open={selectedTransaction !== null}
+        onOpenChange={(open) => { if (!open) setSelectedTransaction(null); }}
+      />
     </TooltipProvider>
+  );
+}
+
+function TransactionDetailDialog({
+  transaction,
+  open,
+  onOpenChange,
+}: {
+  transaction: Transaction | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  if (!transaction) return null;
+  const allocations = transaction.source_allocations ?? [];
+  const fees = transaction.gateway_fees ?? [];
+  const actualFee = transaction.gateway_actual_fee;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Transaction details</DialogTitle>
+          <DialogDescription>{formatDate(transaction.created_at)} · Circle Gateway receipt</DialogDescription>
+        </DialogHeader>
+
+        <div className="grid grid-cols-2 gap-3 rounded-xl border border-border/60 bg-muted/20 p-4 text-sm">
+          <div><div className="text-muted-foreground">Sent</div><div className="mt-1 font-semibold">{formatAmount(transaction.amount)}</div></div>
+          <div><div className="text-muted-foreground">Actual fee</div><div className="mt-1 font-semibold">{actualFee == null ? "Unavailable" : formatAmount(actualFee)}</div></div>
+          <div><div className="text-muted-foreground">Total debited</div><div className="mt-1 font-semibold">{actualFee == null ? "Unavailable" : formatAmount(Number(transaction.amount) + Number(actualFee))}</div></div>
+          <div><div className="text-muted-foreground">Authorization</div><div className="mt-1 font-semibold">{transaction.gateway_engine === "circle_kit" ? "SCA · ERC-1271" : "Gateway"}</div></div>
+        </div>
+
+        <section className="space-y-2">
+          <h3 className="text-sm font-semibold">Actual sources used</h3>
+          {allocations.length ? allocations.map((allocation) => (
+            <div key={`${allocation.sourceChain}-${allocation.amount}`} className="flex items-center justify-between gap-3 rounded-lg border border-border/55 px-3 py-2 text-sm">
+              <span className="flex items-center gap-2"><ChainIcon chain={allocation.sourceChain} size={18} />{getChainMeta(allocation.sourceChain)?.label ?? allocation.sourceChain}</span>
+              <span className="font-medium">{formatAmount(allocation.amount)}</span>
+            </div>
+          )) : <p className="text-sm text-muted-foreground">Actual source allocation is unavailable for this transaction.</p>}
+        </section>
+
+        <section className="space-y-2">
+          <h3 className="text-sm font-semibold">Actual fee breakdown</h3>
+          {fees.length ? fees.map((fee, index) => (
+            <div key={`${fee.type}-${index}`} className="flex items-center justify-between gap-3 rounded-lg border border-border/55 px-3 py-2 text-sm">
+              <span>{fee.type}</span>
+              <span className="font-medium">{formatAmount(fee.amount)}</span>
+            </div>
+          )) : <p className="text-sm text-muted-foreground">Circle did not return an actual fee breakdown for this transaction.</p>}
+        </section>
+
+        <div className="space-y-2 border-t border-border/60 pt-4 text-sm">
+          {transaction.gateway_transfer_id ? <div><span className="text-muted-foreground">Transfer ID: </span><span className="break-all font-mono text-xs">{transaction.gateway_transfer_id}</span></div> : null}
+          <ExplorerTxLink chain={getTransactionExplorerChain(transaction)} txHash={transaction.tx_hash} />
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

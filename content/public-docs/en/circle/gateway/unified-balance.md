@@ -70,7 +70,7 @@ Now consider `/transfer 10 from arc to base`. If the maximum reserve is 0.03 USD
 
 ## Depositor and signer scope
 
-Gateway credits the depositor, while the signer authorizes spending. Payna deposits from the SCA and delegates a Circle-managed EOA. Accordingly, its main balance reads use the SCA address. Recovery code may query both SCA and historical signer addresses so older deposits remain discoverable, but that does not combine ownership between the addresses.
+Gateway credits the depositor, and Payna uses that same Circle SCA to authorize spending directly through ERC-1271. Balance reads and new transfers therefore use the SCA address. Historical records can still identify legacy signer addresses, but new operations never use them.
 
 If a user has multiple SCA records or an older deposit made by another address, support should compare the deposit transaction caller, the webhook `walletAddress`, the domain, and the queried depositor. Do not “fix” a zero signer balance by moving funds or repeating a deposit.
 
@@ -86,4 +86,4 @@ If a user has multiple SCA records or an older deposit made by another address, 
 
 ## Related official references
 
-Circle's [Gateway overview](https://developers.circle.com/gateway) defines the unified cross-chain value proposition. The [technical guide](https://developers.circle.com/gateway/references/technical-guide) explains the ledger, balance inputs, multiple burn intents, and delegates. The [EVM unified-balance quickstart](https://developers.circle.com/gateway/quickstarts/unified-balance-evm) demonstrates finalized deposits and balance queries. Use [supported blockchains](https://developers.circle.com/gateway/references/supported-blockchains) for domain and finality data, and [webhook events](https://developers.circle.com/gateway/references/webhook-events) for the authoritative finalized-deposit payload.
+Circle's [Gateway overview](https://developers.circle.com/gateway) defines the unified cross-chain value proposition. The [ERC-1271 reference](https://developers.circle.com/gateway/references/erc-1271) explains direct smart-account signing. Use [supported blockchains](https://developers.circle.com/gateway/references/supported-blockchains) for domain and finality data, and [webhook events](https://developers.circle.com/gateway/references/webhook-events) for the authoritative finalized-deposit payload.

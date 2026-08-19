@@ -19,7 +19,6 @@ export type GatewayAllocationEstimate = {
   maxBlockHeight: string;
   priorityReason: string;
   authorized: boolean;
-  delegateRequired: boolean;
 };
 
 export type GatewaySourceSelectionRow = {

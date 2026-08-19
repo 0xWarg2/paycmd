@@ -20,13 +20,13 @@ aiSummary:
 
 Use `/balance` between operations. Confirm that funding appears in the SCA section before depositing, then confirm that the deposited amount eventually appears in the Gateway ready section. Do not expect `/fund` to bypass deposit finality.
 
-## Allowance, delegate, and deposit transaction
+## Allowance and deposit transaction
 
 Circle supports several protocol deposit methods: allowance followed by `deposit`, EIP-2612 permit, and ERC-3009 authorization, with variants for crediting another depositor. They are documented in the [Gateway technical guide](https://developers.circle.com/gateway/references/technical-guide#deposit).
 
-**Current Payna implementation behavior:** `/deposit` uses the allowance path. Before funds move, it creates or finds a Gateway signer EOA for the user. The SCA first submits `addDelegate` so that EOA may sign later burn intents. It then submits `approve(GatewayWallet, amount)` to USDC and finally calls `deposit(token, amount)` from the SCA. These are Circle developer-controlled wallet contract-execution transactions, and the route waits for their confirmed or complete state.
+**Current Payna implementation behavior:** `/deposit` uses the allowance path. The SCA submits `approve(GatewayWallet, amount)` to USDC and then calls `deposit(token, amount)`. These are Circle developer-controlled wallet contract-execution transactions, and the route waits for their confirmed or complete state.
 
-The calling SCA is the depositor credited by Gateway. The delegated EOA signs future transfer requests but does not receive this balance. Delegate initialization or approval can consume native source gas even though neither action transfers the requested USDC into Gateway.
+The calling SCA is the depositor credited by Gateway and later signs Burn Intents directly through ERC-1271. Approval can consume native source gas even though it does not transfer the requested USDC into Gateway.
 
 ## Never send USDC directly to Gateway
 
@@ -73,9 +73,9 @@ Search history and the chain explorer for the deposit hash. If the transaction s
 ## Diagnostic checklist
 
 1. Verify the command: `/deposit <positive amount> from <supported source>`.
-2. Confirm the Circle SCA exists, holds enough USDC, and has native gas for delegate, approval, and deposit calls.
+2. Confirm the Circle SCA exists, holds enough USDC, and has native gas for approval and deposit calls unless Gas Station sponsors them.
 3. Distinguish the signer EOA from the SCA depositor; query balance under the depositor.
-4. Identify the last on-chain step: delegate, approval, or deposit. Only the deposit hash tracks moved USDC.
+4. Identify the last on-chain step: approval or deposit. Only the deposit hash tracks moved USDC.
 5. If a deposit hash exists, check chain success and its block number; do not resubmit.
 6. While status is `pending_gateway_finality`, check Circle's pending list and wait for required confirmations.
 7. Refresh or invoke recovery sync. Duplicate refreshes are safe; duplicate deposits are not.

@@ -54,7 +54,7 @@ const flowSteps = [
 ];
 
 const stackItems = [
-  { label: "Circle Wallets", detail: "SCA wallet, Gateway signer, USDC balance" },
+  { label: "Circle Wallets", detail: "SCA wallet, ERC-1271, USDC balance" },
   { label: "Circle Gateway", detail: "Unified USDC liquidity and cross-chain transfer path" },
   { label: "CCTP v2", detail: "MetaMask bridge flow through Circle Bridge Kit" },
   { label: "Arc Testnet", detail: "Receipt proof contract and explorer-linked transaction records" },

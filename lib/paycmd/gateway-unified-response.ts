@@ -18,6 +18,8 @@ export function gatewayUnifiedEstimateResponse(
     ? new Set(options.selectedSourceChains)
     : undefined;
   return {
+    engine: "legacy" as const,
+    allocationPolicy: "payna_explicit" as const,
     sourceMode: "unified" as const,
     amount: atomicUsdc(amountAtomic),
     destinationChain: unified.destinationChain,
@@ -33,7 +35,6 @@ export function gatewayUnifiedEstimateResponse(
         maxBlockHeight: unified.quote.intents[index]!.maxBlockHeight.toString(),
         priorityReason: allocation.priorityReason,
         authorized: source?.authorized ?? false,
-        delegateRequired: false,
       };
     }),
     sources: unified.sourceStatuses

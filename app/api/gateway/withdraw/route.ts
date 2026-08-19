@@ -111,14 +111,11 @@ function gatewayWithdrawPendingResponse(params: {
   amount: string | number;
   chain: SupportedChain;
   txHash?: string;
-  stage: "delegate" | "burn_intent";
+  stage: "burn_intent";
   locale: PayCmdLocale;
 }) {
   const retryCommand = `/withdraw ${params.amount} from ${chainCommandAlias(params.chain)}`;
-  const actionText =
-    params.stage === "delegate"
-      ? tr(params.locale, "gateway.finality.delegate", { chain: params.chain })
-      : tr(params.locale, "gateway.finality.burnIntent", { chain: params.chain });
+  const actionText = tr(params.locale, "gateway.finality.burnIntent", { chain: params.chain });
 
   return NextResponse.json(
     {

@@ -21,15 +21,15 @@ Choose **Sign in with MetaMask** and approve the login signature in the extensio
 
 ## Link the MetaMask wallet with `/link metamask`
 
-After signing in, run `/link metamask`. The command associates the connected external address with the current Payna account; it does not give Payna custody of the wallet. The MetaMask account must match the logged-in session. This association lets Payna prepare funding, CCTP bridge, and swap flows that need a user signature. Verify the linked MetaMask address and status badge in **Profile**; `/wallet status` reports only the Circle SCA, Gateway signer, and Circle wallets.
+After signing in, run `/link metamask`. The command associates the connected external address with the current Payna account; it does not give Payna custody of the wallet. The MetaMask account must match the logged-in session. This association lets Payna prepare funding, CCTP bridge, and swap flows that need a user signature. Verify the linked MetaMask address and status badge in **Profile**; `/wallet status` reports the Circle SCA and Circle wallets.
 
 ## Create a Circle wallet with `/wallet create`
 
-Run `/wallet create` to create or return the Circle SCA wallet. The command is idempotent: if the SCA already exists, it returns its current status rather than creating a duplicate. Gateway signer details can remain absent until a Gateway flow initializes the signer. Wait for the status response before trying a money-moving command. A successful wallet creation does not move USDC into the SCA and does not make a Gateway balance.
+Run `/wallet create` to create or return the Circle SCA wallet. The command is authenticated and idempotent: if the SCA already exists, it returns its current status rather than creating a duplicate. The same SCA signs Gateway Burn Intents directly with ERC-1271. A successful wallet creation does not move USDC into the SCA and does not make a Gateway balance.
 
 ## Get faucet USDC and native gas
 
-Get testnet USDC from the [Circle Faucet](https://faucet.circle.com/) on the chain you want to fund. Confirm that the faucet deposit reaches the linked MetaMask address, not an SCA or Gateway address copied from another screen. MetaMask needs USDC plus native gas for `/fund`, CCTP bridge, and Arc swap actions. Circle SCA or Gateway signer gas is relevant only for Circle-wallet transactions or manual branches explicitly called out in the UI; use `/gas check <chain>` when a Gateway flow asks you to check it.
+Get testnet USDC from the [Circle Faucet](https://faucet.circle.com/) on the chain you want to fund. Confirm that the faucet deposit reaches the intended address. MetaMask needs USDC plus native gas for `/fund`, CCTP bridge, and Arc swap actions. Circle SCA gas matters for unsponsored Circle-wallet transactions or Manual mint branches explicitly called out in the UI; use `/gas check <chain>` when requested.
 
 ## Fund the Circle wallet with `/fund`
 

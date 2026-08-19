@@ -2,7 +2,7 @@ const { BridgeKit } = require("@circle-fin/bridge-kit");
 
 const expectedChains = [
   ["Arbitrum_Sepolia", 421614, "https://sepolia-rollup.arbitrum.io/rpc"],
-  ["Arc_Testnet", 5042002, "https://rpc.testnet.arc.network"],
+  ["Arc_Testnet", 5042002, "https://rpc.testnet.arc.io"],
   ["Avalanche_Fuji", 43113, "https://api.avax-test.network/ext/bc/C/rpc"],
   ["Base_Sepolia", 84532, "https://sepolia.base.org"],
   ["Codex_Testnet", 812242, "https://rpc.codex-stg.xyz"],

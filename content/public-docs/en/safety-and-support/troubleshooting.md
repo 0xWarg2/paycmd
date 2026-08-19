@@ -45,7 +45,7 @@ aiSummary:
 
 ## Source gas, destination gas, or payment ambiguity
 
-**Diagnosis:** Source native gas pays Gateway delegate/approval/deposit; USDC fee is separate. Manual mint needs named SCA/signer gas; auto forwarding normally avoids destination gas. Ambiguous rail, chain, source, or recipient blocks payment.
+**Diagnosis:** Source native gas pays unsponsored Gateway approval/deposit; the USDC fee is separate. Manual mint needs named SCA gas when Gas Station does not sponsor it; auto forwarding normally avoids destination gas. Ambiguous rail, chain, source, or recipient blocks payment.
 
 **Safe action:** Fund only the public address and chain named by the error. Clarify the payment details and reopen its preview; use `/gas check <chain>` as a read aid.
 

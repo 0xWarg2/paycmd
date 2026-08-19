@@ -1,90 +1,85 @@
 ---
 slug: "circle/gateway/overview"
 title: "Circle Gateway trong Payna"
-description: "Mental model và luồng unified USDC của Circle Gateway."
+description: "Mô hình unified USDC của Circle Gateway và cơ chế SCA ký trực tiếp trong Payna."
 section: "circle.gateway"
 order: 20
-lastUpdated: "2026-08-05"
-keywords: ["Circle Gateway", "SCA", "signer", "depositor", "unified"]
+lastUpdated: "2026-08-18"
+keywords: ["Circle Gateway", "SCA", "ERC-1271", "unified balance"]
 tutorial: true
 aiSummary:
-  - "Payna tách ba vai trò: Circle SCA giữ USDC on-chain, depositor sở hữu balance theo domain trong Gateway, còn EOA được delegate ký burn intent."
-  - "Gateway có thể biểu diễn unified cross-chain balance, nhưng lệnh transfer hiện tại của Payna chỉ tiêu từ source domain được chọn rõ ràng."
+  - "Payna dùng Circle SCA vừa làm Gateway depositor vừa làm signer ERC-1271; không tạo hoặc dùng delegate EOA."
+  - "Mọi unified operation mới chạy qua Circle Unified Balance Kit và được ràng buộc với signed quote ngắn hạn."
 ---
 
-Circle Gateway là hệ thống thanh khoản USDC non-custodial gồm Gateway Wallet contract ở source chain, Gateway Minter contract ở destination chain và dịch vụ Gateway off-chain của Circle. Người dùng deposit trước rồi chờ source-chain finality. Sau khi hoàn tất thời gian chờ này, một transfer hợp lệ đã ký có thể nhận attestation và mint USDC ở destination mà không phải chờ source finality giữa luồng transfer. Đây là protocol model trong [Gateway overview](https://developers.circle.com/gateway) và [technical guide](https://developers.circle.com/gateway/references/technical-guide) chính thức của Circle.
+Circle Gateway là hệ thống thanh khoản USDC non-custodial của Circle. Deposit đã finalized trở thành balance có thể tiêu qua các Gateway domain được hỗ trợ. USDC trong wallet nhưng chưa deposit không thuộc Gateway balance.
 
-Payna bao quanh model đó bằng command, preview, managed wallet, history và recovery. Lớp ứng dụng không xóa các ranh giới protocol. Đặc biệt, **Circle SCA wallet không phải Gateway balance**. Việc thấy USDC trong SCA không có nghĩa số đó có thể cấp vốn ngay cho Gateway transfer.
+## SCA ký trực tiếp
 
-## Ba vai trò wallet
+Payna dùng một Circle smart contract account (SCA) cho mỗi user. SCA sở hữu deposited balance và ký Gateway Burn Intent trực tiếp bằng ERC-1271. Unified Balance Kit gửi `contractSigner: true`; không có delegated EOA, bước authorize delegate hoặc fallback sang EOA.
 
-**Circle SCA wallet** là application wallet của người dùng. Nó giữ USDC on-chain thông thường trước deposit, gửi các contract call approval và `deposit`, trả native gas cho các Circle wallet transaction đó và nhận Payna withdrawal. Trong flow deposit hiện tại, nó cũng là depositor vì SCA gọi `GatewayWallet.deposit`.
+SCA cũng gửi transaction approve/deposit và, với Manual mint, transaction mint ở destination. Các on-chain action này có thể cần native gas nếu Circle Gas Station không sponsor transaction SCA tương ứng.
 
-**Gateway depositor** là địa chỉ được Gateway ghi nhận balance theo token và domain. Đây là chủ balance, không phải một loại wallet riêng do Payna đặt ra. Circle theo dõi balance theo tổ hợp chain/domain, token và depositor address. Trong deposit hiện tại của Payna, địa chỉ đó là SCA. Deposit do địa chỉ khác gửi sẽ được credit cho caller đó, trừ khi dùng protocol method deposit rõ ràng cho người khác.
+## Các trạng thái balance
 
-**Gateway signer** là Circle-managed EOA được dùng như authorized delegate. Payna tạo hoặc tìm signer cho chain liên quan rồi để SCA authorize nó. Signer ký EIP-712 burn intent; signer không tự động sở hữu USDC đã deposit. Ranh giới này quan trọng khi chẩn đoán balance: chỉ query signer có thể trả về zero dù SCA depositor có ready balance. Circle mô tả delegate và yêu cầu riêng cho SCA trong [technical guide](https://developers.circle.com/gateway/references/technical-guide#delegates).
+Payna tách riêng:
 
-Không công khai seed phrase, private key, API credential hoặc RPC secret khi xác định các vai trò này. Public address, domain number, transaction hash hoặc transfer ID thường đã đủ cho support.
+- **Confirmed:** Gateway balance đã finalized và có thể allocation.
+- **Pending:** deposit đã được quan sát nhưng chưa finalized.
+- **Funds in motion:** transfer đã submit nhưng chưa đạt settlement state cuối.
 
-## Luồng Gateway hoàn chỉnh của Payna
+Chỉ confirmed balance được allocation. RPC hoặc Gateway response partial không bao giờ bị hiểu thành balance bằng zero.
 
-Lifecycle thông thường là:
+Deposit vào trạng thái **pending finality** sau khi source transaction confirmed nhưng trước khi Circle index đủ số confirmation bắt buộc. Payna lưu deposit hash rồi chờ signed Gateway webhook hoặc reconciliation read. App không cho tiêu pending value và không lặp deposit chỉ vì ready balance chưa đổi. Ranh giới này cũng ngăn UI trình bày optimistic total như tiền có thể tiêu.
 
-1. `/fund 10 from metamask on base` chuyển USDC từ MetaMask sang Circle SCA. Lệnh này chưa deposit vào Gateway.
-2. `/deposit 10 from base` khởi tạo hoặc tìm signer, authorize Gateway contract tiêu USDC của SCA, gửi deposit từ SCA và ghi transaction hash.
-3. Payna đánh dấu transaction `pending_gateway_finality`. On-chain confirmation của deposit đã gửi chưa chứng minh Circle đã credit ready balance.
-4. Circle quan sát deposit đã finalized. Completion path chính của Payna là webhook đã ký `gateway.deposit.finalized`; reconciliation sync là recovery path.
-5. `/transfer 5 from base to arc` estimate fee, kiểm tra Base Gateway balance đã chọn có đủ `amount + fee`, bảo đảm signer authorization, ký một burn intent rồi request Gateway transfer.
-6. Auto forwarding yêu cầu Circle Forwarding Service thực hiện destination mint. Manual mode nhận attestation rồi Payna gửi mint bằng Circle wallet phù hợp.
-7. `/withdraw 2 from base` dùng same-domain burn-and-mint để đưa USDC về Base SCA balance của người dùng.
+Wallet screen rộng hơn có thể hiện ordinary SCA USDC cạnh Gateway USDC, nhưng hai giá trị vẫn tách biệt. Chuyển ordinary USDC vào Gateway bắt buộc confirmation `/deposit` rõ ràng. Tương tự, withdrawal chuyển confirmed Gateway value về ordinary SCA USDC bằng same-domain Burn Intent rồi mint. Không hướng nào chỉ là thay đổi bookkeeping.
 
-Mỗi transition có retry boundary khác nhau. Draft hoặc quote thất bại chưa chuyển tiền. Deposit, delegate transaction, burn intent hoặc forwarding request đã submit có thể đã đổi state và phải được kiểm tra bằng identifier trước khi retry.
+## Mô hình source và destination
 
-## Unified balance có nghĩa gì
+Scoped command nêu một source domain. Payna kiểm tra confirmed balance của source và maximum debit trong quote trước khi bật confirmation. Unified command yêu cầu Circle Kit tự allocation qua eligible source domain. Estimate trả allocation để user review; browser không thể thay bằng unsigned custom source list trong execution.
 
-Ở protocol level, finalized deposit của một depositor có thể tạo unified balance dùng cho transfer đến destination được hỗ trợ. Protocol của Circle hỗ trợ nhiều burn intent và intent set có thể lấy từ nhiều source domain. Unified model nghĩa là integration có thể làm deposited liquidity khả dụng cross-chain; nó không biến USDC chưa deposit trong wallet thành một phần Gateway ledger.
+Gateway destination và funding source có capability khác nhau. Một chain có thể hiện trong balance read nhưng chưa được phê duyệt làm SCA spend source. Payna vì thế lấy giao giữa Circle Gateway support, Circle Wallet SDK support và allowlist nội bộ. Configuration unsupported hoặc mơ hồ fail closed thay vì âm thầm đổi signer, engine hay network.
 
-Response `/v1/balances` của Gateway là ready balance đã ghi nhận. `/v1/deposits` xác định deposit đã được quan sát nhưng chưa process. Circle chờ số confirmation cần thiết trước khi cập nhật unified balance; yêu cầu khác nhau theo network và được liệt kê trong [Gateway supported blockchains](https://developers.circle.com/gateway/references/supported-blockchains).
+Mint mode cũng phụ thuộc destination. `auto_forwarding` chỉ xuất hiện khi Unified Balance Kit báo destination forwarding được hỗ trợ. `manual` là recovery-compatible path và cần destination SCA transaction thực thi được. Đổi destination hoặc mint mode làm signed fingerprint thay đổi và bắt buộc quote mới.
 
-## Payna total balance có nghĩa gì
+## Lifecycle transfer
 
-Payna còn trình bày một total phục vụ visibility rộng hơn. Nó cộng các SCA USDC read on-chain thành công với ready Gateway balance. Con số này trả lời “Payna hiện nhìn thấy bao nhiêu USDC ở hai location này?” Nó không phải pool on-chain mới và không cấp cho Gateway quyền tiêu phần SCA.
+1. Preview lấy allocation và fee estimate từ Circle Kit mà không ký hoặc chuyển tiền.
+2. Payna ký quote fingerprint ở server. Quote hết hạn sau 60 giây; UI confirmation lease là 50 giây.
+3. Confirmation tạo durable operation trước khi submit và bind user, amount, recipient, destination, mint mode cùng funding mode vào fingerprint.
+4. SCA ký Burn Intent trực tiếp bằng ERC-1271. Circle Kit hỗ trợ tối đa 16 source intent.
+5. Circle forward destination mint nếu capability của destination cho phép, hoặc Payna thực hiện Manual mint.
+6. History lưu actual allocation, actual fee, transfer ID, transaction hash và settlement state. Signature, attestation và recovery payload chỉ nằm ở server.
 
-Nếu RPC hoặc Gateway API thất bại, Payna đánh dấu kết quả partial. Partial total là lower bound, không phải bằng chứng chain bị thiếu có zero. Tương tự, deposit ở giữa on-chain submission và Gateway finality có thể tạm thời vắng ở cả SCA balance đã giảm và Gateway ready response. Hãy dùng transaction state thay vì coi chênh lệch hiển thị tạm thời là mất tiền.
+Nếu forwarding fail sau khi source đã submit, Payna không bao giờ chạy lại spend. App lưu resumable state và chỉ cho tiếp tục destination Manual mint.
 
-## Ưu tiên scoped, dùng unified khi cần
+## Arc Testnet
 
-`/transfer <amount> from <source> to <destination>` bắt đầu bằng một burn intent cho source đã nêu. Payna query ready balance của domain đó và yêu cầu đủ `amount + maxFee`. Nếu thiếu, confirmation bị khóa và preview đưa ra hai lựa chọn rõ ràng: deposit minimum được hiển thị vào source đó, hoặc chuyển sang unified quote bằng `BurnIntentSet`.
+Arc Testnet dùng chain ID `5042002`, RPC `https://rpc.testnet.arc.io` và explorer `https://testnet.arcscan.app`. Native USDC gas unit có 18 decimals; ERC-20/display USDC có 6 decimals. Payna kiểm tra chain ID và gọi `USDC.isBlacklisted(recipient)` trước khi ký Gateway transfer tới Arc. Không kiểm tra được cũng phải dừng.
 
-`/transfer <amount> from gateway to <destination>` chọn unified path trực tiếp. Payna xếp hạng ready source đủ điều kiện theo quote cost và usable capacity, hiện từng allocation cùng maximum fee reserve, rồi cho user thêm hoặc bỏ source trước confirm. App không tự tiêu domain khác hoặc deposit SCA funds khi user chưa chọn rõ ràng.
+Arc forwarding lấy theo capability, không bị hard-code tắt. Manual mint dùng Circle Gas Station khi sponsorship policy khả dụng; nếu không, Payna báo đúng native-gas requirement.
 
-## Ví dụ balance trên hai domain
+## Retry an toàn
 
-Giả sử Payna đọc được các giá trị sau cho cùng một SCA depositor:
+Client gửi UUID operation ID. Dùng lại ID với cùng fingerprint trả kết quả cũ; dùng cùng ID với input khác trả `GATEWAY_OPERATION_ID_CONFLICT`. Quote legacy trả `GATEWAY_QUOTE_ENGINE_MISMATCH` và phải estimate lại.
 
-| Location | Base | Arc | Total riêng |
-| --- | ---: | ---: | ---: |
-| SCA USDC on-chain | 12 | 7 | 19 USDC |
-| Gateway USDC ready | 4 | 9 | 13 USDC |
+Sau khi đã có transfer ID hoặc source transaction, lỗi mơ hồ được reconcile theo identifier thay vì retry mù. Nếu destination mint thành công nhưng ghi receipt thất bại, operation chuyển sang `reconciliation_required` và không thể mint lại.
 
-Circle Gateway visibility của depositor là **13 USDC ready**. Visible total rộng hơn trong Payna là **19 + 13 = 32 USDC**. Payna không gọi 19 USDC trong SCA là deposited Gateway liquidity.
+Durable operation đi qua state rõ ràng như created, submitted, pending mint, success, failure và reconciliation required. State transition được lưu cùng authenticated user và transaction row. Raw Circle recovery material nằm trong bảng RLS-protected riêng mà browser session không select được. Manual-mint retry atomically claim row này để hai tab không thể cùng execute một recovery.
 
-Với `/transfer 5 from base to arc`, maximum fee reserve 0.02 USDC làm yêu cầu trên Base thành 5.02 USDC. Base chỉ có 4 nên Payna khóa scoped confirmation và cho chọn deposit tối thiểu 1.02 USDC hoặc mở unified preview. Unified quote có thể allocate từ Arc hoặc kết hợp các source đủ điều kiện nếu đó là fee-aware plan đã chọn. Thay đổi source sẽ tạo quote và fingerprint mới.
+Quote freshness và operation idempotency giải quyết hai vấn đề khác nhau. Quote ngăn execution dưới price, allocation hoặc capability đã cũ. UUID ngăn request hợp lệ bị submit hai lần do browser retry network timeout. Cả hai check xảy ra trước signing. Dung sai fee 5% cho phép Circle fee dịch chuyển có giới hạn mà không chấp nhận economic payload khác; quote vượt policy phải được review lại.
 
-## Checklist state và safety
+## Ví dụ hoàn chỉnh
 
-- Xác nhận địa chỉ nào là SCA depositor và địa chỉ nào chỉ là delegated signer.
-- Xem `submitted` và `pending_gateway_finality` là waiting state, không phải ready balance.
-- Với scoped command, chain sau `from` cần đủ ready balance cho `amount + maxFee`; nếu thiếu, review explicit deposit hoặc unified fallback.
-- Đọc partial balance là “ít nhất bằng số này”, rồi retry chain lookup đã fail.
-- Kiểm tra recipient, source, destination, mint mode, estimated fee và required source debit trước confirm.
-- Sau lỗi transfer đã submit, giữ transfer ID và transaction hash; xem status trước retry.
-- Không bao giờ gửi USDC bằng ERC-20 `transfer` thông thường vào Gateway Wallet contract. Circle cảnh báo cách này không credit unified balance và có thể làm mất tiền.
+Giả sử SCA có 20 ordinary USDC trên Base, 4 confirmed Gateway USDC trên Base, 7 confirmed Gateway USDC ở một domain được hỗ trợ khác và deposit 3 USDC vẫn pending. Ordinary 20 và pending 3 nhìn thấy được nhưng không dùng cho Gateway transfer. Unified request 10 USDC chỉ dùng confirmed 11, sau khi trừ fee reserve Circle Kit trả về.
 
-## Official reference liên quan
+Preview hiện contributing domain đề xuất, destination, recipient, estimated fee, maximum debit, mint mode hỗ trợ, expiry và fingerprint. Confirm tạo operation trước rồi mới yêu cầu direct SCA signature. Nếu Circle nhận source spend nhưng forwarding fail sau đó, Activity hiện `pending_mint`; user có thể tiếp tục Manual mint mà không burn thêm 10 USDC. Nếu UUID cũ được gửi lại với recipient khác, Payna trả conflict thay vì đoán payment nào đúng.
 
-- [Circle Gateway overview](https://developers.circle.com/gateway) — mục đích protocol và unified cross-chain balance.
-- [Gateway technical guide](https://developers.circle.com/gateway/references/technical-guide) — contract, balance, deposit, transfer, withdrawal và delegate.
-- [Gateway supported blockchains](https://developers.circle.com/gateway/references/supported-blockchains) — domain identifier và required confirmation.
-- [Gateway fees](https://developers.circle.com/gateway/references/fees) và [Forwarding Service](https://developers.circle.com/gateway/references/forwarding-service) — thành phần protocol fee và destination forwarding.
-- [Gateway webhook events](https://developers.circle.com/gateway/references/webhook-events) — schema finalized deposit và mint event.
+Với Arc recipient, cùng preview còn thực hiện chain và blocklist check. Primary RPC bị rate limit có thể dùng configured fallback với bounded retry. Wrong chain ID, blocklist read không khả dụng hoặc address bị blacklisted đều ngăn signing. Việc thiếu safety signal vì thế là điều kiện chặn, không phải quyền tiếp tục.
+
+## Official reference
+
+- [Circle Gateway](https://developers.circle.com/gateway)
+- [Gateway ERC-1271](https://developers.circle.com/gateway/references/erc-1271)
+- [Gateway supported blockchains](https://developers.circle.com/gateway/references/supported-blockchains)
+- [Gateway fees](https://developers.circle.com/gateway/references/fees)

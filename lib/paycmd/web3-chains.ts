@@ -14,14 +14,14 @@ export type PayCmdWeb3Chain = {
   usdcAddress: `0x${string}`;
 };
 
-const arcRpcKey = process.env.NEXT_PUBLIC_ARC_TESTNET_RPC_KEY || "c0ca2582063a5bbd5db2f98c139775e982b16919";
+const arcRpcUrl = process.env.NEXT_PUBLIC_ARC_RPC_URL?.trim() || "https://rpc.testnet.arc.io";
 
 export const web3Chains: Record<PayCmdChain, PayCmdWeb3Chain> = {
   arcTestnet: {
     id: 5042002,
     hexChainId: "0x4cef52",
     name: "Arc Testnet",
-    rpcUrl: `https://rpc.testnet.arc.network/${arcRpcKey}`,
+    rpcUrl: arcRpcUrl,
     blockExplorerUrl: "https://testnet.arcscan.app",
     // Arc RPC gas balances use 18-decimal base units. ERC-20 USDC below remains 6 decimals.
     nativeCurrency: { name: "USD Coin", symbol: "USDC", decimals: 18 },

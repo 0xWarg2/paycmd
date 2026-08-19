@@ -16,8 +16,8 @@ V1 chỉ cần demo nhanh. Trạng thái command có thể lưu trong Postgres. 
 
 Bài học từ lỗi thực tế khi chạy `/transfer 5 from base to arc`:
 
-- `addDelegate` và `deposit` có thể đã confirm trên chain, nhưng Gateway API vẫn chưa nhận ngay quyền signer hoặc balance để burn.
-- Lúc đó backend có thể báo `Signer is not authorized to spend funds from sourceDepositor`.
+- `deposit` có thể đã confirm trên chain nhưng Gateway API vẫn chưa ghi nhận ngay confirmed balance để Circle Wallet SCA burn qua ERC-1271.
+- Lúc đó backend phải hiển thị pending/funds-in-motion và không được phân bổ số dư chưa confirmed.
 - Đây không phải lỗi thiếu gas đơn thuần. Nó là trạng thái chờ finality/index của Gateway, đặc biệt dễ gặp trên Base Sepolia.
 
 Lesson:

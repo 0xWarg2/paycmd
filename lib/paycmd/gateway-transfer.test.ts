@@ -763,17 +763,17 @@ test("does not label a preflight estimate as actual on a successful receipt", ()
   );
 });
 
-test("rejects a zero actual fee field in receipt mode", () => {
+test("accepts an explicit zero actual fee from Circle Kit", () => {
   const amounts = gatewayTransferAmounts(
     { amount: "1", actualFeeStatus: "actual", actualGatewayFee: 0 },
     "receipt",
   );
-  assert.equal(amounts.actualFeeStatus, "pending");
-  assert.equal(amounts.gatewayFee, null);
-  assert.equal(amounts.sourceDebit, null);
+  assert.equal(amounts.actualFeeStatus, "actual");
+  assert.equal(amounts.gatewayFee, 0);
+  assert.equal(amounts.sourceDebit, 1);
 });
 
-test("receipt ignores actual fields when settlement fees.total is unavailable", () => {
+test("receipt uses Circle Kit actual fields when legacy fees.total is unavailable", () => {
   const amounts = gatewayTransferAmounts(
     {
       amount: "1",
@@ -784,9 +784,9 @@ test("receipt ignores actual fields when settlement fees.total is unavailable", 
     },
     "receipt",
   );
-  assert.equal(amounts.actualFeeStatus, "pending");
-  assert.equal(amounts.gatewayFee, null);
-  assert.equal(amounts.sourceDebit, null);
+  assert.equal(amounts.actualFeeStatus, "actual");
+  assert.equal(amounts.gatewayFee, 0.5);
+  assert.equal(amounts.sourceDebit, 1.5);
 });
 
 test("same-chain receipt omits transfer fee and keeps forwarding fee mode-specific", () => {

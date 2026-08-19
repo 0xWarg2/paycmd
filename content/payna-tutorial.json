@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "updatedAt": "2026-08-07",
+  "updatedAt": "2026-08-18",
   "product": "Hey Payna",
   "locales": {
     "vi": {
@@ -40,10 +40,10 @@
             "account",
             "MetaMask",
             "SCA",
-            "Gateway signer"
+            "ERC-1271"
           ],
           "content": [
-            "Một tài khoản Payna có thể liên kết MetaMask, Circle SCA wallet và Gateway signer; mỗi ví có vai trò và balance riêng."
+            "Một tài khoản Payna có thể liên kết MetaMask và một Circle SCA wallet; SCA ký Gateway operation trực tiếp bằng ERC-1271."
           ],
           "url": "https://heypayna.xyz/docs/getting-started/account-and-wallets"
         },
@@ -53,13 +53,12 @@
           "keywords": [
             "Circle Gateway",
             "SCA",
-            "signer",
-            "depositor",
-            "unified"
+            "ERC-1271",
+            "unified balance"
           ],
           "content": [
-            "Payna tách ba vai trò: Circle SCA giữ USDC on-chain, depositor sở hữu balance theo domain trong Gateway, còn EOA được delegate ký burn intent.",
-            "Gateway có thể biểu diễn unified cross-chain balance, nhưng lệnh transfer hiện tại của Payna chỉ tiêu từ source domain được chọn rõ ràng."
+            "Payna dùng Circle SCA vừa làm Gateway depositor vừa làm signer ERC-1271; không tạo hoặc dùng delegate EOA.",
+            "Mọi unified operation mới chạy qua Circle Unified Balance Kit và được ràng buộc với signed quote ngắn hạn."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/overview"
         },
@@ -99,29 +98,29 @@
           "title": "Gateway transfer",
           "keywords": [
             "transfer",
-            "burn intent set",
-            "unified gateway",
-            "source allocation",
-            "fee"
+            "ERC-1271",
+            "unified balance",
+            "idempotency",
+            "forwarding"
           ],
           "content": [
-            "`/transfer 5 from base to arc` vẫn source-scoped. Nếu ready balance thiếu, Payna cho chọn minimum deposit hoặc unified BurnIntentSet; không auto-deposit.",
-            "Unified preview hiện từng allocation, maximum fee reserve và maximum debit, rồi bind confirmation với fingerprint của quote mới nhất."
+            "Lệnh `/transfer 5 from base to arc` và unified Gateway dùng Circle Unified Balance Kit với chữ ký ERC-1271 trực tiếp từ SCA.",
+            "Signed quote 60 giây và durable operation ID ngăn stale execution và duplicate spend."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/transfer"
         },
         {
           "id": "circle/gateway/withdraw",
-          "title": "Withdraw từ Gateway",
+          "title": "Gateway withdrawal",
           "keywords": [
             "withdraw",
             "Gateway",
-            "SCA",
-            "same domain"
+            "ERC-1271",
+            "SCA"
           ],
           "content": [
-            "Lệnh /withdraw của Payna burn ready Gateway balance và mint về SCA của người dùng trên same domain, cần amount cộng fee và gas cho SCA mint.",
-            "Application path này khác delayed trustless withdrawal mechanism ở protocol level của Gateway."
+            "Payna withdrawal burn và mint trên cùng Gateway domain về Circle SCA của user.",
+            "SCA ký trực tiếp bằng ERC-1271; không tạo hoặc authorize delegate EOA."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/withdraw"
         },
@@ -136,7 +135,7 @@
           ],
           "content": [
             "`fees.total` là current estimated/settled charge; `maxFee` từng intent là signed cap, và tổng cap là maximum reserve chứ không phải expected fee.",
-            "Unified allocation trừ maxFee từng intent khỏi usable balance; deposit và persistent delegate authorization là confirmation riêng."
+            "Unified allocation dùng confirmed balance và fee reserve; deposit vẫn là confirmation riêng."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/fees-gas-and-forwarding"
         },
@@ -184,11 +183,11 @@
             "contacts",
             "recipient",
             "preview",
-            "15 giây",
+            "50 giây",
             "AskPayna"
           ],
           "content": [
-            "Payment Payna cần amount, recipient, source chain và destination chain, rồi hiện confirmation preview 15 giây trước khi chạy Gateway.",
+            "Payment Payna cần amount, recipient, source chain và destination chain, rồi hiện confirmation preview 50 giây trước khi chạy Gateway.",
             "AskPayna không biến /pay hay transfer-like text thành preview; hãy chuyển sang Payna rồi submit lại tại đó để chuẩn bị payment.",
             "Contact chỉ lưu identity và routing hint, không có quyền ký; luôn kiểm tra địa chỉ đã resolve và destination.",
             "Payna hiểu các imperative contact-group rõ ràng bằng tiếng Việt/Anh, nhưng không biến câu hỏi về group thành hành động."
@@ -339,10 +338,10 @@
             "confirmation",
             "testnet",
             "preview hết hạn",
-            "15 giây"
+            "50 giây"
           ],
           "content": [
-            "Mọi transaction preview hết hạn sau chính xác 15 giây; expiry disable và cancel preview, nên phải submit lại để lấy preview mới.",
+            "Mọi transaction preview hết hạn sau chính xác 50 giây; expiry disable và cancel preview, nên phải submit lại để lấy preview mới.",
             "Payna hướng tới testnet: không chia sẻ secret ví, kiểm tra mọi preview và signature, rồi kiểm tra giao dịch đã submit trước khi retry."
           ],
           "url": "https://heypayna.xyz/docs/safety-and-support/security"
@@ -416,10 +415,10 @@
             "account",
             "MetaMask",
             "SCA",
-            "Gateway signer"
+            "ERC-1271"
           ],
           "content": [
-            "A Payna account can link MetaMask, a Circle SCA wallet, and a Gateway signer; each wallet has a separate role and balance."
+            "A Payna account can link MetaMask and one Circle SCA wallet; the SCA signs Gateway operations directly with ERC-1271."
           ],
           "url": "https://heypayna.xyz/docs/getting-started/account-and-wallets"
         },
@@ -429,13 +428,12 @@
           "keywords": [
             "Circle Gateway",
             "SCA",
-            "signer",
-            "depositor",
-            "unified"
+            "ERC-1271",
+            "unified balance"
           ],
           "content": [
-            "Payna keeps three roles distinct: the Circle SCA holds on-chain USDC, the depositor owns domain balances inside Gateway, and a delegated EOA signs burn intents.",
-            "Gateway can represent a unified cross-chain balance, while Payna's current transfer command spends only the explicitly selected source domain."
+            "Payna uses the Circle SCA as both Gateway depositor and ERC-1271 signer; it does not create or use a delegate EOA.",
+            "Every new unified operation runs through Circle Unified Balance Kit and is bound to a short-lived signed quote."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/overview"
         },
@@ -475,29 +473,29 @@
           "title": "Gateway transfer",
           "keywords": [
             "transfer",
-            "burn intent set",
-            "unified gateway",
-            "source allocation",
-            "fee"
+            "ERC-1271",
+            "unified balance",
+            "idempotency",
+            "forwarding"
           ],
           "content": [
-            "`/transfer 5 from base to arc` remains source-scoped. If that ready balance is short, Payna offers an explicit minimum deposit or a unified BurnIntentSet; it never auto-deposits.",
-            "A unified preview shows every allocation, maximum fee reserve and maximum debit, then binds confirmation to a fresh quote fingerprint."
+            "All new Gateway transfers use Circle Unified Balance Kit with direct ERC-1271 SCA signatures.",
+            "A signed 60-second quote and durable operation ID prevent stale execution and duplicate spending."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/transfer"
         },
         {
           "id": "circle/gateway/withdraw",
-          "title": "Withdraw from Gateway",
+          "title": "Gateway withdrawal",
           "keywords": [
             "withdraw",
             "Gateway",
-            "SCA",
-            "same domain"
+            "ERC-1271",
+            "SCA"
           ],
           "content": [
-            "Payna's /withdraw burns ready Gateway balance and mints it to the user's own SCA on the same domain, requiring amount plus fee and SCA mint gas.",
-            "This application path is distinct from Gateway's protocol-level delayed trustless withdrawal mechanism."
+            "A Payna withdrawal burns and mints on the same Gateway domain back to the user's Circle SCA.",
+            "The SCA signs directly with ERC-1271; no delegate EOA is created or authorized."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/withdraw"
         },
@@ -512,7 +510,7 @@
           ],
           "content": [
             "`fees.total` is the current estimated/settled charge; per-intent `maxFee` is a signed cap, and their sum is maximum reserve rather than expected fee.",
-            "Unified allocation subtracts each maxFee from usable balance; deposit and persistent delegate authorization are separate confirmations."
+            "Unified allocation uses confirmed balance and fee reserves; deposit remains a separate confirmation."
           ],
           "url": "https://heypayna.xyz/docs/circle/gateway/fees-gas-and-forwarding"
         },
@@ -560,11 +558,11 @@
             "contacts",
             "recipient",
             "preview",
-            "15 seconds",
+            "50 seconds",
             "AskPayna"
           ],
           "content": [
-            "A Payna payment requires amount, recipient, source chain, and destination chain, then shows a 15-second confirmation preview before Gateway execution.",
+            "A Payna payment requires amount, recipient, source chain, and destination chain, then shows a 50-second confirmation preview before Gateway execution.",
             "AskPayna never turns /pay or transfer-like text into a preview; switch to Payna and resubmit there to prepare a payment.",
             "Contacts store identity and routing hints, never signing authority; verify the resolved address and destination every time.",
             "Payna understands clear Vietnamese and English contact-group imperatives, but never turns a group question into an action."
@@ -715,10 +713,10 @@
             "confirmation",
             "testnet",
             "preview expiry",
-            "15 seconds"
+            "50 seconds"
           ],
           "content": [
-            "Every transaction preview expires after exactly 15 seconds; expiry disables and cancels it, so resubmit for a fresh preview.",
+            "Every transaction preview expires after exactly 50 seconds; expiry disables and cancels it, so resubmit for a fresh preview.",
             "Payna is testnet-oriented: never share wallet secrets, verify every preview and signature, and inspect submitted work before retrying."
           ],
           "url": "https://heypayna.xyz/docs/safety-and-support/security"

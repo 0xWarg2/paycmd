@@ -16,42 +16,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { circleDeveloperSdk } from "@/lib/circle/sdk";
-import { CIRCLE_CHAIN_NAMES } from "@/lib/circle/gateway-sdk";
+import { NextResponse } from "next/server";
+import { ensureUserCircleWallet } from "@/lib/circle/ensure-user-wallet";
+import { createClient } from "@/lib/supabase/server";
 
-export async function POST(req: NextRequest) {
+export async function POST() {
   try {
-    const { walletSetId } = await req.json();
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    if (!walletSetId) {
-      return NextResponse.json(
-        { error: "walletSetId is required" },
-        { status: 400 }
-      );
-    }
-
-    const response = await circleDeveloperSdk.createWallets({
-      accountType: "SCA",
-      blockchains: Object.values(CIRCLE_CHAIN_NAMES),
-      count: 1,
-      walletSetId,
-    });
-
-    if (!response.data?.wallets?.length) {
-      return NextResponse.json(
-        { error: "No wallets were created" },
-        { status: 500 }
-      );
-    }
-
-    const [createdWallet] = response.data.wallets;
-
-    return NextResponse.json(createdWallet, { status: 201 });
+    const { wallet, created } = await ensureUserCircleWallet(supabase, user.id);
+    return NextResponse.json(wallet, { status: created ? 201 : 200 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json(
-      { error: `Failed to create wallet: ${message}` },
+      { error: `Failed to ensure wallet: ${message}` },
       { status: 500 }
     );
   }

@@ -43,10 +43,11 @@ import {
   X,
 } from "lucide-react";
 import Image from "next/image";
-import { FormEvent, KeyboardEvent, ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { decodeFunctionResult, encodeFunctionData, erc20Abi, formatUnits, parseUnits } from "viem";
 
 import {
+  ChainIcon,
   ChainRoute,
   ExplorerTxLink,
   RailBadge,
@@ -55,7 +56,6 @@ import {
 } from "@/components/chain-identity";
 import { PayCmdShell } from "@/components/paycmd-shell";
 import { PreviewLeaseTimer } from "@/components/paycmd/preview-lease-timer";
-import { UnifiedGatewaySourceSelector } from "@/components/unified-gateway-source-selector";
 import {
   ExecutionTimeline,
   TransactionConfirmActions,
@@ -83,11 +83,8 @@ import { balanceBreakdown } from "@/lib/paycmd/balance-breakdown";
 import {
   buildTransactionPreviewModel,
   canSafelyRetryExecutionFailure,
-  gatewayAllocationGuardDraftField,
   gatewayTransferSubmitted,
-  parseGatewayAllocationGuardDraftField,
 } from "@/lib/paycmd/ui-models";
-import type { GatewayAllocationGuard } from "@/lib/paycmd/gateway-allocation-guard";
 import {
   normalizeQuotaOnboardingState,
   shouldShowQuotaOnboarding,
@@ -129,11 +126,6 @@ import {
   gatewayReceiptFeeComponents,
   gatewayTransferAmounts,
 } from "@/lib/paycmd/gateway-transfer";
-import {
-  gatewaySelectedSourceRequest,
-  recommendedGatewaySourceChains,
-  toggleGatewayCustomSource,
-} from "@/lib/paycmd/gateway-source-selection";
 import { formatNativeGasBalance } from "@/lib/paycmd/native-gas";
 import { isNearViewportBottom, jumpToLatestMessage } from "@/lib/paycmd/chat-scroll";
 import { createPreviewExpiresAt, previewCanConfirm, previewLeaseState } from "@/lib/paycmd/preview-lease";
@@ -910,6 +902,7 @@ type ExecutionReceipt = {
   metrics: ExecutionReceiptMetric[];
   links: ExecutionReceiptLink[];
   details: ExecutionReceiptMetric[];
+  sourceAllocations?: Array<{ sourceChain: string; amount: string }>;
 };
 
 type TranslateFn = ReturnType<typeof useI18n>["t"];
@@ -935,6 +928,17 @@ function receiptLinks(...links: Array<ExecutionReceiptLink | null | undefined>) 
     }
     seen.add(link.txHash);
     return true;
+  });
+}
+
+function receiptSourceAllocations(...values: unknown[]) {
+  const raw = values.find(Array.isArray);
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((value) => {
+    const allocation = recordFrom(value);
+    const sourceChain = stringFrom(allocation.sourceChain) ?? stringFrom(allocation.chain);
+    const amount = formatDecimalAmount(allocation.amount);
+    return sourceChain && amount ? [{ sourceChain, amount }] : [];
   });
 }
 
@@ -994,6 +998,17 @@ function buildExecutionReceipt(execution: ExecutionItem, t: TranslateFn): Execut
   const { result, transfer, payment } = executionResultRecords(execution);
   const sourceChain = executionSourceChain(execution);
   const destinationChain = executionDestinationChain(execution);
+  const transaction = [result.transaction, transfer.transaction]
+    .map(recordFrom)
+    .find((record) => Object.keys(record).length > 0) ?? {};
+  const unified = result.sourceMode === "unified" || transfer.sourceMode === "unified" ||
+    payment.sourceMode === "unified" || transaction.source_mode === "unified";
+  const displayedSourceChain = unified ? "gateway" : sourceChain;
+  const sourceAllocations = receiptSourceAllocations(
+    result.sourceAllocations,
+    transfer.sourceAllocations,
+    transaction.source_allocations,
+  );
   const proofTxHash =
     stringFrom(result.proofTxHash) ??
     stringFrom(transfer.proofTxHash) ??
@@ -1073,16 +1088,16 @@ function buildExecutionReceipt(execution: ExecutionItem, t: TranslateFn): Execut
 
     return {
       title: t("receipt.transferComplete"),
-      primary: `${amount} USDC ${shortChainLabel(sourceChain)} -> ${shortChainLabel(destinationChain)}`,
-      sourceChain,
+      primary: `${amount} USDC ${shortChainLabel(displayedSourceChain)} -> ${shortChainLabel(destinationChain)}`,
+      sourceChain: displayedSourceChain,
       destinationChain,
       metrics: [
         result.autoDeposit ? metric(t("receipt.autoDeposit"), `${formatDecimalAmount(result.autoDepositedAmount)} USDC`) : null,
         result.forwarding ? metric(t("receipt.forwarding"), t("receipt.enabled")) : metric(t("receipt.destinationGas"), t("receipt.manual")),
         amounts.gatewayFee !== null
-          ? metric(t("receipt.fees"), `${formatDecimalAmount(amounts.gatewayFee)} USDC`)
-          : metric(t("receipt.fees"), t("receipt.actualFeePending")),
-        amounts.gatewayFee === null && amounts.estimatedGatewayFee > 0
+          ? metric(t("receipt.actualFee"), `${formatDecimalAmount(amounts.gatewayFee)} USDC`)
+          : metric(t("receipt.actualFee"), t("receipt.actualFeePending")),
+        amounts.estimatedGatewayFee > 0
           ? metric(t("receipt.estimatedFee"), `~${formatDecimalAmount(amounts.estimatedGatewayFee)} USDC`)
           : null,
       ].filter(Boolean) as ExecutionReceiptMetric[],
@@ -1102,7 +1117,12 @@ function buildExecutionReceipt(execution: ExecutionItem, t: TranslateFn): Execut
           : metric(t("receipt.sourceDebit"), t("receipt.actualFeePending")),
         metric(t("receipt.mode"), result.forwarding ? t("transfer.autoForwarding") : t("transfer.manualGas")),
         metric(t("receipt.transferId"), stringFrom(result.transferId)),
+        metric(t("receipt.estimatedFeeMeaning"), t("receipt.estimatedFeeHelp")),
+        metric(t("receipt.actualFeeMeaning"), amounts.gatewayFee !== null
+          ? t("receipt.actualFeeHelp")
+          : t("receipt.actualFeeUnavailableHelp")),
       ].filter(Boolean) as ExecutionReceiptMetric[],
+      sourceAllocations: unified ? sourceAllocations : undefined,
     };
   }
 
@@ -1122,15 +1142,15 @@ function buildExecutionReceipt(execution: ExecutionItem, t: TranslateFn): Execut
       title: t("receipt.paymentSent"),
       primary: `${amount} USDC to ${recipient}`,
       secondary: destinationChain ? t("receipt.deliveredOn", { chain: getChainMeta(destinationChain)?.label ?? destinationChain }) : undefined,
-      sourceChain,
+      sourceChain: displayedSourceChain,
       destinationChain,
       metrics: [
         metric(t("receipt.recipient"), recipient),
         transfer.forwarding ? metric(t("receipt.forwarding"), t("receipt.enabled")) : metric(t("receipt.destinationGas"), t("receipt.manual")),
         amounts.gatewayFee !== null
-          ? metric(t("receipt.fees"), `${formatDecimalAmount(amounts.gatewayFee)} USDC`)
-          : metric(t("receipt.fees"), t("receipt.actualFeePending")),
-        amounts.gatewayFee === null && amounts.estimatedGatewayFee > 0
+          ? metric(t("receipt.actualFee"), `${formatDecimalAmount(amounts.gatewayFee)} USDC`)
+          : metric(t("receipt.actualFee"), t("receipt.actualFeePending")),
+        amounts.estimatedGatewayFee > 0
           ? metric(t("receipt.estimatedFee"), `~${formatDecimalAmount(amounts.estimatedGatewayFee)} USDC`)
           : null,
       ].filter(Boolean) as ExecutionReceiptMetric[],
@@ -1150,7 +1170,12 @@ function buildExecutionReceipt(execution: ExecutionItem, t: TranslateFn): Execut
           ? metric(t("receipt.sourceDebit"), `${formatDecimalAmount(amounts.sourceDebit)} USDC`)
           : metric(t("receipt.sourceDebit"), t("receipt.actualFeePending")),
         metric(t("receipt.mode"), transfer.forwarding ? t("transfer.autoForwarding") : t("transfer.manualGas")),
+        metric(t("receipt.estimatedFeeMeaning"), t("receipt.estimatedFeeHelp")),
+        metric(t("receipt.actualFeeMeaning"), amounts.gatewayFee !== null
+          ? t("receipt.actualFeeHelp")
+          : t("receipt.actualFeeUnavailableHelp")),
       ].filter(Boolean) as ExecutionReceiptMetric[],
+      sourceAllocations: unified ? sourceAllocations : undefined,
     };
   }
 
@@ -1961,14 +1986,40 @@ type BridgeEstimateSummary = {
 };
 
 type GatewayTransferEstimateSummary = {
+  engine?: "circle_kit";
+  allocationPolicy?: "payna_explicit" | "circle_auto";
+  authorizationMode?: "sca_erc1271";
   sourceMode?: "scoped" | "unified";
   amount: string | number;
   estimatedGatewayFee?: string | number;
   totalEstimatedFee?: string | number;
+  feeToleranceBps?: number;
+  maximumTotalFee?: string | number;
   totalFeeBuffer?: string | number;
-  maximumGatewayFee: string | number;
+  maximumGatewayFee?: string | number;
   requiredGatewayBalance?: string | number;
   maximumDebit?: string | number;
+  estimatedSourceDebit?: string | number;
+  maximumSourceDebit?: string | number;
+  totalConfirmedBalance?: string | number;
+  totalPendingBalance?: string | number;
+  fundsInMotionBalance?: string | number;
+  eligibleConfirmedBalance?: string | number;
+  quoteFingerprint?: string;
+  quoteExpiresAt?: string;
+  balanceBreakdown?: Array<{
+    chain: string;
+    sourceChain: string | null;
+    confirmedBalance: string;
+    pendingBalance?: string;
+    eligible: boolean;
+  }>;
+  fees?: Array<{
+    type: string;
+    token: string;
+    amount: string;
+    allocations?: Array<{ chain: string; sourceChain: string | null; amount: string }>;
+  }>;
   readyGatewayBalance?: string | number;
   readyBalance?: string | number;
   maximumUsableCapacity?: string | number;
@@ -1976,7 +2027,6 @@ type GatewayTransferEstimateSummary = {
   minimumDepositAmount?: string | number;
   fallbackOptions?: Array<"deposit" | "burn_intent_set">;
   fingerprint?: string;
-  allocationGuard?: GatewayAllocationGuard;
   allocations?: Array<{
     sourceChain: string;
     amount: number;
@@ -1987,7 +2037,6 @@ type GatewayTransferEstimateSummary = {
     maxBlockHeight: string;
     priorityReason: string;
     authorized: boolean;
-    delegateRequired: boolean;
   }>;
   sources?: Array<{
     sourceChain: string;
@@ -1999,7 +2048,7 @@ type GatewayTransferEstimateSummary = {
     selected: boolean;
     allocated: boolean;
   }>;
-  feeEstimateKind: "quoted_total" | "max_fee_reserve";
+  feeEstimateKind?: "quoted_total" | "max_fee_reserve";
   forwarding: boolean;
   mintGasMode: "auto_forwarding" | "manual";
   supportedMintGasModes?: Array<"auto_forwarding" | "manual">;
@@ -2393,11 +2442,8 @@ async function executeCommand(draft: ParsedCommand) {
         amount: draft.fields.amount,
         autoDeposit: false,
         mintGasMode: draft.fields.mintGasMode ?? "auto_forwarding",
-        selectedSourceChains: draft.fields.selectedSourceChains
-          ? draft.fields.selectedSourceChains.split(",").filter(Boolean)
-          : undefined,
-        allocationFingerprint: draft.fields.allocationFingerprint || undefined,
-        allocationGuard: parseGatewayAllocationGuardDraftField(draft.fields.allocationGuard),
+        quoteFingerprint: draft.fields.quoteFingerprint || undefined,
+        operationId: draft.fields.gatewayOperationId || undefined,
       }),
     });
   }
@@ -2412,11 +2458,8 @@ async function executeCommand(draft: ParsedCommand) {
         sourceChain: draft.fields.sourceChain,
         destinationChain: draft.fields.destinationChain,
         mintGasMode: draft.fields.mintGasMode ?? "auto_forwarding",
-        selectedSourceChains: draft.fields.selectedSourceChains
-          ? draft.fields.selectedSourceChains.split(",").filter(Boolean)
-          : undefined,
-        allocationFingerprint: draft.fields.allocationFingerprint || undefined,
-        allocationGuard: parseGatewayAllocationGuardDraftField(draft.fields.allocationGuard),
+        quoteFingerprint: draft.fields.quoteFingerprint || undefined,
+        operationId: draft.fields.gatewayOperationId || undefined,
       }),
     });
   }
@@ -6484,6 +6527,56 @@ function SlowAskSurfNotice({
   );
 }
 
+function InlineInfoPopover({
+  ariaLabel,
+  children,
+}: {
+  ariaLabel: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  return (
+    <span ref={rootRef} className="relative inline-flex shrink-0 align-middle">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        aria-label={ariaLabel}
+        className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-muted-foreground/50 bg-background text-[10px] font-bold leading-none text-muted-foreground transition hover:border-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={() => setOpen((current) => !current)}
+      >
+        !
+      </button>
+      {open ? (
+        <span
+          role="dialog"
+          className="absolute left-0 top-full z-50 mt-1 w-64 max-w-[calc(100vw-3rem)] rounded-lg border bg-popover p-2.5 text-left text-xs font-normal leading-5 text-popover-foreground shadow-lg"
+        >
+          {children}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 function OnboardingGuide({
   onSelect,
   showQuotaNotice,
@@ -6740,9 +6833,6 @@ export function CommandPreviewCard({
     draft.fields.sourceMode === "unified" ? "unified" : "none",
   );
   const [gatewayDepositAmount, setGatewayDepositAmount] = useState("");
-  const [selectedGatewaySources, setSelectedGatewaySources] = useState<string[] | null>(null);
-  const [gatewayPreflightLoading, setGatewayPreflightLoading] = useState(false);
-  const [gatewayRefreshMessage, setGatewayRefreshMessage] = useState("");
   const [payrollPreview, setPayrollPreview] = useState<{
     groupId: string;
     groupName: string;
@@ -6756,6 +6846,9 @@ export function CommandPreviewCard({
   } | null>(null);
   const [payrollPreviewError, setPayrollPreviewError] = useState("");
   const manualMintSupported = gatewayManualMintSupported(previewDestinationChain);
+  const autoForwardingSupported = gatewayEstimate?.supportedMintGasModes
+    ? gatewayEstimate.supportedMintGasModes.includes("auto_forwarding")
+    : true;
   const manualMintUnavailableMessage = previewDestinationChain
     ? t("preview.manualMintUnavailable", {
         chain: getChainMeta(previewDestinationChain)?.label ?? previewDestinationChain,
@@ -6765,7 +6858,19 @@ export function CommandPreviewCard({
     draft.fields.sourceMode === "unified" || gatewayFallbackMode === "unified"
       ? "unified"
       : "scoped";
-
+  const gatewayOperationKey = [
+    draft.command,
+    draft.fields.amount,
+    draft.fields.destinationChain,
+    draft.fields.recipient,
+    draft.fields.recipientAddress,
+    effectiveGatewaySourceMode,
+    selectedMintGasMode,
+  ].join("|");
+  const gatewayOperationId = useMemo(() => {
+    void gatewayOperationKey;
+    return crypto.randomUUID();
+  }, [gatewayOperationKey]);
   useEffect(() => {
     if (
       gatewayEstimate?.sourceMode === "scoped" &&
@@ -6972,9 +7077,6 @@ export function CommandPreviewCard({
           sourceChain: previewSourceChain,
           destinationChain: previewDestinationChain,
           mintGasMode: selectedMintGasMode,
-          ...(effectiveGatewaySourceMode === "unified"
-            ? gatewaySelectedSourceRequest(selectedGatewaySources)
-            : {}),
         }),
       })
         .then((result) => {
@@ -7008,7 +7110,6 @@ export function CommandPreviewCard({
     manualMintSupported,
     manualMintUnavailableMessage,
     selectedMintGasMode,
-    selectedGatewaySources,
     t,
     transferRecipientBlocked,
   ]);
@@ -7074,9 +7175,21 @@ export function CommandPreviewCard({
             ...draft.fields,
             mintGasMode: selectedMintGasMode,
             sourceMode: effectiveGatewaySourceMode,
-            selectedSourceChains: selectedGatewaySources?.join(",") ?? "",
-            allocationFingerprint: gatewayEstimate?.fingerprint ?? "",
-            allocationGuard: gatewayAllocationGuardDraftField(gatewayEstimate?.allocationGuard),
+            ...(effectiveGatewaySourceMode === "unified"
+              ? {
+                  selectedSourceChains: "",
+                  allocationFingerprint: "",
+                  allocationGuard: "",
+                  quoteFingerprint: gatewayEstimate?.quoteFingerprint ?? "",
+                  gatewayOperationId,
+                }
+              : {
+                  selectedSourceChains: "",
+                  allocationFingerprint: "",
+                  allocationGuard: "",
+                  quoteFingerprint: "",
+                  gatewayOperationId: "",
+                }),
           }
         : draft.fields,
   };
@@ -7136,16 +7249,12 @@ export function CommandPreviewCard({
     !isActive ||
     transferRecipientBlocked ||
     gatewayEstimateLoading ||
-    gatewayPreflightLoading ||
     !gatewayEstimate ||
     Boolean(gatewayEstimateError) ||
     (selectedMintGasMode === "manual" && !manualMintSupported) ||
     (scopedGatewayInsufficient && gatewayFallbackMode === "none") ||
     (gatewayFallbackMode === "deposit" && !gatewayDepositValid) ||
-    (effectiveGatewaySourceMode === "unified" && (
-      !gatewayEstimate.fingerprint ||
-      !(gatewayEstimate.allocations?.length)
-    ));
+    (effectiveGatewaySourceMode === "unified" && !gatewayEstimate.quoteFingerprint);
   const confirmWithGatewayPreflight = async () => {
     if (
       effectiveGatewaySourceMode !== "unified" ||
@@ -7156,55 +7265,7 @@ export function CommandPreviewCard({
       return;
     }
 
-    const allocationGuard = parseGatewayAllocationGuardDraftField(
-      finalConfirmDraft.fields.allocationGuard,
-    );
-    if (!allocationGuard || !finalConfirmDraft.fields.allocationFingerprint) {
-      setGatewayRefreshMessage(t("preview.gatewayEstimateFailed"));
-      return;
-    }
-
-    setGatewayPreflightLoading(true);
-    setGatewayRefreshMessage("");
-    try {
-      const common = {
-        amount: finalConfirmDraft.fields.amount,
-        sourceMode: "unified",
-        sourceChain: finalConfirmDraft.fields.sourceChain,
-        destinationChain: finalConfirmDraft.fields.destinationChain,
-        mintGasMode: finalConfirmDraft.fields.mintGasMode ?? "auto_forwarding",
-        selectedSourceChains: finalConfirmDraft.fields.selectedSourceChains
-          ? finalConfirmDraft.fields.selectedSourceChains.split(",").filter(Boolean)
-          : undefined,
-        allocationGuard,
-        allocationFingerprint: finalConfirmDraft.fields.allocationFingerprint,
-        preflightOnly: true,
-      };
-      const path = draft.command === "pay" ? "/api/payments/pay" : "/api/gateway/transfer";
-      const body = draft.command === "pay"
-        ? { ...common, recipient: finalConfirmDraft.fields.recipient }
-        : {
-            ...common,
-            recipientAddress: finalConfirmDraft.fields.recipientAddress || undefined,
-            autoDeposit: false,
-          };
-      await requestJson(path, { method: "POST", body: JSON.stringify(body) });
-      onConfirm(finalConfirmDraft);
-    } catch (error) {
-      const requestError = error as { code?: string; data?: unknown };
-      const data = recordFrom(requestError.data);
-      const refreshedEstimate = recordFrom(data.refreshedEstimate);
-      if (requestError.code === "GATEWAY_QUOTE_CHANGED" && Object.keys(refreshedEstimate).length) {
-        setGatewayEstimate(refreshedEstimate as GatewayTransferEstimateSummary);
-        setGatewayRefreshMessage(t("preview.gatewayQuoteRefreshed"));
-        return;
-      }
-      setGatewayRefreshMessage(
-        error instanceof Error ? error.message : t("preview.gatewayEstimateFailed"),
-      );
-    } finally {
-      setGatewayPreflightLoading(false);
-    }
+    onConfirm(finalConfirmDraft);
   };
   return (
     <div className="min-w-[260px] space-y-3" aria-live="polite">
@@ -7279,7 +7340,7 @@ export function CommandPreviewCard({
         </div>
         {isBridge ? (
           <div className="space-y-3">
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid gap-2 sm:grid-cols-3">
               <label className="grid gap-1">
                 <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{t("bridge.from")}</span>
                 <select
@@ -7561,7 +7622,7 @@ export function CommandPreviewCard({
           <div className="grid gap-2 sm:grid-cols-2">
             <button
               type="button"
-              disabled={!isActive}
+              disabled={!isActive || !autoForwardingSupported}
               onClick={() => setSelectedMintGasMode("auto_forwarding")}
               className={`rounded-md border px-3 py-2 text-left transition ${
                 selectedMintGasMode === "auto_forwarding"
@@ -7631,7 +7692,6 @@ export function CommandPreviewCard({
                     type="button"
                     onClick={() => {
                       setGatewayFallbackMode("unified");
-                      setSelectedGatewaySources(null);
                     }}
                     className={`rounded-md border px-3 py-2 text-left ${gatewayFallbackMode === "unified" ? "border-emerald-500 bg-emerald-500/10" : "bg-card hover:border-primary/60"}`}
                   >
@@ -7661,35 +7721,181 @@ export function CommandPreviewCard({
             ) : null}
           </>
         ) : null}
-        {hasMintGasChoice && effectiveGatewaySourceMode === "unified" ? (
-          <UnifiedGatewaySourceSelector
-            amount={draft.fields.amount}
-            destinationChain={previewDestinationChain}
-            totalEstimatedFee={gatewayEstimate?.totalEstimatedFee ?? gatewayEstimate?.estimatedGatewayFee}
-            totalFeeBuffer={gatewayEstimate?.totalFeeBuffer}
-            maximumGatewayFee={gatewayEstimate?.maximumGatewayFee}
-            maximumDebit={gatewayEstimate?.maximumDebit ?? gatewayEstimate?.requiredGatewayBalance}
-            mintGasMode={selectedMintGasMode}
-            sources={gatewayEstimate?.sourceMode === "unified" ? gatewayEstimate.sources ?? [] : []}
-            allocations={gatewayEstimate?.sourceMode === "unified" ? gatewayEstimate.allocations ?? [] : []}
-            customSourceChains={selectedGatewaySources}
-            quoteLoading={gatewayEstimateLoading}
-            active={isActive}
-            onCustomize={() => {
-              setSelectedGatewaySources(recommendedGatewaySourceChains(gatewayEstimate?.allocations ?? []));
-            }}
-            onToggleSource={(sourceChain) => {
-              setSelectedGatewaySources((current) => toggleGatewayCustomSource({
-                currentSourceChains: current ?? recommendedGatewaySourceChains(gatewayEstimate?.allocations ?? []),
-                sourceChain,
-              }));
-            }}
-            onRestoreRecommended={() => setSelectedGatewaySources(null)}
-            onBackToScoped={previewSourceChain ? () => {
-              setGatewayFallbackMode("none");
-              setSelectedGatewaySources(null);
-            } : undefined}
-          />
+        {hasMintGasChoice && effectiveGatewaySourceMode === "unified" && gatewayEstimate?.engine === "circle_kit" ? (
+          <div className="space-y-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs">
+            <div className="flex items-center justify-between gap-3">
+              <div className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                {t("preview.gatewaySources.circleAutoTitle")}
+                <InlineInfoPopover
+                  ariaLabel={t("preview.gatewaySources.infoLabel", {
+                    label: t("preview.gatewaySources.circleAutoTitle"),
+                  })}
+                >
+                  {t("preview.gatewaySources.circleAutoHelp")}
+                </InlineInfoPopover>
+              </div>
+              <Badge variant="secondary">SCA · ERC-1271</Badge>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="rounded-md border bg-background/70 px-3 py-2">
+                <div className="text-muted-foreground">{t("preview.gatewaySources.confirmedTotal")}</div>
+                <div className="mt-1 font-medium text-foreground">
+                  {formatDecimalAmount(gatewayEstimate.eligibleConfirmedBalance)} USDC
+                </div>
+              </div>
+              <div className="rounded-md border bg-background/70 px-3 py-2">
+                <div className="text-muted-foreground">{t("preview.gatewaySources.pendingTotal")}</div>
+                <div className="mt-1 font-medium text-foreground">
+                  {formatDecimalAmount(gatewayEstimate.totalPendingBalance)} USDC
+                </div>
+              </div>
+              <div className="rounded-md border bg-background/70 px-3 py-2">
+                <div className="text-muted-foreground">{t("preview.gatewaySources.fundsInMotion")}</div>
+                <div className="mt-1 font-medium text-foreground">
+                  {formatDecimalAmount(gatewayEstimate.fundsInMotionBalance)} USDC
+                </div>
+              </div>
+              <div className="rounded-md border bg-background/70 px-3 py-2">
+                <div className="text-muted-foreground">{t("preview.gatewaySources.estimatedDebit")}</div>
+                <div className="mt-1 font-medium text-foreground">
+                  ~{formatDecimalAmount(gatewayEstimate.estimatedSourceDebit)} USDC
+                </div>
+                <div className="mt-0.5 text-[11px] text-muted-foreground">
+                  {t("preview.gatewaySources.maximumAllowedDebit")}: ≤{formatDecimalAmount(gatewayEstimate.maximumSourceDebit)} USDC
+                </div>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <div className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                {t("preview.gatewaySources.eligibleBalancesTitle")}
+                <InlineInfoPopover
+                  ariaLabel={t("preview.gatewaySources.infoLabel", {
+                    label: t("preview.gatewaySources.eligibleBalancesTitle"),
+                  })}
+                >
+                  {t("preview.gatewaySources.eligibleBalancesHelp")}
+                </InlineInfoPopover>
+              </div>
+              {(gatewayEstimate.balanceBreakdown ?? [])
+                .filter((balance) => balance.eligible && Number(balance.confirmedBalance) > 0)
+                .map((balance) => (
+                  <div key={balance.chain} className="flex items-center justify-between gap-3 text-muted-foreground">
+                    <span className="inline-flex items-center gap-2">
+                      <ChainIcon chain={balance.sourceChain} size={16} />
+                      {getChainMeta(balance.sourceChain ?? "")?.label ?? balance.chain}
+                    </span>
+                    <span className="font-medium text-foreground">
+                      {formatDecimalAmount(balance.confirmedBalance)} USDC
+                    </span>
+                  </div>
+                ))}
+            </div>
+            {(gatewayEstimate.fees ?? []).length ? (
+              <div className="space-y-1 border-t pt-2">
+                <div className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                  {t("preview.gatewaySources.currentFeePlan")}
+                  <InlineInfoPopover
+                    ariaLabel={t("preview.gatewaySources.infoLabel", {
+                      label: t("preview.gatewaySources.currentFeePlan"),
+                    })}
+                  >
+                    {t("preview.gatewaySources.currentFeePlanHelp")}
+                  </InlineInfoPopover>
+                </div>
+                {(gatewayEstimate.fees ?? []).flatMap((fee) => {
+                  const feeLabel = fee.type === "provider"
+                    ? t("preview.gatewaySources.providerFee")
+                    : fee.type === "gasFee"
+                      ? t("preview.gatewaySources.gasFee")
+                      : fee.type === "forwarder"
+                        ? t("preview.gatewaySources.forwarderFee")
+                        : fee.type === "kit"
+                          ? t("preview.gatewaySources.kitFee")
+                          : fee.type;
+                  if (fee.allocations?.length) {
+                    return fee.allocations.map((allocation) => (
+                      <div
+                        key={`${fee.type}-${allocation.chain}`}
+                        className="flex items-center justify-between gap-3 text-muted-foreground"
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <ChainIcon chain={allocation.sourceChain} size={16} />
+                          <span>{getChainMeta(allocation.sourceChain ?? "")?.label ?? allocation.chain} · {feeLabel}</span>
+                          <InlineInfoPopover
+                            ariaLabel={t("preview.gatewaySources.infoLabel", { label: feeLabel })}
+                          >
+                            {fee.type === "provider"
+                              ? t("preview.gatewaySources.providerFeeHelp")
+                              : fee.type === "gasFee"
+                                ? t("preview.gatewaySources.gasFeeHelp")
+                                : fee.type === "kit"
+                                  ? t("preview.gatewaySources.kitFeeHelp")
+                                  : t("preview.gatewaySources.feePlanGenericHelp")}
+                          </InlineInfoPopover>
+                        </span>
+                        <span className="font-medium text-foreground">
+                          ~{formatDecimalAmount(allocation.amount)} {fee.token}
+                        </span>
+                      </div>
+                    ));
+                  }
+                  return [
+                    <div
+                      key={`${fee.type}-flat`}
+                      className="flex items-center justify-between gap-3 text-muted-foreground"
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        {fee.type === "forwarder" ? (
+                          <ChainIcon chain={previewDestinationChain} size={16} />
+                        ) : null}
+                        {fee.type === "forwarder"
+                          ? `${getChainMeta(previewDestinationChain)?.label ?? previewDestinationChain} · ${feeLabel}`
+                          : feeLabel}
+                        <InlineInfoPopover
+                          ariaLabel={t("preview.gatewaySources.infoLabel", { label: feeLabel })}
+                        >
+                          {fee.type === "forwarder"
+                            ? t("preview.gatewaySources.forwarderFeeHelp")
+                            : fee.type === "kit"
+                              ? t("preview.gatewaySources.kitFeeHelp")
+                              : t("preview.gatewaySources.feePlanGenericHelp")}
+                        </InlineInfoPopover>
+                      </span>
+                      <span className="font-medium text-foreground">
+                        ~{formatDecimalAmount(fee.amount)} {fee.token}
+                      </span>
+                    </div>,
+                  ];
+                })}
+                <div className="mt-2 flex items-center justify-between gap-3 border-t pt-2 font-medium text-foreground">
+                  <span className="inline-flex items-center gap-1.5">
+                    {t("preview.gatewaySources.estimatedFee")}
+                    <InlineInfoPopover
+                      ariaLabel={t("preview.gatewaySources.infoLabel", {
+                        label: t("preview.gatewaySources.estimatedFee"),
+                      })}
+                    >
+                      <span className="block">
+                        {t("preview.gatewaySources.debitFormula", {
+                          amount: formatDecimalAmount(gatewayEstimate.amount),
+                          fee: formatDecimalAmount(gatewayEstimate.totalEstimatedFee),
+                          total: formatDecimalAmount(gatewayEstimate.estimatedSourceDebit),
+                        })}
+                      </span>
+                      <span className="mt-1 block">
+                        {t("preview.gatewaySources.allocationAfterSpend")}
+                      </span>
+                    </InlineInfoPopover>
+                  </span>
+                  <span>~{formatDecimalAmount(gatewayEstimate.totalEstimatedFee)} USDC</span>
+                </div>
+                <div className="flex items-center justify-between gap-3 text-muted-foreground">
+                  <span>{t("preview.gatewaySources.maximumAllowedFee")}</span>
+                  <span>≤{formatDecimalAmount(gatewayEstimate.maximumTotalFee)} USDC</span>
+                </div>
+              </div>
+            ) : null}
+          </div>
         ) : null}
         {hasMintGasChoice ? (
           <TransactionPreviewSummary
@@ -7708,7 +7914,7 @@ export function CommandPreviewCard({
                           : t("preview.gatewayFeeQuote"),
                       value: `${gatewayEstimate.feeEstimateKind === "max_fee_reserve" ? "≤" : "~"}${formatDecimalAmount(gatewayEstimate.totalEstimatedFee ?? gatewayEstimate.estimatedGatewayFee)} USDC`,
                     },
-                    ...(gatewayEstimate.sourceMode === "unified"
+                    ...(gatewayEstimate.sourceMode === "unified" && gatewayEstimate.engine !== "circle_kit"
                       ? [
                           {
                             label: t("preview.gatewaySources.feeBuffer"),
@@ -7722,7 +7928,9 @@ export function CommandPreviewCard({
                       : []),
                     {
                       label: t("receipt.sourceDebit"),
-                      value: `≤${formatDecimalAmount(gatewayEstimate.maximumDebit ?? gatewayEstimate.requiredGatewayBalance)} USDC`,
+                      value: gatewayEstimate.engine === "circle_kit"
+                        ? `~${formatDecimalAmount(gatewayEstimate.estimatedSourceDebit)} USDC`
+                        : `≤${formatDecimalAmount(gatewayEstimate.maximumDebit ?? gatewayEstimate.requiredGatewayBalance)} USDC`,
                     },
                     {
                       label: t("preview.destinationGas"),
@@ -7742,16 +7950,13 @@ export function CommandPreviewCard({
             }
             details={[
               t("preview.gatewayQuoteExecutionNote"),
-              ...(gatewayEstimate?.sourceMode === "unified"
+              ...(gatewayEstimate?.sourceMode === "unified" && gatewayEstimate.engine !== "circle_kit"
                 ? [t("preview.gatewayFeeLimitNote")]
-                : []),
+                : gatewayEstimate?.engine === "circle_kit"
+                  ? [t("preview.gatewaySources.allocationAfterSpend")]
+                  : []),
             ]}
           />
-        ) : null}
-        {gatewayRefreshMessage ? (
-          <div role="status" className="rounded-md border border-info/35 bg-info/10 px-3 py-2 text-[11px] leading-4 text-info-foreground">
-            {gatewayRefreshMessage}
-          </div>
         ) : null}
         {mintGasHelpText ? <div>{mintGasHelpText}</div> : null}
       </div>
@@ -7765,7 +7970,7 @@ export function CommandPreviewCard({
         <>
           <PreviewLeaseTimer expiresAt={previewExpiresAt!} onExpire={() => onCancel("expired")} />
           <TransactionConfirmActions
-            confirmLabel={gatewayPreflightLoading ? t("preview.gatewayCheckingQuote") : confirmLabel}
+            confirmLabel={confirmLabel}
             cancelLabel={t("common.cancel")}
             disabled={!canConfirmLease || (isBridge ? bridgeConfirmDisabled : isSwap ? swapConfirmDisabled : hasMintGasChoice ? gatewayConfirmDisabled : isPayroll ? payrollPreview === null || payrollPreview.recipientCount === 0 || Boolean(payrollPreviewError) : false)}
             onCancel={() => onCancel()}
@@ -8050,6 +8255,7 @@ function ExecutionReceiptCard({
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
   const [copyErrorHash, setCopyErrorHash] = useState<string | null>(null);
   const hasDetails = receipt.details.length > 0;
+  const hasSourceAllocations = Boolean(receipt.sourceAllocations?.length);
 
   async function copyHash(txHash: string) {
     try {
@@ -8128,16 +8334,33 @@ function ExecutionReceiptCard({
           {copiedHash ? t("receipt.hashCopied") : copyErrorHash ? t("receipt.copyFailed") : ""}
         </span>
 
-        {hasDetails ? (
+        {hasDetails || hasSourceAllocations ? (
           <details className="mt-3 rounded-lg border border-border/70 bg-muted/15 px-3 py-2 text-xs">
             <summary className="cursor-pointer text-muted-foreground">{t("receipt.details")}</summary>
-            <div className="mt-2 space-y-1.5">
+            <div className="mt-3 space-y-3">
+              {hasSourceAllocations ? (
+                <section className="space-y-2">
+                  <div className="font-semibold text-foreground">{t("receipt.gatewaySourcesUsed")}</div>
+                  {receipt.sourceAllocations?.map((allocation, index) => (
+                    <div key={`${allocation.sourceChain}-${index}`} className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-background/70 px-3 py-2">
+                      <span className="flex items-center gap-2">
+                        <ChainIcon chain={allocation.sourceChain} size={18} />
+                        <span>{getChainMeta(allocation.sourceChain)?.label ?? allocation.sourceChain}</span>
+                      </span>
+                      <span className="font-semibold">{allocation.amount} USDC</span>
+                    </div>
+                  ))}
+                  <p className="leading-5 text-muted-foreground">{t("receipt.gatewaySourcesUsedHelp")}</p>
+                </section>
+              ) : null}
+              <div className="space-y-1.5">
               {receipt.details.map((item) => (
                 <div key={`${item.label}-${item.value}`} className="grid grid-cols-[104px_minmax(0,1fr)] gap-2">
                   <span className="text-muted-foreground">{item.label}</span>
                   <span className="break-all font-medium">{item.value}</span>
                 </div>
               ))}
+              </div>
             </div>
           </details>
         ) : null}

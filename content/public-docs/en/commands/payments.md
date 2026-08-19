@@ -32,11 +32,11 @@ Contacts resolve identity; `/pay` and payroll move Gateway USDC; a request creat
 - **Purpose:** Send USDC from one scoped Gateway domain or an explicitly selected unified allocation to a resolved contact/address.
 - **Syntax and variants:** `/pay <amount> [USDC] to <recipient> on <destination> from <source> [manual]`; use `from gateway` for BurnIntentSet allocation.
 - **Example:** `/pay 25 to Minh on arc from base`; if Base is short, choose a minimum deposit or the unified source table. `/pay 25 to Minh on arc from gateway` starts unified.
-- **Prerequisites:** Resolvable recipient, valid quote, ready capacity after fee reserves, delegate authorization on selected sources, and destination gas only for manual mint.
+- **Prerequisites:** Resolvable recipient, valid signed quote, confirmed capacity after fee reserves, and destination gas only for unsponsored Manual mint.
 - **Preview:** Verify recipient, destination, mint mode, each source allocation, total estimated fee, maximum reserve/debit, exclusions, and quote fingerprint. No auto-deposit occurs.
-- **Confirmation boundary:** Deposit and persistent delegate consent are separate confirmations. Final payment confirmation signs the bounded BurnIntent/BurnIntentSet; MetaMask does not sign.
+- **Confirmation boundary:** Deposit is a separate confirmation. Final payment confirmation asks the Circle SCA to sign the bounded Burn Intent directly with ERC-1271; MetaMask does not sign.
 - **Success and persisted data:** Response includes recipient resolution, one transfer ID, source allocations, settled fees, history ID, destination explorer/proof links, and notifications.
-- **Named errors and fixes:** **“Contact not found”**: add the contact or use a full address. **`GATEWAY_INSUFFICIENT_SCOPED_BALANCE`**: choose deposit or unified. **`GATEWAY_DELEGATE_REQUIRED`**: authorize and wait. **`GATEWAY_QUOTE_CHANGED`**: review again. **`INSUFFICIENT_GAS`**: fund the named wallet or select forwarding.
+- **Named errors and fixes:** **“Contact not found”**: add the contact or use a full address. **`GATEWAY_INSUFFICIENT_SCOPED_BALANCE`**: choose deposit or unified. **`GATEWAY_QUOTE_EXPIRED`**: review again. **`INSUFFICIENT_GAS`**: fund the named SCA or select forwarding.
 
 ## `/request`
 

@@ -46,6 +46,7 @@ import {
   type GatewayFeeEstimate,
 } from "@/lib/paycmd/gateway-transfer";
 import { web3Chains } from "@/lib/paycmd/web3-chains";
+import { arcTestnetChain } from "@/lib/paycmd/arc-rpc";
 import {
   Transaction,
   Blockchain,
@@ -54,20 +55,7 @@ import {
 export const GATEWAY_WALLET_ADDRESS = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9";
 export const GATEWAY_MINTER_ADDRESS = "0x0022222ABE238Cc2C7Bb1f21003F0a260052475B";
 
-const arcRpcKey = process.env.ARC_TESTNET_RPC_KEY || 'c0ca2582063a5bbd5db2f98c139775e982b16919';
-
-export const arcTestnet = {
-  id: 5042002,
-  name: 'Arc Testnet',
-  nativeCurrency: { name: 'USD Coin', symbol: 'USDC', decimals: 18 },
-  rpcUrls: {
-    default: { http: [`https://rpc.testnet.arc.network/${arcRpcKey}`] },
-  },
-  blockExplorers: {
-    default: { name: 'ArcScan', url: 'https://testnet.arcscan.app' },
-  },
-  testnet: true,
-} as const satisfies Chain;
+export const arcTestnet = arcTestnetChain;
 
 const hyperEvmTestnet = defineChain({
   id: 998,
@@ -360,13 +348,6 @@ const BurnIntentSet = [
 
 function addressToBytes32(address: Address): `0x${string}` {
   return pad(address.toLowerCase() as Address, { size: 32 });
-}
-
-function usdcDecimalToAtomic(value: string | number): bigint {
-  const [wholeRaw, fractionRaw = ""] = String(value).split(".");
-  const whole = wholeRaw.replace(/[^\d]/g, "") || "0";
-  const fraction = fractionRaw.replace(/[^\d]/g, "").padEnd(6, "0").slice(0, 6);
-  return BigInt(whole) * 1_000_000n + BigInt(fraction || "0");
 }
 
 export interface BurnIntentSpec {

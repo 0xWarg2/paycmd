@@ -57,13 +57,13 @@ test("switch to Payna only changes mode and prefills without submitting", async 
   await expect(page.getByTestId("mode-safety-state")).toContainText("submitted=0");
 });
 
-test("expires a transaction preview after fifteen seconds", async ({ page }) => {
+test("expires a transaction preview after fifty seconds", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-08-07T00:00:00.000Z") });
   await page.addInitScript(() => window.localStorage.setItem("paycmd_locale", "en"));
   await page.goto("/dev/ui-preview");
 
-  await expect(page.getByRole("timer")).toHaveText(/^00:(?:0[1-9]|1[0-5])$/);
-  await page.clock.fastForward(15_000);
+  await expect(page.getByRole("timer")).toHaveText(/^00:(?:[0-4][1-9]|[1-5]0)$/);
+  await page.clock.fastForward(50_000);
 
   await expect(page.getByRole("button", { name: /Confirm 50 USDC/i })).toBeDisabled();
   await expect(page.getByText(/Preview expired/i)).toBeVisible();

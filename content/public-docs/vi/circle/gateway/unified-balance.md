@@ -70,7 +70,7 @@ Xét `/transfer 10 from arc to base`. Nếu maximum reserve là 0.03 USDC, Arc c
 
 ## Scope của depositor và signer
 
-Gateway credit depositor, còn signer authorize việc tiêu. Payna deposit từ SCA và delegate một Circle-managed EOA. Vì thế balance read chính dùng SCA address. Recovery code có thể query cả SCA và historical signer address để deposit cũ vẫn được tìm thấy, nhưng việc này không gộp ownership giữa các address.
+Gateway credit depositor và Payna dùng chính Circle SCA đó để authorize việc tiêu trực tiếp bằng ERC-1271. Balance read và transfer mới vì thế dùng SCA address. Historical record vẫn có thể nhận diện signer legacy, nhưng operation mới không dùng chúng.
 
 Nếu người dùng có nhiều SCA record hoặc deposit cũ từ address khác, support nên so sánh caller của deposit transaction, `walletAddress` trong webhook, domain và depositor được query. Không “sửa” signer balance bằng zero qua việc chuyển tiền hoặc lặp lại deposit.
 
@@ -86,4 +86,4 @@ Nếu người dùng có nhiều SCA record hoặc deposit cũ từ address khá
 
 ## Official reference liên quan
 
-[Gateway overview](https://developers.circle.com/gateway) của Circle định nghĩa unified cross-chain value proposition. [Technical guide](https://developers.circle.com/gateway/references/technical-guide) giải thích ledger, balance input, multiple burn intent và delegate. [EVM unified-balance quickstart](https://developers.circle.com/gateway/quickstarts/unified-balance-evm) minh họa finalized deposit và balance query. Dùng [supported blockchains](https://developers.circle.com/gateway/references/supported-blockchains) cho domain/finality và [webhook events](https://developers.circle.com/gateway/references/webhook-events) cho authoritative finalized-deposit payload.
+[Gateway overview](https://developers.circle.com/gateway) của Circle định nghĩa unified cross-chain value proposition. [ERC-1271 reference](https://developers.circle.com/gateway/references/erc-1271) giải thích direct smart-account signing. Dùng [supported blockchains](https://developers.circle.com/gateway/references/supported-blockchains) cho domain/finality và [webhook events](https://developers.circle.com/gateway/references/webhook-events) cho authoritative finalized-deposit payload.

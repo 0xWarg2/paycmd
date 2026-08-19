@@ -1,92 +1,74 @@
 ---
 slug: "circle/gateway/withdraw"
-title: "Withdraw từ Gateway"
-description: "Rút Gateway balance về Circle SCA wallet trên cùng domain."
+title: "Gateway withdrawal"
+description: "Đưa confirmed Gateway USDC về Circle SCA của user trên cùng domain."
 section: "circle.gateway"
 order: 24
-lastUpdated: "2026-08-05"
-keywords: ["withdraw", "Gateway", "SCA", "same domain"]
+lastUpdated: "2026-08-18"
+keywords: ["withdraw", "Gateway", "ERC-1271", "SCA"]
 tutorial: true
 aiSummary:
-  - "Lệnh /withdraw của Payna burn ready Gateway balance và mint về SCA của người dùng trên same domain, cần amount cộng fee và gas cho SCA mint."
-  - "Application path này khác delayed trustless withdrawal mechanism ở protocol level của Gateway."
+  - "Payna withdrawal burn và mint trên cùng Gateway domain về Circle SCA của user."
+  - "SCA ký trực tiếp bằng ERC-1271; không tạo hoặc authorize delegate EOA."
 ---
 
-## Payna withdraw làm gì
+## Same-domain withdrawal
 
-`/withdraw 5 from base` trả USDC từ ready Gateway balance của SCA depositor trên Base về Circle SCA của chính người dùng cũng trên Base. Source và destination domain giống nhau, recipient cố định là SCA address. Đây không phải bridge sang chain khác và không nhận external recipient.
+`/withdraw 10 from base` đưa confirmed Gateway USDC trên Base về ordinary USDC trong Base Circle SCA của user. Đây là same-domain Gateway Burn Intent rồi `gatewayMint`, không phải trustless recovery bảy ngày.
 
-**Current Payna implementation behavior:** withdraw dùng Gateway transfer API với same-domain burn intent, chờ attestation rồi submit `gatewayMint` qua Circle SCA. Sau success, amount là SCA on-chain USDC thông thường và không còn thuộc ready Gateway balance.
+Source và destination domain giống nhau, recipient là SCA của authenticated user. Withdrawal không chọn external recipient và không chuyển fund tới MetaMask. Ordinary SCA balance chỉ tăng sau khi destination mint settle. Trước đó Activity có thể hiện funds in motion dù source Gateway balance đã được commit.
 
-Circle còn mô tả on-chain trustless withdrawal mechanism có initiation transaction và delay khi API không khả dụng. Đó là protocol capability khác trong [Gateway technical guide](https://developers.circle.com/gateway/references/technical-guide#withdrawal). Command `/withdraw` ở đây là application-managed same-domain transfer path, không phải delayed trustless path.
+Gateway recovery bảy ngày là trustless fallback riêng cho protocol recovery. Normal withdrawal của Payna dùng regular spend-and-mint flow của Circle và không nên được mô tả với recovery delay. Support cần xác định path nào tạo transaction trước khi hướng dẫn timing.
 
-## Command và amount validation
+## Preview boundary
 
-Syntax là `/withdraw <amount> from <source>`, ví dụ `/withdraw 5.25 from base`. Amount phải là positive USDC với tối đa sáu chữ số thập phân. Payna reject missing field, unsupported chain alias, zero/negative value, malformed decimal và value vượt safety ceiling trước execution.
+Preview xác nhận amount, selected domain, receiving SCA, current balance state, estimated fee và gas responsibility. Nó là read-only: không sign, burn, mint hoặc khởi tạo wallet thứ hai. Nếu quote hết hạn, user review quote mới thay vì để server execute với fee hoặc block constraint đã cũ.
 
-Command không ngầm withdraw “all” và không suy source từ visible total lớn nhất. Hãy chỉ rõ domain đang có ready liquidity trong Gateway row. Vì current Payna selection là source-scoped, thiếu trên Base không được bù bằng Gateway balance trên Arc.
+Chỉ confirmed Gateway balance tiêu được. Pending deposit vẫn hiện nhưng không thỏa `amount + fee`. Deposit transaction confirmed on-chain vẫn có thể ở pending finality khi Circle chờ required confirmation của domain và index nó. Payna dựa vào signed deposit webhook cùng reconciliation read thay vì giả định một receipt nghĩa là Gateway balance đã ready.
 
-## Prerequisite
+Mọi money value vẫn là decimal string dựa trên atomic bigint. Payna không dùng JavaScript `Number` hay `parseFloat` để quyết định balance có cover withdrawal không. Điều này quan trọng gần ranh giới sáu decimals của USDC, nơi display value đã round không được authorize atomic debit lớn hơn.
 
-Trước khi confirmed withdrawal execution có thể hoàn tất:
+## Authorization và fee check
 
-- user phải có Circle SCA wallet và address;
-- selected chain phải vừa nằm trong Gateway configuration của Payna vừa operable qua current Circle Wallet SDK;
-- SCA depositor phải có finalized Gateway ready balance trên domain đó;
-- Gateway signer liên quan phải tồn tại và authorized, hoặc SCA phải có gas để authorize;
-- SCA phải có native gas trên same domain để execute destination mint;
-- estimate và transfer API của Circle phải available.
+Sau confirmation, Payna resolve SCA của authenticated user, estimate Gateway fee và yêu cầu confirmed source balance đủ `amount + fee`. SCA ký Burn Intent trực tiếp bằng ERC-1271 với `contractSigner: true`. Không có delegate stage hoặc EOA fallback.
 
-Pending deposit chưa ready. `/withdraw` không auto-deposit hoặc dùng SCA USDC bù Gateway shortfall vì như vậy fund đi ngược hướng.
+Destination mint transaction dùng cùng SCA và cần native gas được estimate động nếu Circle Gas Station không sponsor.
 
-Đây là execution prerequisite, không phải check đã được command preview chứng minh. Current preview không gọi withdraw route để inspect signer, quote, balance, authorization hay gas.
+Direct ERC-1271 authorization nghĩa Gateway depositor và protocol field `sourceSigner` đều resolve thành SCA address. Circle verify contract signature vì submitted request được đánh dấu `contractSigner: true`. Historical operation có thể còn hiện legacy engine label, nhưng không thể làm withdrawal mới tạo hoặc dùng EOA delegate.
 
-## Fee và balance validation
+Trước burn, Payna check current fee, confirmed source capacity, SCA identity và destination execution prerequisite. Browser không thể supply wallet address của user khác hoặc chọn execution engine. Wallet provisioning endpoint yêu cầu authenticated session và idempotently trả existing SCA nếu đã tạo.
 
-Sau khi user confirm, Payna resolve Circle SCA rồi tìm hoặc tạo Gateway signer. Tiếp theo nó tạo same-domain burn-intent preview cho Circle estimate, tính `requiredGatewayBalance = amount + estimatedGatewayFee`, rồi đọc Gateway balance của SCA depositor trên đúng selected domain.
+Gas là chain-specific execution prerequisite, không thuộc Gateway USDC balance. Payna hỏi RPC lấy current estimate thay vì hard-code gas price vào receipt. Nếu Circle Gas Station policy chấp nhận SCA Manual-mint transaction, user có thể có zero native balance. Nếu sponsorship không khả dụng, response nêu SCA, chain và native-gas need mà không gợi ý thêm USDC sẽ giải quyết.
 
-Nếu row thiếu, Payna trả `INSUFFICIENT_GATEWAY_BALANCE` cùng current balance, amount, fee và total required. Hãy giảm amount hoặc chờ existing deposit finalize. Không chỉ so amount với balance; Gateway fee được collect từ source và cũng phải vừa.
+## Durable state transition
 
-Estimate không phải settled receipt. Circle giải thích burn intent `maxFee` cover protocol gas và transfer fee, forwarding fee chỉ thêm khi dùng forwarding; xem [Gateway fees](https://developers.circle.com/gateway/references/fees). Withdraw path của Payna không enable forwarding nhưng vẫn cần usable quote.
+Operation được persist trước first submit. UUID và fingerprint bind authenticated user, amount, recipient SCA, domain và mint path. Dùng lại UUID với data giống nhau trả known state; đổi payload trả conflict. Cách này ngăn double withdrawal khi browser lặp request sau timeout.
 
-## Preview và confirmation
+State điển hình gồm created, source submitted, pending mint, success, failed before submit và reconciliation required. Failure trước khi Circle nhận source spend có thể review an toàn. Failure sau khi có transfer ID là ambiguous và phải reconcile. UI không biến trường hợp sau thành generic retry button.
 
-**Current Payna UI boundary:** withdrawal preview xác nhận amount, selected source và recipient là Circle SCA của user trên same domain. Nó chưa hiển thị runtime fee estimate hoặc required Gateway balance, inspect mint gas, tạo/tìm signer hay check delegate authorization. Các operation này chỉ bắt đầu sau khi user confirm và Payna gọi withdrawal route.
+Signature, attestation và recovery data không bao giờ được lưu trong user-readable history column. Khi cần continuation, value này nằm trong server-only RLS-protected table có expiry và atomic claim. Public receipt chỉ có transfer ID, transaction hash, actual fee khi available, amount, chain và settlement state.
 
-Kiểm tra kỹ amount/source và hiểu recipient role là same-domain SCA, không phải MetaMask hay signer EOA. Confirmation cho phép Payna bắt đầu execution check; nó không chứng minh fee, ready balance, native gas hoặc signer authorization sẽ pass. Execution trả resolved SCA address hoặc specific error sau các check đó.
+## Retry safety
 
-## Signer authorization và pending state
+Khi Circle đã trả transfer ID hoặc on-chain hash, không lặp withdrawal mù. Giữ identifier và reconcile current state. Signature, attestation và recovery material chỉ nằm trong server-only storage, không được history API trả về.
 
-Payna tìm hoặc tạo Gateway signer trước final burn request. Nó check `isAuthorizedForBalance(token, depositor, signer)` trên selected chain. Nếu authorization rõ ràng false, SCA submit `addDelegate` call không kèm deposit amount, rồi Payna trả `GATEWAY_FINALITY_PENDING` với transaction hash và retry command.
+Nếu source spend accepted nhưng mint chưa hoàn tất, continuation chỉ được gọi existing destination mint. Nó không được sign Burn Intent mới. Hai tab không thể claim cùng continuation vì server atomically đánh dấu recovery record trước khi gọi Circle Kit.
 
-Người dùng nên chờ authorization observable rồi retry cùng withdrawal. Submit lặp delegate call không làm finality nhanh hơn và tốn source gas. Nếu authorization lookup fail, Payna có thể thử burn và chuyển response “signer not authorized” của Circle thành cùng pending guidance.
+Nếu Circle trả destination transaction hash rồi database update fail, Payna giữ recovery claim bị khóa và đánh dấu operation `reconciliation_required`. Operator có thể verify hash và sửa history, nhưng user không thể mint lại. Behavior bảo thủ này coi returned destination hash là bằng chứng state có thể đã đổi.
 
-## Burn và same-domain mint
+## Ví dụ hoàn chỉnh
 
-Khi prerequisite pass, delegated EOA ký burn intent có source/destination domain giống nhau, source depositor và destination recipient đều là SCA, `maxFee` là estimate. Payna submit tới Circle Gateway rồi chờ attestation và signature.
+Giả sử Base hiện 12.000000 confirmed Gateway USDC, 2 pending và không có transfer in motion khác. User preview `/withdraw 10 from base`. Circle estimate bounded fee nên Payna verify confirmed 12 cover cả 10 cùng fee đó. Pending 2 hiện để tham khảo nhưng bị loại khỏi calculation.
 
-Sau đó Payna yêu cầu Circle SCA execute `gatewayMint(bytes,bytes)` trên same chain. SCA cần native gas. Final mint transaction này giải thích vì sao user có nhiều Gateway USDC vẫn có thể nhận `INSUFFICIENT_GAS`. Nạp đúng SCA address và network trong error; USDC không tự là native gas token trên mọi supported chain.
+User confirm trong preview lease. Payna tạo durable operation, resolve Base SCA từ session, refresh quote và yêu cầu SCA đó ký ERC-1271 Burn Intent. Circle trả một transfer ID. Payna sau đó submit same-domain mint qua SCA, được Gas Station sponsor khi eligible, rồi record destination hash cùng settled fee.
 
-## Expected receipt và balance change
+Nếu network response biến mất sau khi Circle trả transfer ID, user không tạo withdrawal khác. Activity dùng ID đó để xác định mint pending, success hoặc cần controlled continuation. Request thứ hai với cùng UUID trả existing operation; amount mới dưới cùng UUID trả `GATEWAY_OPERATION_ID_CONFLICT`.
 
-Successful response gồm `success`, `transferId`, `mintTxHash`, `amount`, `chain`, `recipient` và `estimatedGatewayFee`. Payna ghi history row type `withdraw`, source/destination chain giống nhau, amount, success state và mint transaction hash.
+## Common failure
 
-Sau balance refresh, selected Gateway ready row phải giảm theo amount cộng actual fee Gateway áp dụng, còn SCA on-chain USDC tăng bằng minted amount. Hai read có thể update khác thời điểm. Dùng transfer ID và mint hash làm evidence nếu total tạm thời chưa khớp.
-
-Response hiện tại báo pre-execution estimate chứ chưa có settled-fee field riêng. Interface phải label là estimated và tránh hứa đó là exact final charge.
-
-## Error và safe retry
-
-**Invalid amount hoặc chain:** không nên có stateful work; sửa command.
-
-**Quote unavailable:** sau confirmation, Payna có thể đã tạo hoặc lookup signer nhưng chưa submit burn intent. Hãy chờ rồi confirm một execution attempt mới.
-
-**Insufficient ready balance:** chờ đúng pending deposit hoặc giảm amount. Không deposit lại khi chưa check hash.
-
-**Thiếu source/mint gas:** fund native gas vào SCA address trên selected chain.
-
-**Authorization pending:** giữ delegate transaction hash và chỉ retry sau khi confirmed/indexed.
-
-**Error sau khi đã có transfer ID hoặc mint challenge:** inspect identifier trước retry. API timeout không chứng minh burn/mint fail. Blind repetition có thể tạo debit request khác.
-
-Khi cần support, cung cấp public SCA address, domain, transfer ID và transaction hash. Không cung cấp private key, seed phrase, Circle API key hoặc private RPC URL.
+- **Thiếu confirmed balance:** chờ pending deposit hoặc giảm amount.
+- **Thiếu native gas:** fund named SCA trên selected chain khi sponsorship không khả dụng.
+- **Lỗi mơ hồ sau submit:** reconcile transfer ID hiện có; không tạo burn khác.
+- **Quote hết hạn:** lấy estimate mới và confirm fingerprint mới.
+- **Quote legacy:** đóng preview cũ rồi estimate lại qua Circle Kit.
+- **Cảnh báo persist receipt:** inspect destination hash; không retry mint.

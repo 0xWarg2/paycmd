@@ -5,10 +5,10 @@ description: "Bảo vệ private key, preview, confirmation và ranh giới khô
 section: "safety-and-support"
 order: 70
 lastUpdated: "2026-08-07"
-keywords: ["security", "seed phrase", "confirmation", "testnet", "preview hết hạn", "15 giây"]
+keywords: ["security", "seed phrase", "confirmation", "testnet", "preview hết hạn", "50 giây"]
 tutorial: true
 aiSummary:
-  - "Mọi transaction preview hết hạn sau chính xác 15 giây; expiry disable và cancel preview, nên phải submit lại để lấy preview mới."
+  - "Mọi transaction preview hết hạn sau chính xác 50 giây; expiry disable và cancel preview, nên phải submit lại để lấy preview mới."
   - "Payna hướng tới testnet: không chia sẻ secret ví, kiểm tra mọi preview và signature, rồi kiểm tra giao dịch đã submit trước khi retry."
 ---
 
@@ -24,15 +24,15 @@ Public address, transaction hash, transfer ID, chain, thời điểm và lỗi �
 
 ## Kiểm tra chính wallet prompt
 
-Trước khi chấp nhận MetaMask authentication, `/fund`, CCTP hoặc swap prompt, kiểm tra account, chain, contract/spender, amount và gas. Payna confirmation khác wallet signature. Circle SCA/Gateway operation thay vào đó dùng Circle wallet và Gateway signer role đã nêu. Từ chối signature/network addition bất ngờ và so sánh name, chain ID, RPC đề nghị với guide.
+Trước khi chấp nhận MetaMask authentication, `/fund`, CCTP hoặc swap prompt, kiểm tra account, chain, contract/spender, amount và gas. Payna confirmation khác wallet signature. Gateway operation dùng Circle SCA của authenticated user và direct ERC-1271 authorization. Từ chối signature/network addition bất ngờ và so sánh name, chain ID, RPC đề nghị với guide.
 
-Circle SCA, Gateway depositor, Gateway signer được ủy quyền và MetaMask account có vai trò khác nhau. Đặc biệt, USDC trong SCA không phải Gateway balance sẵn sàng và Gateway signer không tự động là chủ balance. Xem [vai trò ví](/docs/getting-started/account-and-wallets) và [Gateway overview](/docs/circle/gateway/overview) trước khi chuyển tiền.
+Circle SCA và MetaMask account có vai trò khác nhau. SCA vừa là Gateway depositor vừa là direct signer, nhưng ordinary SCA USDC vẫn không phải confirmed Gateway balance. Xem [vai trò ví](/docs/getting-started/account-and-wallets) và [Gateway overview](/docs/circle/gateway/overview) trước khi chuyển tiền.
 
 ## Coi preview là điểm kiểm tra bắt buộc
 
 Natural language/parser chỉ chuẩn bị intent, không thể bỏ qua explicit confirmation. Kiểm tra amount, token, rail, chain, full recipient, mint mode, estimated fee, source debit và gas payer. Với swap xem route/minimum output/slippage; với payment/transfer xác nhận source đã nêu.
 
-Mỗi transaction preview có lease chính xác 15 giây. Khi hết hạn, Payna disable control confirm và cancel preview với trạng thái expired; stale confirmation không thể execute. Hãy submit lại command để tạo preview 15 giây mới. Sửa text hoặc đổi mode không làm preview hết hạn hoạt động lại.
+Mỗi transaction preview có lease chính xác 50 giây. Khi hết hạn, Payna disable control confirm và cancel preview với trạng thái expired; stale confirmation không thể execute. Hãy submit lại command để tạo preview 50 giây mới. Sửa text hoặc đổi mode không làm preview hết hạn hoạt động lại.
 
 Hủy khi bất kỳ trường nào khác yêu cầu của bạn. Mở preview mới sau khi đổi amount, recipient, route, source, destination hoặc mint mode vì quote và balance có thể cũ. Các guide [Gateway fees và forwarding](/docs/circle/gateway/fees-gas-and-forwarding), [CCTP bridge](/docs/circle/cctp-bridge) và [Arc swap](/docs/arc/overview-and-swap) giải thích các bước confirmation bổ sung của từng rail.
 
@@ -48,7 +48,7 @@ ERC-20 approval cấp quyền spender và là action riêng tốn gas. Đọc sc
 
 Thông thường có thể sửa và retry lỗi validation, yêu cầu wallet bị từ chối, balance check chỉ đọc hoặc lỗi transfer quote khi chưa có transaction, deposit, burn hash hay transfer ID. Refresh Gateway deposit recovery, kiểm tra status hoặc mở lại Activity cũng an toàn vì không submit transfer khác.
 
-Khi đã có deposit, approval, delegate, CCTP burn, Gateway transfer, forwarding, manual mint hay swap hash, state có thể đổi. Không lặp lại vì chat/history/proof chậm. Burn có thể chờ mint, deposit có thể `pending_gateway_finality`, Arc proof không chuyển tiền. Đối soát identifier trong [Activity](/docs/features/activity-and-notifications).
+Khi đã có deposit, approval, CCTP burn, Gateway transfer, forwarding, Manual mint hay swap hash, state có thể đổi. Không lặp lại vì chat/history/proof chậm. Burn có thể chờ mint, deposit có thể `pending_gateway_finality`, Arc proof không chuyển tiền. Đối soát identifier trong [Activity](/docs/features/activity-and-notifications).
 
 ## Checklist khi có sự cố
 

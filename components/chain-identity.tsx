@@ -20,7 +20,7 @@ import NetworkSonic from "@web3icons/react/icons/networks/NetworkSonic";
 import NetworkUnichain from "@web3icons/react/icons/networks/NetworkUnichain";
 import NetworkWorld from "@web3icons/react/icons/networks/NetworkWorld";
 import NetworkXdcNetwork from "@web3icons/react/icons/networks/NetworkXdcNetwork";
-import type { ComponentType, ReactNode, SVGProps } from "react";
+import { useId, type ComponentType, type ReactNode, type SVGProps } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { cctpBridgeChainMap, type CctpBridgeChainKey } from "@/lib/paycmd/cctp-bridge";
@@ -350,6 +350,10 @@ export function ChainIcon({
   className?: string;
   size?: number;
 }) {
+  if (chain?.trim().toLowerCase() === "gateway") {
+    return <CircleGatewayIcon className={className} size={size} />;
+  }
+
   const meta = getChainMeta(chain);
 
   if (!meta) {
@@ -363,6 +367,69 @@ export function ChainIcon({
 
   const Icon = meta.Icon;
   return <Icon aria-hidden="true" className={className} size={size} variant="branded" />;
+}
+
+function CircleGatewayIcon({
+  className,
+  size,
+}: {
+  className?: string;
+  size: number;
+}) {
+  const id = useId().replaceAll(":", "");
+  const aquaGradient = `${id}-circle-aqua`;
+  const blueGradient = `${id}-circle-blue`;
+
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      height={size}
+      viewBox="0 0 64 64"
+      width={size}
+    >
+      <defs>
+        <linearGradient id={aquaGradient} x1="10" x2="49" y1="47" y2="10" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#55c9eb" />
+          <stop offset="1" stopColor="#70e9ad" />
+        </linearGradient>
+        <linearGradient id={blueGradient} x1="15" x2="54" y1="54" y2="17" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#a17bec" />
+          <stop offset="1" stopColor="#58aff5" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M13 45A25 25 0 0 1 47 13"
+        fill="none"
+        stroke={`url(#${aquaGradient})`}
+        strokeLinecap="round"
+        strokeWidth="7"
+      />
+      <path
+        d="M21 38A14 14 0 0 1 36 23L47 13"
+        fill="none"
+        stroke={`url(#${aquaGradient})`}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="7"
+      />
+      <path
+        d="M51 19A25 25 0 0 1 17 51"
+        fill="none"
+        stroke={`url(#${blueGradient})`}
+        strokeLinecap="round"
+        strokeWidth="7"
+      />
+      <path
+        d="M43 26A14 14 0 0 1 28 41L17 51"
+        fill="none"
+        stroke={`url(#${blueGradient})`}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="7"
+      />
+    </svg>
+  );
 }
 
 export function ChainBadge({

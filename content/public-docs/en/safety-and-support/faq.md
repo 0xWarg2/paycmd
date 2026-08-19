@@ -19,7 +19,7 @@ aiSummary:
 
 ## Wallets, signatures, and balances
 
-**Which wallet signs what?** MetaMask signs its bridge and Arc swap actions. Gateway uses a Circle SCA, depositor, and delegated signer with distinct roles. `/link metamask` signs a readable message, not an onchain transaction.
+**Which wallet signs what?** MetaMask signs its bridge and Arc swap actions. Gateway uses the Circle SCA as depositor and direct ERC-1271 signer. `/link metamask` signs a readable message, not an onchain transaction.
 
 **Is unified balance the same as total?** No. Gateway ready balance is finalized deposited liquidity. Payna's broader total is visibility across successful SCA and Gateway reads, not one spendable pool; a partial total is a lower bound.
 

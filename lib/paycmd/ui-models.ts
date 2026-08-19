@@ -96,7 +96,14 @@ const hiddenPreviewFields = new Set([
   "recipientMode",
 ]);
 
-const suppressedPreviewFields = new Set(["unsupportedRecipient"]);
+const suppressedPreviewFields = new Set([
+  "unsupportedRecipient",
+  "allocationFingerprint",
+  "allocationGuard",
+  "selectedSourceChains",
+  "quoteFingerprint",
+  "gatewayOperationId",
+]);
 
 const advancedFieldLabels: Record<string, string> = {
   mintGasMode: "Destination gas",

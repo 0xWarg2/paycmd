@@ -1,92 +1,74 @@
 ---
 slug: "circle/gateway/withdraw"
-title: "Withdraw from Gateway"
-description: "Move Gateway balance back to the Circle SCA wallet on the same domain."
+title: "Gateway withdrawal"
+description: "Return confirmed Gateway USDC to the user's Circle SCA on the same domain."
 section: "circle.gateway"
 order: 24
-lastUpdated: "2026-08-05"
-keywords: ["withdraw", "Gateway", "SCA", "same domain"]
+lastUpdated: "2026-08-18"
+keywords: ["withdraw", "Gateway", "ERC-1271", "SCA"]
 tutorial: true
 aiSummary:
-  - "Payna's /withdraw burns ready Gateway balance and mints it to the user's own SCA on the same domain, requiring amount plus fee and SCA mint gas."
-  - "This application path is distinct from Gateway's protocol-level delayed trustless withdrawal mechanism."
+  - "A Payna withdrawal burns and mints on the same Gateway domain back to the user's Circle SCA."
+  - "The SCA signs directly with ERC-1271; no delegate EOA is created or authorized."
 ---
 
-## What Payna withdraw does
+## Same-domain withdrawal
 
-`/withdraw 5 from base` returns USDC from the SCA depositor's ready Gateway balance on Base to that same user's Circle SCA on Base. The source and destination domain are identical, and the recipient is fixed to the user's SCA address. It is not a bridge to another chain and does not accept an external recipient.
+`/withdraw 10 from base` returns confirmed Gateway USDC on Base to ordinary USDC in the user's Base Circle SCA. It is a same-domain Gateway Burn Intent followed by `gatewayMint`; it is not the seven-day trustless recovery path.
 
-**Current Payna implementation behavior:** withdraw uses Gateway's transfer API with a same-domain burn intent, waits for an attestation, and submits `gatewayMint` through the Circle SCA. After success, the amount is ordinary SCA on-chain USDC and no longer part of ready Gateway balance.
+The source and destination domain are identical, and the recipient is the authenticated user's SCA. A withdrawal does not choose an external recipient and does not move funds to MetaMask. The ordinary SCA balance increases only after the destination mint settles. Until then, Activity can show funds in motion even though the source Gateway balance has already been committed.
 
-Circle also documents an on-chain trustless withdrawal mechanism with an initiation transaction and a delay for periods when its APIs are unavailable. That is a distinct protocol capability in the [Gateway technical guide](https://developers.circle.com/gateway/references/technical-guide#withdrawal). Payna's `/withdraw` command described here is the application-managed same-domain transfer path, not the delayed trustless path.
+Gateway's seven-day recovery mechanism is a separate trustless fallback for protocol recovery. Payna's normal withdrawal uses Circle's regular spend-and-mint flow and should not be described with the recovery delay. Support should identify which path produced a transaction before giving timing guidance.
 
-## Command and amount validation
+## Preview boundary
 
-The command syntax is `/withdraw <amount> from <source>`, for example `/withdraw 5.25 from base`. The amount must be positive USDC with no more than six decimal places. Payna rejects missing fields, unsupported chain aliases, zero or negative values, malformed decimals, and values above its safety ceiling before execution.
+Preview confirms the amount, selected domain, receiving SCA, current balance states, estimated fee, and gas responsibility. It is read-only: it does not sign, burn, mint, or initialize a second wallet. If the quote expires, the user reviews a new quote rather than letting the server execute with stale fee or block constraints.
 
-The command does not withdraw “all” implicitly and does not infer a source from the largest visible total. Name the domain whose Gateway row owns the ready liquidity. Because current Payna selection is source-scoped, a shortfall on Base is not covered by Gateway balance on Arc.
+Only confirmed Gateway balance is spendable. Pending deposits remain visible but do not satisfy `amount + fee`. A deposit transaction that is confirmed on-chain can still be in pending finality while Circle waits for the domain's required confirmations and indexes it. Payna relies on the signed deposit webhook and reconciliation reads instead of assuming one receipt means the Gateway balance is ready.
 
-## Prerequisites
+All monetary values remain decimal strings backed by atomic bigint arithmetic. Payna does not use JavaScript `Number` or `parseFloat` to decide whether the balance covers the withdrawal. This is important near six-decimal USDC boundaries, where a display-friendly rounded value must not authorize a larger atomic debit.
 
-Before confirmed withdrawal execution can complete:
+## Authorization and fee checks
 
-- the user must have a Circle SCA wallet and address;
-- the selected chain must be both listed in Payna's Gateway configuration and operable through the current Circle Wallet SDK;
-- the SCA depositor must have finalized Gateway ready balance on that domain;
-- the associated Gateway signer must exist and be authorized, or the SCA must have gas to authorize it;
-- the SCA must have native gas on the same domain to execute the destination mint;
-- Circle's estimate and transfer APIs must be available.
+After confirmation, Payna resolves the authenticated user's SCA, estimates the Gateway fee, and requires confirmed source balance for `amount + fee`. The SCA signs the Burn Intent directly through ERC-1271 with `contractSigner: true`. There is no delegate stage or EOA fallback.
 
-A pending deposit is not ready. `/withdraw` does not auto-deposit or use SCA USDC to cover a Gateway shortfall because that would send funds in the opposite direction.
+The destination mint transaction uses the same SCA and requires dynamically estimated native gas unless Circle Gas Station sponsors it.
 
-These are execution prerequisites, not checks already proven by the command preview. The current preview does not contact the withdraw route to inspect the signer, quote, balance, authorization, or gas.
+Direct ERC-1271 authorization means the Gateway depositor and `sourceSigner` protocol field both resolve to the SCA address. Circle verifies the contract signature because the submitted request is marked `contractSigner: true`. A historical operation may still display a legacy engine label, but it cannot cause a new withdrawal to create or use an EOA delegate.
 
-## Fee and balance validation
+Before the burn, Payna checks the current fee, confirmed source capacity, SCA identity, and destination execution prerequisites. The browser cannot supply another user's wallet address or choose an execution engine. Wallet provisioning endpoints require an authenticated session and return the existing SCA idempotently when it has already been created.
 
-After the user confirms, Payna resolves the Circle SCA and finds or creates the Gateway signer. It then constructs a same-domain burn-intent preview for Circle's estimate, computes `requiredGatewayBalance = amount + estimatedGatewayFee`, and reads the SCA depositor's Gateway balance on exactly the selected domain.
+Gas is a chain-specific execution prerequisite, not part of the Gateway USDC balance. Payna asks the RPC for a current estimate instead of embedding a gas price in the receipt. If Circle Gas Station policy accepts the SCA Manual-mint transaction, the user can have zero native balance. If sponsorship is unavailable, the response names the SCA, chain, and native-gas need without suggesting that more USDC solves it.
 
-If the row is short, Payna returns `INSUFFICIENT_GATEWAY_BALANCE` with current balance, amount, fee, and total required. Reduce the amount or wait for an existing deposit to finalize. Do not compare only the amount with the balance; Gateway fees are collected from the source and must also fit.
+## Durable state transitions
 
-The estimate is not the settled receipt. Circle explains that a burn intent's `maxFee` covers protocol gas and transfer fee, with forwarding fee added only when forwarding is used; see [Gateway fees](https://developers.circle.com/gateway/references/fees). Payna's withdraw path does not enable forwarding, but it still needs a usable quote.
+The operation is persisted before the first submit. Its UUID and fingerprint bind the authenticated user, amount, recipient SCA, domain, and mint path. Reusing the UUID with identical data returns the known state; changing the payload returns a conflict. This prevents double withdrawal when a browser repeats a request after a timeout.
 
-## Preview and confirmation
+Typical states are created, source submitted, pending mint, success, failed before submit, and reconciliation required. A failure before Circle accepts a source spend may be reviewed safely. A failure after a transfer ID exists is ambiguous and must be reconciled. The UI does not turn the latter into a generic retry button.
 
-**Current Payna UI boundary:** the withdrawal preview confirms the amount, selected source, and that the recipient is the user's Circle SCA on the same domain. It does not yet show a runtime fee estimate or required Gateway balance, inspect mint gas, create or look up the signer, or check delegate authorization. Those operations begin only after the user confirms and Payna calls the withdrawal route.
+Signature, attestation, and recovery data are never stored in a user-readable history column. When a continuation is necessary, those values live in a server-only RLS-protected table with an expiry and atomic claim. The public receipt contains only the transfer ID, transaction hash, actual fee when available, amount, chain, and settlement state.
 
-Check the amount and source carefully, and understand that the recipient role is the same-domain SCA—not MetaMask or the signer EOA. Confirmation authorizes Payna to begin the execution checks; it is not proof that the fee, ready balance, native gas, or signer authorization will pass. Execution returns the resolved SCA address or a specific error after those checks.
+## Retry safety
 
-## Signer authorization and pending state
+Once Circle returns a transfer ID or an on-chain hash, do not repeat the withdrawal blindly. Preserve the identifiers and reconcile the current state. Signature, attestation, and recovery material stay in server-only storage and are never returned by history APIs.
 
-Payna finds or creates the Gateway signer before requesting the final burn. It checks `isAuthorizedForBalance(token, depositor, signer)` on the selected chain. If authorization is explicitly false, the SCA submits an `addDelegate` call with no deposit amount, and Payna returns a `GATEWAY_FINALITY_PENDING` response with the transaction hash and retry command.
+If the source spend is accepted but mint does not finish, continuation must call only the existing destination mint. It must not sign a new Burn Intent. Two tabs cannot claim the same continuation because the server atomically marks the recovery record before calling Circle Kit.
 
-The user should wait for authorization to become observable, then retry the same withdrawal. Submitting repeated delegate calls does not make finality faster and spends additional source gas. If the authorization lookup itself fails, Payna can attempt the burn and convert Circle's “signer not authorized” response into the same pending guidance.
+If Circle returns a destination transaction hash and the database update then fails, Payna keeps the recovery claim locked and marks the operation `reconciliation_required`. An operator can verify the hash and repair history, but the user cannot mint again. This conservative behavior treats a returned destination hash as evidence that state may already have changed.
 
-## Burn and same-domain mint
+## Worked example
 
-Once prerequisites pass, the delegated EOA signs a burn intent whose source and destination domains are identical, whose source depositor and destination recipient are both the SCA, and whose `maxFee` is the estimate. Payna submits it to Circle Gateway and waits for the attestation and signature.
+Assume Base shows 12.000000 confirmed Gateway USDC, 2 pending, and no other transfer in motion. The user previews `/withdraw 10 from base`. Circle estimates a bounded fee, so Payna verifies that 12 confirmed covers both 10 and that fee. The pending 2 is displayed for context but excluded from the calculation.
 
-Payna then asks the Circle SCA to execute `gatewayMint(bytes,bytes)` on the same chain. The SCA must have native gas. This final mint transaction is why a user can have plenty of Gateway USDC yet still receive `INSUFFICIENT_GAS`. Replenish the exact SCA address and network stated in the error; USDC itself is not automatically the native gas token on every supported chain.
+The user confirms within the preview lease. Payna creates the durable operation, resolves the Base SCA from the session, refreshes the quote, and asks that SCA for the ERC-1271 Burn Intent signature. Circle returns one transfer ID. Payna then submits the same-domain mint through the SCA, sponsored by Gas Station when eligible, and records the destination hash and settled fee.
 
-## Expected receipt and balance change
+If the network response disappears after Circle returned the transfer ID, the user does not create another withdrawal. Activity uses that ID to determine whether mint is pending, successful, or requires controlled continuation. A second request with the same UUID returns the existing operation; a new amount under the same UUID returns `GATEWAY_OPERATION_ID_CONFLICT`.
 
-A successful response includes `success`, `transferId`, `mintTxHash`, `amount`, `chain`, `recipient`, and `estimatedGatewayFee`. Payna records a history row with type `withdraw`, the same source and destination chain, the amount, successful state, and mint transaction hash.
+## Common failures
 
-After balance refresh, the selected Gateway ready row should decrease by the amount plus the actual fee applied by Gateway, while SCA on-chain USDC should increase by the minted amount. These reads may update at different times. Use the transfer ID and mint hash as evidence if the totals temporarily disagree.
-
-The response currently reports the pre-execution estimate rather than a separate settled-fee field. Interfaces should label it estimated and avoid promising that it is the exact final charge.
-
-## Errors and safe retries
-
-**Invalid amount or chain:** no stateful work should occur; correct the command.
-
-**Quote unavailable:** after confirmation, Payna may already have created or looked up the signer, but it has not submitted the burn intent. Wait and confirm a fresh execution attempt later.
-
-**Insufficient ready balance:** wait for the exact pending deposit or lower the amount. Do not deposit again without checking its hash.
-
-**Missing source/mint gas:** fund native gas to the SCA address on the selected chain.
-
-**Authorization pending:** keep the delegate transaction hash and retry only after it is confirmed and indexed.
-
-**Error after a transfer ID or mint challenge exists:** inspect that identifier before retrying. An API timeout does not prove the burn or mint failed. Blind repetition can create another debit request.
-
-For support, provide the public SCA address, domain, transfer ID, and transaction hashes. Never provide a private key, seed phrase, Circle API key, or private RPC URL.
+- **Insufficient confirmed balance:** wait for pending deposits or reduce the amount.
+- **Insufficient native gas:** fund the named SCA on the selected chain when sponsorship is unavailable.
+- **Ambiguous post-submit failure:** reconcile the existing transfer ID; do not create another burn.
+- **Expired quote:** obtain a fresh estimate and confirm its new fingerprint.
+- **Legacy quote:** close the old preview and estimate again through Circle Kit.
+- **Receipt persistence warning:** inspect the destination hash; do not retry mint.
