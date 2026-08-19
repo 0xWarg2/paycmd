@@ -8081,12 +8081,26 @@ function BalanceBreakdownTable({
                       </span>
                     </th>
                     <td className="px-2 py-1.5 text-right tabular-nums">
-                      {row.sca > 0 ? formatDecimalAmount(row.sca) : <span className="text-muted-foreground">—</span>}
+                      {/* A failed read is not a zero. "—" is reserved for a chain that really holds
+                          nothing; an unreadable one says so, in the same amber as the total's
+                          partial warning, so the two agree about which chain is missing. */}
+                      {row.scaUnreadable ? (
+                        <span className="text-amber-600 dark:text-amber-400">
+                          {t("common.balanceUnavailable")}
+                        </span>
+                      ) : row.sca > 0 ? (
+                        formatDecimalAmount(row.sca)
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
                     </td>
                     <td className="px-2 py-1.5 text-right tabular-nums">
                       {row.gateway > 0 ? formatDecimalAmount(row.gateway) : <span className="text-muted-foreground">—</span>}
                     </td>
                     <td className="px-3 py-1.5 text-right font-medium tabular-nums">
+                      {/* Same "≥" convention as the shell's unified figure: with one side unread the
+                          row total is a floor, and showing it bare would make it look exact. */}
+                      {row.scaUnreadable ? "≥ " : ""}
                       {formatDecimalAmount(row.sca + row.gateway)}
                     </td>
                   </tr>

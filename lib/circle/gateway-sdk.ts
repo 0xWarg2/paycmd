@@ -45,6 +45,7 @@ import {
   type GatewayBurnIntentSetEstimate,
   type GatewayFeeEstimate,
 } from "@/lib/paycmd/gateway-transfer";
+import { rpcTransport } from "@/lib/paycmd/rpc-endpoints";
 import { web3Chains } from "@/lib/paycmd/web3-chains";
 import { arcTestnetChain } from "@/lib/paycmd/arc-rpc";
 import {
@@ -260,26 +261,6 @@ function getChainConfig(chain: SupportedChain): Chain {
   return GATEWAY_CHAIN_CONFIGS[chain].viemChain;
 }
 
-// Some chain definitions ship a default public RPC that is no longer reachable, and
-// `http()` with no URL silently falls back to that default. Verified 2026-07-29 by
-// probing eth_chainId on all 12 gateway chains: 10 answered correctly, these 2 did not.
-// `rpc-amoy.polygon.technology` no longer resolves at all (ENOTFOUND), and
-// `rpc.hyperliquid-testnet.xyz` fails Node's TLS chain verification
-// (UNABLE_TO_VERIFY_LEAF_SIGNATURE) even though browsers accept its cert.
-const RPC_URL_OVERRIDES: Partial<Record<SupportedChain, string>> = {
-  polygonAmoy: "https://polygon-amoy-bor-rpc.publicnode.com",
-  hyperEvmTestnet: "https://hyperliquid-testnet.drpc.org",
-  // Alternates for the bundled defaults (11155111.rpc.thirdweb.com and
-  // worldchain-sepolia.g.alchemy.com/public), both measured healthy here: 372ms and 441ms
-  // under a 48-request concurrent sweep.
-  //
-  // Do NOT read the timeouts these two used to log as evidence that an endpoint is bad. A
-  // later probe fanned all 12 chains out 4x concurrently — 48/48 succeeded in 1089ms — so
-  // the in-app timeouts were not coming from the endpoints at all. See RPC_TIMEOUT_MS below.
-  sepolia: "https://ethereum-sepolia-rpc.publicnode.com",
-  worldChainSepolia: "https://worldchain-sepolia.gateway.tenderly.co",
-};
-
 // viem's `http()` defaults to no timeout, so a single unresponsive endpoint held this whole
 // route open for over two minutes. Capping it is right — but the cap has to account for
 // *where* the clock is measured.
@@ -297,21 +278,26 @@ const RPC_URL_OVERRIDES: Partial<Record<SupportedChain, string>> = {
 const isProduction = process.env.NODE_ENV === "production";
 const RPC_TIMEOUT_MS = isProduction ? 8_000 : 20_000;
 
-// Retry in production, where a timeout is most likely a transient network fault worth one
-// more attempt. Not in dev: there the cause is a stalled event loop, which a retry cannot
-// help, and retrying would double the worst case to 40s of head-of-line blocking on a route
-// other requests are queued behind.
-const RPC_RETRY_COUNT = isProduction ? 1 : 0;
-
-// Always pass an explicit URL to `http()`. Relying on the bare fallback is what let a dead
-// endpoint surface as a balance of 0 instead of an error, and it makes the endpoint in use
-// invisible at the call site.
-function getRpcUrl(chain: SupportedChain): string {
-  return RPC_URL_OVERRIDES[chain] ?? GATEWAY_CHAIN_CONFIGS[chain].viemChain.rpcUrls.default.http[0];
-}
-
+// Which host to call is decided in lib/paycmd/rpc-endpoints.ts. The override table that used to sit
+// here held a second, independent opinion about that and had already drifted from `web3Chains`: one
+// map had moved Polygon Amoy off the host that no longer resolves, the other had not.
+//
+// `retryCount: 0` because `rpcTransport` moves to the next endpoint on failure, which is what the
+// old `retryCount: 1` was reaching for and could not do — it repeated the request against the same
+// host, and the faults seen on these endpoints (a name that no longer resolves, a gateway answering
+// `no backend is currently healthy`) do not clear on a second identical attempt. Worst case stays
+// two attempts; the second one now lands somewhere else.
 function getRpcTransport(chain: SupportedChain) {
-  return http(getRpcUrl(chain), { timeout: RPC_TIMEOUT_MS, retryCount: RPC_RETRY_COUNT });
+  if (chain !== "arcTestnet") {
+    return rpcTransport(chain, { timeout: RPC_TIMEOUT_MS, retryCount: 0 });
+  }
+  // Arc keeps its own endpoint: `arcTestnetChain` carries the server-only keyed URL from
+  // lib/paycmd/arc-rpc.ts, and the public NEXT_PUBLIC_ARC_RPC_URL must not stand in for it here.
+  // Arc also rate-limits on concurrency, so it keeps the retry rather than a second endpoint.
+  return http(arcTestnetChain.rpcUrls.default.http[0], {
+    timeout: RPC_TIMEOUT_MS,
+    retryCount: isProduction ? 1 : 0,
+  });
 }
 
 const EIP712Domain = [

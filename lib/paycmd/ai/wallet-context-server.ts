@@ -3,12 +3,12 @@ import {
   defineChain,
   erc20Abi,
   formatUnits,
-  http,
   parseUnits,
   type Address,
 } from "viem";
 
 import { supportedChains, type PayCmdChain } from "../chains.ts";
+import { rpcTransport } from "../rpc-endpoints.ts";
 import { web3Chains } from "../web3-chains.ts";
 import { buildWalletContext } from "./wallet-context.ts";
 import type {
@@ -264,7 +264,11 @@ function configuredPublicClient(chain: PayCmdChain) {
   });
   return createPublicClient({
     chain: viemChain,
-    transport: http(config.rpcUrl, { timeout: WALLET_CONTEXT_FAMILY_TIMEOUT_MS, retryCount: 0 }),
+    // `rpcTransport` walks that chain's endpoint list instead of failing on the first host, which is
+    // how a single sick endpoint used to blank a whole chain here. `retryCount: 0` keeps the extra
+    // attempts to the list itself: `withFamilyTimeout` below bounds this whole family of reads, and
+    // retrying one dead host inside that budget only eats the time the alternates need.
+    transport: rpcTransport(chain, { timeout: WALLET_CONTEXT_FAMILY_TIMEOUT_MS, retryCount: 0 }),
   });
 }
 
