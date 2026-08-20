@@ -12,6 +12,8 @@ import {
   LogOut,
   MessageCircle,
   MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
   ShieldCheck,
   UserCircle,
   Wallet,
@@ -64,6 +66,8 @@ const navIcons = {
 const desktopNavigation = navigationFor("desktop");
 const mobileNavigation = navigationFor("mobile-primary");
 const mobileMoreNavigation = navigationFor("mobile-more");
+
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "paycmd_sidebar_collapsed";
 
 function navIsActive(pathname: string, item: AppNavigationItem) {
   if (!item.href) return false;
@@ -137,6 +141,7 @@ export function PayCmdShell({ children, sidebarPanel }: { children: ReactNode; s
   const { t } = useI18n();
   const pathname = usePathname();
   const [isMounted, setIsMounted] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [email, setEmail] = useState<string>("");
   const {
     activeCommandCount,
@@ -192,6 +197,13 @@ export function PayCmdShell({ children, sidebarPanel }: { children: ReactNode; s
 
   useEffect(() => {
     setIsMounted(true);
+    // Restored after mount (not in the useState initializer) so the server render and the
+    // first client render agree; a remembered collapse applies one frame later.
+    try {
+      setIsSidebarCollapsed(window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "1");
+    } catch {
+      // Blocked storage (private mode) just means the sidebar starts expanded.
+    }
   }, []);
 
   useEffect(() => {
@@ -218,11 +230,38 @@ export function PayCmdShell({ children, sidebarPanel }: { children: ReactNode; s
     }
   }
 
+  function toggleSidebar() {
+    setIsSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, next ? "1" : "0");
+      } catch {
+        // Persistence is best-effort; the toggle still works for this session.
+      }
+      return next;
+    });
+  }
+
+  const sidebarToggleLabel = isSidebarCollapsed ? t("shell.sidebarExpand") : t("shell.sidebarCollapse");
+
   const desktopToolbar = (
     <header
       data-testid="desktop-command-toolbar"
       className="hidden min-h-16 min-w-0 items-center justify-end gap-1.5 overflow-hidden border-b border-border/55 bg-surface/88 px-3 backdrop-blur-xl xl:px-5 lg:flex"
     >
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onClick={toggleSidebar}
+          aria-label={sidebarToggleLabel}
+          title={sidebarToggleLabel}
+          aria-expanded={!isSidebarCollapsed}
+          aria-controls="app-sidebar"
+          className="mr-auto h-9 w-9 shrink-0 rounded-xl text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+        >
+          {isSidebarCollapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
+        </Button>
         {isMounted ? (
           <>
             <Badge
@@ -329,111 +368,125 @@ export function PayCmdShell({ children, sidebarPanel }: { children: ReactNode; s
 
   return (
     <main className="command-center-canvas relative h-dvh overflow-hidden text-foreground">
-      <div className="grid h-full grid-rows-[auto_minmax(0,1fr)_auto] lg:grid-cols-[280px_minmax(0,1fr)] lg:grid-rows-[64px_minmax(0,1fr)]">
-        <aside className="hidden border-r border-border/55 bg-surface/88 backdrop-blur-xl lg:row-span-2 lg:flex lg:flex-col">
-          <div className="border-b border-border/60 p-3">
-            <Link href="/app" className="flex items-center gap-3">
-              <div className="payna-logo-frame relative h-10 w-10 overflow-hidden rounded-2xl border border-emerald-400/30">
-                <Image
-                  src="/brand/antlers_transparent.png"
-                  alt="Payna AI Copilot"
-                  fill
-                  className="object-contain p-1"
-                  priority
-                />
-              </div>
-              <div>
-                <div className="text-lg font-semibold tracking-normal">Payna</div>
-                <div className="text-xs text-muted-foreground">{t("shell.aiCopilot")}</div>
-              </div>
-            </Link>
-          </div>
-
-          <div className="command-panel m-3 rounded-2xl p-3.5">
-            <div className="text-xs text-muted-foreground">{t("common.unifiedBalance")}</div>
-            {isBalanceLoading ? (
-              <Skeleton className="mt-2 h-7 w-36" />
-            ) : (
-              <div className="mt-1 text-xl font-semibold">{unifiedBalanceLabel}</div>
-            )}
-            <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-              <ShieldCheck className="h-4 w-4 text-primary" />
-              {t("shell.gatewayNetworks")}
+      <div
+        className={`grid h-full grid-rows-[auto_minmax(0,1fr)_auto] lg:grid-rows-[64px_minmax(0,1fr)] lg:transition-[grid-template-columns] lg:duration-300 lg:ease-out motion-reduce:lg:transition-none ${
+          isSidebarCollapsed ? "lg:grid-cols-[0px_minmax(0,1fr)]" : "lg:grid-cols-[280px_minmax(0,1fr)]"
+        }`}
+      >
+        <aside
+          id="app-sidebar"
+          inert={isSidebarCollapsed}
+          className={`hidden overflow-hidden bg-surface/88 backdrop-blur-xl lg:row-span-2 lg:block ${
+            isSidebarCollapsed ? "" : "border-r border-border/55"
+          }`}
+        >
+          {/* The grid column animates 280px→0, so this wrapper holds its full width and the
+              content gets clipped instead of reflowing mid-transition. */}
+          <div className="flex h-full w-[280px] flex-col">
+            <div className="border-b border-border/60 p-3">
+              <Link href="/" className="flex items-center gap-3">
+                <div className="payna-logo-frame relative h-10 w-10 overflow-hidden rounded-2xl border border-emerald-400/30">
+                  <Image
+                    src="/brand/antlers_transparent.png"
+                    alt="Payna AI Copilot"
+                    fill
+                    className="object-contain p-1"
+                    priority
+                  />
+                </div>
+                <div>
+                  <div className="text-lg font-semibold tracking-normal">Payna</div>
+                  <div className="text-xs text-muted-foreground">{t("shell.aiCopilot")}</div>
+                </div>
+              </Link>
             </div>
-            {/* Circle finality runs ~10 minutes after a deposit's transaction lands. A toast is
-                long gone by then, so the wait needs a surface that persists. Amber + Clock3
-                matches the "waiting" bucket on /notifications. */}
-            {pendingGatewayDepositCount > 0 ? (
-              <div className="mt-2 flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400">
-                <Clock3 className="h-4 w-4 shrink-0" />
-                <span>{gatewayDepositsPendingLabel}</span>
-              </div>
-            ) : null}
-          </div>
 
-          <nav aria-label="Primary navigation" className={`space-y-0.5 px-3 ${sidebarPanel ? "shrink-0" : "flex-1"}`}>
-            {desktopNavigation.map((item) => {
-              const isActive = navIsActive(pathname, item);
-              const Icon = navIcons[item.key];
-
-              return (
-                <Link
-                  key={item.key}
-                  href={item.href ?? "/app"}
-                  aria-current={isActive ? "page" : undefined}
-                  className={`payna-subtle-lift flex min-h-10 items-center gap-3 rounded-xl px-3 text-sm transition ${
-                    isActive
-                      ? "bg-primary/12 text-primary ring-1 ring-inset ring-primary/20"
-                      : "text-muted-foreground hover:bg-accent/70 hover:text-accent-foreground"
-                  }`}
-                >
-                  <Icon className="h-4 w-4" />
-                  <span>{t(`nav.${item.key}`)}</span>
-                  {item.key === "activity" && unreadCount > 0 ? (
-                    <Badge className="ml-auto rounded-full">{unreadCount}</Badge>
-                  ) : item.key === "chat" && activeCommandCount > 0 ? (
-                    <Badge className="ml-auto">{activeCommandCount}</Badge>
-                  ) : null}
-                </Link>
-              );
-            })}
-          </nav>
-
-          {sidebarPanel ? <div className="mt-2 flex min-h-0 flex-1 flex-col px-3 pb-2">{sidebarPanel}</div> : null}
-
-          <div className="border-t border-border/60 p-3">
-            {/* One compact row: identity + language/theme + logout. The email carries a title
-                attribute because truncation is the norm at 280px. */}
-            <div className="flex items-center gap-1 rounded-xl border bg-background/65 py-1.5 pl-2.5 pr-1.5">
-              <UserCircle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-              <span
-                className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
-                title={email || undefined}
-              >
-                {email || t("common.signedIn")}
-              </span>
-              {isMounted ? (
-                <>
-                  <LanguageSwitcher />
-                  <ThemeSwitcher />
-                </>
+            <div className="command-panel m-3 rounded-2xl p-3.5">
+              <div className="text-xs text-muted-foreground">{t("common.unifiedBalance")}</div>
+              {isBalanceLoading ? (
+                <Skeleton className="mt-2 h-7 w-36" />
               ) : (
-                <>
-                  <Skeleton className="h-8 w-8 rounded-md" />
-                  <Skeleton className="h-8 w-8 rounded-md" />
-                </>
+                <div className="mt-1 text-xl font-semibold">{unifiedBalanceLabel}</div>
               )}
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
-                aria-label={t("common.logout")}
-                title={t("common.logout")}
-                onClick={logout}
-              >
-                <LogOut className="h-4 w-4" />
-              </Button>
+              <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                <ShieldCheck className="h-4 w-4 text-primary" />
+                {t("shell.gatewayNetworks")}
+              </div>
+              {/* Circle finality runs ~10 minutes after a deposit's transaction lands. A toast is
+                  long gone by then, so the wait needs a surface that persists. Amber + Clock3
+                  matches the "waiting" bucket on /notifications. */}
+              {pendingGatewayDepositCount > 0 ? (
+                <div className="mt-2 flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400">
+                  <Clock3 className="h-4 w-4 shrink-0" />
+                  <span>{gatewayDepositsPendingLabel}</span>
+                </div>
+              ) : null}
+            </div>
+
+            <nav aria-label="Primary navigation" className={`space-y-0.5 px-3 ${sidebarPanel ? "shrink-0" : "flex-1"}`}>
+              {desktopNavigation.map((item) => {
+                const isActive = navIsActive(pathname, item);
+                const Icon = navIcons[item.key];
+
+                return (
+                  <Link
+                    key={item.key}
+                    href={item.href ?? "/app"}
+                    aria-current={isActive ? "page" : undefined}
+                    className={`payna-subtle-lift flex min-h-10 items-center gap-3 rounded-xl px-3 text-sm transition ${
+                      isActive
+                        ? "bg-primary/12 text-primary ring-1 ring-inset ring-primary/20"
+                        : "text-muted-foreground hover:bg-accent/70 hover:text-accent-foreground"
+                    }`}
+                  >
+                    <Icon className="h-4 w-4" />
+                    <span>{t(`nav.${item.key}`)}</span>
+                    {item.key === "activity" && unreadCount > 0 ? (
+                      <Badge className="ml-auto rounded-full">{unreadCount}</Badge>
+                    ) : item.key === "chat" && activeCommandCount > 0 ? (
+                      <Badge className="ml-auto">{activeCommandCount}</Badge>
+                    ) : null}
+                  </Link>
+                );
+              })}
+            </nav>
+
+            {sidebarPanel ? <div className="mt-2 flex min-h-0 flex-1 flex-col px-3 pb-2">{sidebarPanel}</div> : null}
+
+            <div className="border-t border-border/60 p-3">
+              {/* One compact row: identity + language/theme + logout. The email carries a title
+                  attribute because truncation is the norm at 280px. */}
+              <div className="flex items-center gap-1 rounded-xl border bg-background/65 py-1.5 pl-2.5 pr-1.5">
+                <UserCircle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span
+                  className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+                  title={email || undefined}
+                >
+                  {email || t("common.signedIn")}
+                </span>
+                {isMounted ? (
+                  <>
+                    <LanguageSwitcher />
+                    <ThemeSwitcher />
+                  </>
+                ) : (
+                  <>
+                    <Skeleton className="h-8 w-8 rounded-md" />
+                    <Skeleton className="h-8 w-8 rounded-md" />
+                  </>
+                )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                  aria-label={t("common.logout")}
+                  title={t("common.logout")}
+                  onClick={logout}
+                >
+                  <LogOut className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           </div>
         </aside>
@@ -441,7 +494,7 @@ export function PayCmdShell({ children, sidebarPanel }: { children: ReactNode; s
         {desktopToolbar}
 
         <header className="flex min-h-16 items-center justify-between border-b border-border/55 bg-surface/88 px-4 py-2 backdrop-blur-xl lg:hidden">
-          <Link href="/app" className="flex items-center gap-2 font-semibold">
+          <Link href="/" className="flex items-center gap-2 font-semibold">
             <span className="payna-logo-frame relative h-8 w-8 overflow-hidden rounded-xl border border-emerald-400/30">
               <Image src="/brand/antlers_transparent.png" alt="Payna AI Copilot" fill className="object-contain p-0.5" />
             </span>

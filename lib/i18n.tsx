@@ -131,6 +131,8 @@ const dictionaries: Record<Locale, TranslationMap> = {
     "shell.systemReady": "Hệ thống sẵn sàng",
     "shell.moreTitle": "Command center",
     "shell.moreDescription": "Quản lý hoạt động, cài đặt, tài khoản và ví của bạn.",
+    "shell.sidebarCollapse": "Thu gọn thanh bên",
+    "shell.sidebarExpand": "Mở thanh bên",
 
     "activity.eyebrow": "Dòng tiền và hệ thống",
     "activity.title": "Hoạt động",
@@ -872,6 +874,8 @@ const dictionaries: Record<Locale, TranslationMap> = {
     "shell.systemReady": "Systems ready",
     "shell.moreTitle": "Command center",
     "shell.moreDescription": "Manage activity, settings, your account, and wallet.",
+    "shell.sidebarCollapse": "Collapse sidebar",
+    "shell.sidebarExpand": "Expand sidebar",
 
     "activity.eyebrow": "Money movement and systems",
     "activity.title": "Activity",
