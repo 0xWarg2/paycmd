@@ -331,9 +331,9 @@ export function PayCmdShell({ children, sidebarPanel }: { children: ReactNode; s
     <main className="command-center-canvas relative h-dvh overflow-hidden text-foreground">
       <div className="grid h-full grid-rows-[auto_minmax(0,1fr)_auto] lg:grid-cols-[280px_minmax(0,1fr)] lg:grid-rows-[64px_minmax(0,1fr)]">
         <aside className="hidden border-r border-border/55 bg-surface/88 backdrop-blur-xl lg:row-span-2 lg:flex lg:flex-col">
-          <div className="border-b border-border/60 p-4">
+          <div className="border-b border-border/60 p-3">
             <Link href="/app" className="flex items-center gap-3">
-              <div className="payna-logo-frame relative h-12 w-12 overflow-hidden rounded-2xl border border-emerald-400/30">
+              <div className="payna-logo-frame relative h-10 w-10 overflow-hidden rounded-2xl border border-emerald-400/30">
                 <Image
                   src="/brand/antlers_transparent.png"
                   alt="Payna AI Copilot"
@@ -349,7 +349,7 @@ export function PayCmdShell({ children, sidebarPanel }: { children: ReactNode; s
             </Link>
           </div>
 
-          <div className="command-panel m-4 rounded-2xl p-4">
+          <div className="command-panel m-3 rounded-2xl p-3.5">
             <div className="text-xs text-muted-foreground">{t("common.unifiedBalance")}</div>
             {isBalanceLoading ? (
               <Skeleton className="mt-2 h-7 w-36" />
@@ -371,7 +371,7 @@ export function PayCmdShell({ children, sidebarPanel }: { children: ReactNode; s
             ) : null}
           </div>
 
-          <nav aria-label="Primary navigation" className={`space-y-1 px-3 ${sidebarPanel ? "shrink-0" : "flex-1"}`}>
+          <nav aria-label="Primary navigation" className={`space-y-0.5 px-3 ${sidebarPanel ? "shrink-0" : "flex-1"}`}>
             {desktopNavigation.map((item) => {
               const isActive = navIsActive(pathname, item);
               const Icon = navIcons[item.key];
@@ -381,7 +381,7 @@ export function PayCmdShell({ children, sidebarPanel }: { children: ReactNode; s
                   key={item.key}
                   href={item.href ?? "/app"}
                   aria-current={isActive ? "page" : undefined}
-                  className={`payna-subtle-lift flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm transition ${
+                  className={`payna-subtle-lift flex min-h-10 items-center gap-3 rounded-xl px-3 text-sm transition ${
                     isActive
                       ? "bg-primary/12 text-primary ring-1 ring-inset ring-primary/20"
                       : "text-muted-foreground hover:bg-accent/70 hover:text-accent-foreground"
@@ -402,33 +402,39 @@ export function PayCmdShell({ children, sidebarPanel }: { children: ReactNode; s
           {sidebarPanel ? <div className="mt-2 flex min-h-0 flex-1 flex-col px-3 pb-2">{sidebarPanel}</div> : null}
 
           <div className="border-t border-border/60 p-3">
-            <div className="mb-2 rounded-xl border bg-background/65 px-3 py-2">
-              <div className="text-sm font-medium">{t("common.account")}</div>
-              <div className="truncate text-xs text-muted-foreground">{email || t("common.signedIn")}</div>
+            {/* One compact row: identity + language/theme + logout. The email carries a title
+                attribute because truncation is the norm at 280px. */}
+            <div className="flex items-center gap-1 rounded-xl border bg-background/65 py-1.5 pl-2.5 pr-1.5">
+              <UserCircle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <span
+                className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+                title={email || undefined}
+              >
+                {email || t("common.signedIn")}
+              </span>
+              {isMounted ? (
+                <>
+                  <LanguageSwitcher />
+                  <ThemeSwitcher />
+                </>
+              ) : (
+                <>
+                  <Skeleton className="h-8 w-8 rounded-md" />
+                  <Skeleton className="h-8 w-8 rounded-md" />
+                </>
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                aria-label={t("common.logout")}
+                title={t("common.logout")}
+                onClick={logout}
+              >
+                <LogOut className="h-4 w-4" />
+              </Button>
             </div>
-            <div className="flex items-center justify-between rounded-xl border bg-background/65 px-3 py-2">
-              <div>
-                <div className="text-sm font-medium">{t("common.appearance")}</div>
-                <div className="text-xs text-muted-foreground">{t("shell.appearanceHelp")}</div>
-              </div>
-              <div className="flex items-center gap-1">
-                {isMounted ? (
-                  <>
-                    <LanguageSwitcher />
-                    <ThemeSwitcher />
-                  </>
-                ) : (
-                  <>
-                    <Skeleton className="h-8 w-8 rounded-md" />
-                    <Skeleton className="h-8 w-8 rounded-md" />
-                  </>
-                )}
-              </div>
-            </div>
-            <Button className="mt-2 w-full justify-start" variant="outline" onClick={logout}>
-              <LogOut className="mr-2 h-4 w-4" />
-              {t("common.logout")}
-            </Button>
           </div>
         </aside>
 

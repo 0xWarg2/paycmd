@@ -141,7 +141,8 @@ test("supports keyboard navigation and dismissal in the command palette", async 
 
 test("keeps the public landing and login surfaces available", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Stablecoin commands that feel like messaging" })).toBeVisible();
+  // The landing page is bilingual and defaults to Vietnamese without a locale cookie.
+  await expect(page.getByRole("heading", { name: "Lệnh stablecoin tự nhiên như nhắn tin" })).toBeVisible();
 
   await page.goto("/auth/login");
   await expect(page.getByRole("heading", { name: "Welcome" })).toBeVisible();

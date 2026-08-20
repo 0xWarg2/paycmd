@@ -1,21 +1,24 @@
 import { Radio } from "lucide-react";
+import { cookies } from "next/headers";
 
+import { localeFromCookieStore, tr, type PayCmdLocale } from "@/lib/i18n/server";
 import {
   formatPublicCount,
   formatPublicUsdc,
   loadPublicPlatformMetrics,
 } from "@/lib/paycmd/public-metrics";
 
-function networkLabel(network: "testnet" | "mainnet" | "mixed") {
-  if (network === "mainnet") return "Mainnet activity";
-  if (network === "mixed") return "Testnet + mainnet activity";
-  return "Testnet activity";
+function networkLabel(locale: PayCmdLocale, network: "testnet" | "mainnet" | "mixed") {
+  if (network === "mainnet") return tr(locale, "landing.metrics.networkMainnet");
+  if (network === "mixed") return tr(locale, "landing.metrics.networkMixed");
+  return tr(locale, "landing.metrics.networkTestnet");
 }
 
 export async function PublicPlatformMetrics() {
+  const locale = localeFromCookieStore(await cookies());
   const metrics = await loadPublicPlatformMetrics();
   const updatedLabel = metrics
-    ? new Intl.DateTimeFormat("en", {
+    ? new Intl.DateTimeFormat(locale === "vi" ? "vi" : "en", {
         month: "short",
         day: "numeric",
         hour: "2-digit",
@@ -27,24 +30,30 @@ export async function PublicPlatformMetrics() {
   const items = metrics
     ? [
         {
-          label: "Users joined",
+          label: tr(locale, "landing.metrics.users"),
           value: formatPublicCount(metrics.registeredUsers),
-          exact: `${metrics.registeredUsers.toLocaleString("en")} registered users`,
+          exact: tr(locale, "landing.metrics.exactUsers", {
+            count: metrics.registeredUsers.toLocaleString("en"),
+          }),
         },
         {
-          label: "Movements",
+          label: tr(locale, "landing.metrics.movements"),
           value: formatPublicCount(metrics.completedPayments),
-          exact: `${metrics.completedPayments.toLocaleString("en")} completed onchain movements`,
+          exact: tr(locale, "landing.metrics.exactMovements", {
+            count: metrics.completedPayments.toLocaleString("en"),
+          }),
         },
         {
-          label: "USDC moved",
+          label: tr(locale, "landing.metrics.usdcMoved"),
           value: formatPublicUsdc(metrics.usdcMoved) ?? metrics.usdcMoved,
-          exact: `${metrics.usdcMoved} USDC moved`,
+          exact: tr(locale, "landing.metrics.exactUsdc", { amount: metrics.usdcMoved }),
         },
         {
           label: "AskPayna",
           value: formatPublicCount(metrics.researchAnswers),
-          exact: `${metrics.researchAnswers.toLocaleString("en")} persisted AskPayna answers`,
+          exact: tr(locale, "landing.metrics.exactAnswers", {
+            count: metrics.researchAnswers.toLocaleString("en"),
+          }),
         },
       ]
     : [];
@@ -60,7 +69,7 @@ export async function PublicPlatformMetrics() {
           <div className="flex shrink-0 items-center gap-2 text-sm font-medium text-primary lg:w-32">
             <Radio aria-hidden="true" className="h-4 w-4" />
             <h2 id="platform-activity-heading" className="whitespace-nowrap">
-              Live activity
+              {tr(locale, "landing.metrics.title")}
             </h2>
           </div>
 
@@ -88,22 +97,22 @@ export async function PublicPlatformMetrics() {
 
               <div className="flex shrink-0 flex-wrap items-center gap-2 text-xs text-muted-foreground lg:w-44 lg:flex-col lg:items-end lg:gap-1">
                 <span className="rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 font-medium text-primary">
-                  {networkLabel(metrics.network)}
+                  {networkLabel(locale, metrics.network)}
                 </span>
                 <time className="whitespace-nowrap" dateTime={metrics.asOf}>
-                  Updated {updatedLabel} UTC
+                  {tr(locale, "landing.metrics.updated", { time: updatedLabel })}
                 </time>
               </div>
             </>
           ) : (
             <p className="text-sm text-muted-foreground">
-              Activity temporarily unavailable. Payna remains available.
+              {tr(locale, "landing.metrics.unavailable")}
             </p>
           )}
         </div>
 
         <p id="platform-activity-definition" className="sr-only">
-          Counts come from aggregate Payna records. “Verified movements” includes successful transfers and bridges with a recorded transaction hash; it excludes deposits and internal balance consolidation to avoid double counting.
+          {tr(locale, "landing.metrics.definition")}
         </p>
       </div>
     </section>
