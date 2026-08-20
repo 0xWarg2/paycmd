@@ -22,6 +22,7 @@ export default defineConfig([
   globalIgnores([
     ".next/**",
     ".next-build/**",
+    ".next-claude/**",
     ".next-playwright/**",
     ".worktrees/**",
     "out/**",
