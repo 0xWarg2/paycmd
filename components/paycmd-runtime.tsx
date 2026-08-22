@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { usePathname } from "next/navigation";
 import { toast } from "sonner";
 
 import { getChainMeta } from "@/components/chain-identity";
@@ -771,6 +772,16 @@ function mapNotification(row: any): NotificationItem {
 
 export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
   const { t } = useI18n();
+  const pathname = usePathname();
+  // The provider wraps every route from the root layout, but only signed-in surfaces render
+  // anything that consumes it. On public pages the authed fetches below just fail — three 401s
+  // in every anonymous visitor's console, and "Failed to fetch" TypeErrors in the dev overlay
+  // whenever a signed-in visitor's network blips — so keep the runtime inert there.
+  const isPublicSurface =
+    pathname === "/" ||
+    pathname.startsWith("/auth") ||
+    pathname.startsWith("/docs") ||
+    pathname.startsWith("/dev");
   const [activeCommandCount, setActiveCommandCount] = useState(0);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unifiedBalance, setUnifiedBalance] = useState<number | null>(null);
@@ -1163,6 +1174,8 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
+    if (isPublicSurface) return;
+
     void refreshNotifications();
     const interval = window.setInterval(() => void refreshNotifications(), 30_000);
     const onFocus = () => void refreshNotifications();
@@ -1172,9 +1185,11 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
       window.clearInterval(interval);
       window.removeEventListener("focus", onFocus);
     };
-  }, [refreshNotifications]);
+  }, [isPublicSurface, refreshNotifications]);
 
   useEffect(() => {
+    if (isPublicSurface) return;
+
     void refreshBalance();
     const interval = window.setInterval(() => void refreshBalance(), 30_000);
     const onFocus = () => void refreshBalance();
@@ -1188,9 +1203,11 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("ra:balance-changed", onBalanceChanged);
     };
-  }, [refreshBalance]);
+  }, [isPublicSurface, refreshBalance]);
 
   useEffect(() => {
+    if (isPublicSurface) return;
+
     void syncGatewayDeposits();
     const onFocus = () => void syncGatewayDeposits();
     const onBalanceChanged = () => void syncGatewayDeposits();
@@ -1202,9 +1219,11 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("ra:balance-changed", onBalanceChanged);
     };
-  }, [syncGatewayDeposits]);
+  }, [isPublicSurface, syncGatewayDeposits]);
 
   useEffect(() => {
+    if (isPublicSurface) return;
+
     const supabase = createClient();
     let channel: ReturnType<typeof supabase.channel> | null = null;
     let cancelled = false;
@@ -1254,7 +1273,7 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       if (channel) void supabase.removeChannel(channel);
     };
-  }, [refreshBalance, refreshNotifications, syncGatewayDeposits, t]);
+  }, [isPublicSurface, refreshBalance, refreshNotifications, syncGatewayDeposits, t]);
 
   // Deliberately a separate effect from the one above. Gating that one on `hasPending` would
   // tear down and re-register its focus + `ra:balance-changed` listeners every time the count
@@ -1270,6 +1289,10 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
       pendingPollingStartedAtRef.current = null;
       return;
     }
+
+    // Keep the started-at ref so backoff resumes where it left off when the user
+    // navigates back from a public page mid-settlement.
+    if (isPublicSurface) return;
 
     pendingPollingStartedAtRef.current ??= Date.now();
     let timer = 0;
@@ -1287,7 +1310,7 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [hasPendingGatewayDeposits, syncGatewayDeposits]);
+  }, [hasPendingGatewayDeposits, isPublicSurface, syncGatewayDeposits]);
 
   const value = useMemo(
     () => ({
