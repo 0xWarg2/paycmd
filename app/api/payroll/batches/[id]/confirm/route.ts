@@ -90,17 +90,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "PAYROLL_ALREADY_STARTED", code: "PAYROLL_ALREADY_STARTED" }, { status: 409 });
   }
 
-  const failedCount = execution.results.filter((result) => result.status === "failed").length;
-  const { error: notificationError } = await supabase.from("notifications").insert({
-    user_id: user.id,
-    type: "payroll_completed",
-    title: "Payroll completed",
-    body: `${execution.results.length - failedCount}/${execution.results.length} payroll payments succeeded.`,
-    status: "unread",
-    metadata: { batchId: id, results: execution.results },
-  });
-  if (notificationError) console.error("Could not write payroll notification", notificationError);
-
+  // The chat runtime (the only caller) writes the payroll notification, localized and with
+  // structured metadata; writing another one here double-notified every batch.
   return NextResponse.json({
     success: execution.status !== "failed",
     batchId: id,

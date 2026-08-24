@@ -31,6 +31,12 @@ import {
   gatewayTransferAmounts,
 } from "@/lib/paycmd/gateway-transfer";
 import { formatNativeGasBalance } from "@/lib/paycmd/native-gas";
+import {
+  composeFailureNotification,
+  composeSuccessNotification,
+  formatDecimalAmount,
+  shortErrorSummary,
+} from "@/lib/paycmd/notification-content";
 import { createClient } from "@/lib/supabase/client";
 import { ParsedCommand } from "@/lib/paycmd/commands";
 import { executeContactGroupCommand } from "@/lib/paycmd/contact-group-command";
@@ -170,17 +176,13 @@ export function usesGatewayPipeline(draft: ParsedCommand) {
   );
 }
 
-export function formatDecimalAmount(value: unknown, maxFractionDigits = 6) {
-  const numberValue = Number(value ?? 0);
+export { formatDecimalAmount };
 
-  if (!Number.isFinite(numberValue)) {
-    return "0";
-  }
-
-  return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: maxFractionDigits,
-  }).format(numberValue);
+// Notification copy wants "Arb Sepolia", not the internal chain id, and must never crash on a
+// chain the registry does not know — fall back to whatever string the API returned.
+function notificationChainLabel(chain?: string | null) {
+  const meta = getChainMeta(chain);
+  return meta?.shortLabel ?? meta?.label ?? chain ?? "";
 }
 
 function gatewayFeeText(transfer: any, translate: Translator) {
@@ -1016,6 +1018,7 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
       type: string;
       title: string;
       body: string;
+      metadata?: Record<string, unknown>;
     }) => {
       const supabase = createClient();
       const { data, error } = await supabase
@@ -1026,6 +1029,7 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
           type: params.type,
           title: params.title,
           body: params.body,
+          metadata: params.metadata ?? {},
           status: "unread",
         })
         .select("*")
@@ -1091,28 +1095,40 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
           txHash,
           result,
         };
+        // The chat keeps the full receipt; the notification and toast get the composer's
+        // one-line summary. Read-only commands (composer returns null) answer in chat only.
         const body = resultText(draft, result, t);
-        const title = awaitingFinality
-          ? t("runtime.gatewayPending")
-          : t("runtime.commandCompleted");
+        const notification = composeSuccessNotification({
+          draft,
+          result,
+          translate: t,
+          chainLabel: notificationChainLabel,
+        });
 
         await updateExecutionRecord(success);
-        await insertNotification({
-          userId: context.userId,
-          executionId: success.id,
-          // Substring-matched by `app/notifications/page.tsx`, which checks `pending|finality`
-          // before `gateway` — so this lands in the amber "waiting" bucket on its own.
-          type: awaitingFinality ? "gateway_deposit_pending" : "command_success",
-          title,
-          body,
-        });
+        if (notification) {
+          await insertNotification({
+            userId: context.userId,
+            executionId: success.id,
+            type: notification.type,
+            title: notification.title,
+            body: notification.body,
+            metadata: notification.metadata,
+          });
+        }
         await writeStatus(context, body, success);
-        if (awaitingFinality) {
-          // Deliberately not `toast.loading`: a toast held open for ten minutes is the wrong
-          // surface. The notification and the sidebar badge own the long wait.
-          toast.warning(title, { description: body });
+        if (notification) {
+          // Deliberately not `toast.loading` for the pending case: a toast held open for ten
+          // minutes is the wrong surface. The notification and the sidebar badge own the wait.
+          if (awaitingFinality || notification.metadata.outcome === "pending") {
+            toast.warning(notification.title, { description: notification.body || undefined });
+          } else {
+            toast.success(notification.title, { description: notification.body || undefined });
+          }
+        } else if (awaitingFinality) {
+          toast.warning(t("runtime.gatewayPending"), { description: body });
         } else {
-          toast.success(title, { description: body });
+          toast.success(t("runtime.commandCompleted"), { description: body });
         }
 
         if (usesGatewayPipeline(draft) || draft.command === "balance") {
@@ -1143,20 +1159,41 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
           safeToRetry,
         };
 
-        await updateExecutionRecord(failed);
-        await insertNotification({
-          userId: context.userId,
-          executionId: failed.id,
-          type: waitingGateway ? "gateway_finality_pending" : "command_failed",
-          title: waitingGateway ? t("runtime.gatewayPending") : t("runtime.commandFailed"),
-          body: localizedMessage,
+        // Chat and the execution record keep the long localized explanation; the notification
+        // gets the composer's short form built straight from the error data.
+        const notification = composeFailureNotification({
+          draft,
+          message,
+          errorData: (error as { data?: unknown })?.data,
+          waitingGateway,
+          fundsMoved: transferSubmitted,
+          translate: t,
+          chainLabel: notificationChainLabel,
         });
+
+        await updateExecutionRecord(failed);
+        if (notification) {
+          await insertNotification({
+            userId: context.userId,
+            executionId: failed.id,
+            type: notification.type,
+            title: notification.title,
+            body: notification.body,
+            metadata: notification.metadata,
+          });
+        }
         await writeStatus(context, localizedMessage, failed);
 
-        if (waitingGateway) {
+        if (notification) {
+          if (waitingGateway) {
+            toast.warning(notification.title, { description: notification.body || undefined });
+          } else {
+            toast.error(notification.title, { description: notification.body || undefined });
+          }
+        } else if (waitingGateway) {
           toast.warning(t("runtime.gatewayPending"), { description: localizedMessage });
         } else {
-          toast.error(t("runtime.commandFailed"), { description: localizedMessage });
+          toast.error(t("runtime.commandFailed"), { description: shortErrorSummary(message) });
         }
       } finally {
         setActiveCommandCount((current) => Math.max(0, current - 1));

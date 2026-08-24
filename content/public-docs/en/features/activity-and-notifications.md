@@ -4,12 +4,12 @@ title: "Activity, history, and notifications"
 description: "Reconcile transaction receipts, lifecycle states, explorer links, and operational alerts."
 section: "features"
 order: 44
-lastUpdated: "2026-08-05"
+lastUpdated: "2026-08-25"
 keywords: ["activity", "history", "notification", "status"]
 tutorial: true
 aiSummary:
   - "Activity separates transaction history from notifications; use receipts and chain-correct explorer links to reconcile every stage."
-  - "Gateway finality notifications are created only after verified settlement evidence updates a pending deposit; unread state is informational in the current UI."
+  - "Gateway finality notifications are created only after verified settlement evidence updates a pending deposit; opening the Notifications tab marks unread items as read."
 ---
 
 ## Two Activity tabs
@@ -40,7 +40,9 @@ A source transaction can succeed while a destination mint, forwarder action, or 
 
 The Notifications tab shows up to 50 newest non-archived records. It provides text search and filters for all, unread, waiting, and failed. Counts at the top summarize unread, waiting/finality, and failed/error items. Notifications can include received payments, paid requests, payroll results, transaction failures, and Gateway balance availability.
 
-`unread`, `read`, and `archived` exist in storage, but the current Activity UI has no mark-read action. An unread badge therefore means the record has not been updated to `read`, not that nobody investigated it. Pending Gateway notices can be archived automatically when no deposit remains pending. Per-notification deep links to command execution details are also not available yet.
+Each notification is a one-line summary with structured chips underneath: the amount, the route (for unified-balance transfers, every source chain that funded the transfer with its per-chain amount), the Gateway fee, and an explorer link when a transaction hash exists. The full multi-line receipt stays in the chat thread. Read-only commands such as balance, history, or gas checks answer in chat only and do not create inbox entries.
+
+Opening the Notifications tab marks all unread notifications as read, so the sidebar badge reflects what you have not yet seen. Rows already on screen keep their "New" badge until the next visit. Pending Gateway notices can be archived automatically when no deposit remains pending. Per-notification deep links to command execution details are not available yet.
 
 ## Gateway webhooks and finality alerts
 

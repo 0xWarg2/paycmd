@@ -217,18 +217,8 @@ export async function POST(req: NextRequest) {
       transfer.proofContractAddress = proof.contractAddress;
     }
 
-    await supabase.from("notifications").insert({
-      user_id: user.id,
-      type: "payment_success",
-      title: `Paid ${recipient.label}`,
-      body: `${amount} USDC sent to ${recipient.label} on ${recipient.destinationChain}.`,
-      status: "unread",
-      metadata: {
-        recipient,
-        transfer,
-      },
-    });
-
+    // The payer's notification is written by the chat runtime (the only caller), localized
+    // and with structured metadata; a second English insert here double-notified every /pay.
     await notifyPaymentRecipient({
       supabase,
       recipientUserId: directRecipientUserId,

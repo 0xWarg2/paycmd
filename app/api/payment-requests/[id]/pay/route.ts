@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { requestLocale, tr } from "@/lib/i18n/server";
 import { normalizeChain } from "@/lib/paycmd/chains";
 import { createClient } from "@/lib/supabase/server";
 
@@ -89,13 +90,23 @@ export async function POST(
       })
       .eq("id", id);
 
+    const locale = requestLocale(req);
     await supabase.from("notifications").insert({
       user_id: user.id,
       type: "payment_request_paid",
-      title: "Payment request paid",
-      body: `${paymentRequest.amount} USDC paid on ${paymentRequest.destination_chain}.`,
+      title: tr(locale, "notifications.paymentRequestPaidTitle", {
+        amount: String(paymentRequest.amount),
+      }),
+      body: tr(locale, "notifications.paymentRequestPaidBody", {
+        chain: paymentRequest.destination_chain,
+      }),
       status: "unread",
-      metadata: { requestId: id, transfer },
+      metadata: {
+        requestId: id,
+        transfer,
+        amount: String(paymentRequest.amount),
+        chain: paymentRequest.destination_chain,
+      },
     });
 
     const { error: recipientNotificationError } = await supabase.rpc(
