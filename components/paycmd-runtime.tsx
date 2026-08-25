@@ -1265,46 +1265,54 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
     let channel: ReturnType<typeof supabase.channel> | null = null;
     let cancelled = false;
 
-    void supabase.auth.getUser().then(({ data }) => {
-      const userId = data.user?.id;
-      if (!userId || cancelled) return;
+    // getSession() avoids getUser()'s network round-trip: the id only names the channel
+    // and its filter, and RLS on chat_messages is what actually authorizes the rows.
+    void supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        const userId = data.session?.user.id;
+        if (!userId || cancelled) return;
 
-      channel = supabase
-        .channel(`gateway-deposit-finality:${userId}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "UPDATE",
-            schema: "public",
-            table: "chat_messages",
-            filter: `user_id=eq.${userId}`,
-          },
-          (payload) => {
-            const row = payload.new as Record<string, unknown>;
-            const metadata = row.metadata as Record<string, unknown> | null;
-            const execution = metadata?.execution as Record<string, unknown> | null;
-            if (
-              execution?.status !== "success" ||
-              execution.finalitySource !== "circle_webhook" ||
-              typeof execution.txHash !== "string" ||
-              typeof row.content !== "string"
-            ) {
-              return;
-            }
+        channel = supabase
+          .channel(`gateway-deposit-finality:${userId}`)
+          .on(
+            "postgres_changes",
+            {
+              event: "UPDATE",
+              schema: "public",
+              table: "chat_messages",
+              filter: `user_id=eq.${userId}`,
+            },
+            (payload) => {
+              const row = payload.new as Record<string, unknown>;
+              const metadata = row.metadata as Record<string, unknown> | null;
+              const execution = metadata?.execution as Record<string, unknown> | null;
+              if (
+                execution?.status !== "success" ||
+                execution.finalitySource !== "circle_webhook" ||
+                typeof execution.txHash !== "string" ||
+                typeof row.content !== "string"
+              ) {
+                return;
+              }
 
-            window.dispatchEvent(
-              new CustomEvent("ra:gateway-deposit-settled", {
-                detail: [{ txHash: execution.txHash, message: row.content }],
-              }),
-            );
-            toast.success(t("runtime.gatewayBalanceUpdated"), { description: row.content });
-            void refreshNotifications();
-            void refreshBalance();
-            void syncGatewayDeposits();
-          },
-        )
-        .subscribe();
-    });
+              window.dispatchEvent(
+                new CustomEvent("ra:gateway-deposit-settled", {
+                  detail: [{ txHash: execution.txHash, message: row.content }],
+                }),
+              );
+              toast.success(t("runtime.gatewayBalanceUpdated"), { description: row.content });
+              void refreshNotifications();
+              void refreshBalance();
+              void syncGatewayDeposits();
+            },
+          )
+          .subscribe();
+      })
+      .catch(() => {
+        // Live finality updates are an optimisation: the focus listener and the
+        // interval both still call syncGatewayDeposits if this never subscribes.
+      });
 
     return () => {
       cancelled = true;

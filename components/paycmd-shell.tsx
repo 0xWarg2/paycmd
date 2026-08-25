@@ -208,9 +208,17 @@ export function PayCmdShell({ children, sidebarPanel }: { children: ReactNode; s
 
   useEffect(() => {
     const supabase = createClient();
-    void supabase.auth.getUser().then(({ data }) => {
-      setEmail(data.user?.email ?? "");
-    });
+    // getSession() reads the stored session, while getUser() re-validates it over the
+    // network. This email is only a label in the account menu, so the round-trip buys
+    // nothing and its failures get logged by auth-js straight into the dev overlay.
+    void supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        setEmail(data.session?.user.email ?? "");
+      })
+      .catch(() => {
+        // No session to read (or storage is blocked): the menu just omits the email.
+      });
   }, []);
 
   async function logout() {

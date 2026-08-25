@@ -71,6 +71,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { isAuthRetryableFetchError } from "@supabase/supabase-js";
+
 import { createClient } from "@/lib/supabase/client";
 import { localeRequestHeaders, translateClient, useI18n } from "@/lib/i18n";
 import type { GroundingStatus, KnowledgeSource, WalletContextStatus } from "@/lib/paycmd/ai/knowledge-types";
@@ -4150,11 +4152,19 @@ export function PayCmdApp() {
   useEffect(() => {
     async function bootstrapChat() {
       const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      // This gate keeps getUser() because it must verify the session, not trust it.
+      const auth = await supabase.auth.getUser().catch(() => null);
+      const user = auth?.data.user ?? null;
 
       if (!user) {
+        // A failed request resolves with user:null plus a retryable error (auth-js
+        // wraps the fetch failure), which is indistinguishable from being signed out
+        // unless we check. Redirecting on it would eject a signed-in user on a blip.
+        if (!auth || isAuthRetryableFetchError(auth.error)) {
+          setIsLoadingHistory(false);
+          return;
+        }
+
         window.location.href = "/auth/login?next=/app";
         return;
       }
@@ -4260,7 +4270,11 @@ export function PayCmdApp() {
       setIsLoadingHistory(false);
     }
 
-    void bootstrapChat();
+    bootstrapChat().catch((error) => {
+      // Unexpected failure: still clear the skeleton so the composer is usable.
+      console.error("Failed to bootstrap chat", error);
+      setIsLoadingHistory(false);
+    });
   }, []);
 
   return (
