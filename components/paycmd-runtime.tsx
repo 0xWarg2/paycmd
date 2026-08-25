@@ -25,6 +25,8 @@ import { faucetHint, isKnownTestnetChain } from "@/lib/paycmd/cctp-bridge";
 import {
   gatewayDepositPollingIntervalMs,
   gatewayDepositSettlementsFromSync,
+  pendingGatewayDepositsFromSync,
+  type PendingGatewayDepositSummary,
 } from "@/lib/paycmd/gateway-finality";
 import {
   gatewayReceiptFeeComponents,
@@ -88,6 +90,9 @@ type RuntimeContext = {
   // Deposits whose on-chain transaction landed but whose Gateway balance is not spendable yet.
   // Circle finality runs ~10 minutes, so this needs a surface that outlives a toast.
   pendingGatewayDepositCount: number;
+  // Per-chain detail behind that count, so the shell can say *where* the money is waiting.
+  // Can be shorter than the count on an older deployment: the count stays authoritative.
+  pendingGatewayDeposits: PendingGatewayDepositSummary[];
   notifications: NotificationItem[];
   refreshBalance: () => Promise<void>;
   refreshNotifications: () => Promise<void>;
@@ -790,6 +795,9 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
   const [unifiedBalanceFailedChains, setUnifiedBalanceFailedChains] = useState<string[]>([]);
   const [isBalanceLoading, setIsBalanceLoading] = useState(true);
   const [pendingGatewayDepositCount, setPendingGatewayDepositCount] = useState(0);
+  const [pendingGatewayDeposits, setPendingGatewayDeposits] = useState<
+    PendingGatewayDepositSummary[]
+  >([]);
   const statusWriterRef = useRef<((text: string, execution: ExecutionItem) => Promise<void>) | null>(
     null,
   );
@@ -881,6 +889,9 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
       // The route has always returned `pending` on every path; nothing read it until now. It
       // drives both the sidebar badge and the polling interval below.
       setPendingGatewayDepositCount(Array.isArray(data?.pending) ? data.pending.length : 0);
+      // Read separately from the count on purpose: a payload this cannot parse costs the
+      // tooltip its detail, never the badge its number.
+      setPendingGatewayDeposits(pendingGatewayDepositsFromSync(data));
 
       if (settlements.length > 0) {
         // Realtime is the fast path, but a tab can disconnect exactly while Circle finalizes.
@@ -1365,6 +1376,7 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
       unifiedBalanceFailedChains,
       isBalanceLoading,
       pendingGatewayDepositCount,
+      pendingGatewayDeposits,
       notifications,
       refreshBalance,
       refreshNotifications,
@@ -1376,6 +1388,7 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
       isBalanceLoading,
       notifications,
       pendingGatewayDepositCount,
+      pendingGatewayDeposits,
       refreshBalance,
       refreshNotifications,
       registerStatusWriter,

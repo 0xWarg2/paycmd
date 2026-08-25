@@ -6,6 +6,8 @@ import * as gatewayWebhook from "../circle/gateway-webhook.ts";
 import * as gatewayFinalityModule from "./gateway-finality.ts";
 import {
   gatewayDepositPollingIntervalMs,
+  groupPendingGatewayDeposits,
+  pendingGatewayDepositsFromSync,
   reconciliationDecision,
 } from "./gateway-finality.ts";
 import {
@@ -280,5 +282,67 @@ test("uses settled snapshots when polling missed the realtime completion", () =>
       settled: [{ txHash: "0xABC", message: "Deposit complete" }],
     }),
     [{ txHash: "0xABC", message: "Deposit complete" }],
+  );
+});
+
+test("reads the per-chain detail behind the pending deposit count", () => {
+  assert.deepEqual(
+    pendingGatewayDepositsFromSync({
+      completed: [],
+      pending: [
+        { id: "row-1", chain: "base-sepolia", amount: "12.5" },
+        // Numeric column, numeric value: the driver decides, so both shapes must survive.
+        { id: "row-2", chain: "arc-testnet", amount: 3 },
+      ],
+    }),
+    [
+      { id: "row-1", chain: "base-sepolia", amount: "12.5" },
+      { id: "row-2", chain: "arc-testnet", amount: "3" },
+    ],
+  );
+});
+
+test("drops pending entries a tooltip could not name a chain from", () => {
+  // Bare ids are what the route used to send, and what the Playwright stub still sends.
+  assert.deepEqual(pendingGatewayDepositsFromSync({ pending: ["row-1", "row-2"] }), []);
+  assert.deepEqual(pendingGatewayDepositsFromSync({ pending: [{ id: "row-1" }] }), []);
+  assert.deepEqual(
+    pendingGatewayDepositsFromSync({ pending: [{ id: "row-1", chain: "   " }] }),
+    [],
+  );
+  assert.deepEqual(pendingGatewayDepositsFromSync({ pending: [{ chain: "base-sepolia" }] }), []);
+  assert.deepEqual(pendingGatewayDepositsFromSync({}), []);
+  assert.deepEqual(pendingGatewayDepositsFromSync(null), []);
+});
+
+test("groups pending deposits into one row per waiting chain", () => {
+  assert.deepEqual(
+    groupPendingGatewayDeposits([
+      { id: "row-1", chain: "base-sepolia", amount: "12.5" },
+      { id: "row-2", chain: "arc-testnet", amount: "3" },
+      { id: "row-3", chain: "base-sepolia", amount: "7.5" },
+    ]),
+    [
+      // First-seen order, and the two Base deposits collapse into one answer.
+      { chain: "base-sepolia", amount: "20", count: 2 },
+      { chain: "arc-testnet", amount: "3", count: 1 },
+    ],
+  );
+});
+
+test("keeps an unparseable amount from swallowing the rest of a chain's total", () => {
+  assert.deepEqual(
+    groupPendingGatewayDeposits([
+      { id: "row-1", chain: "base-sepolia", amount: "" },
+      { id: "row-2", chain: "base-sepolia", amount: "4" },
+    ]),
+    [{ chain: "base-sepolia", amount: "4", count: 2 }],
+  );
+});
+
+test("passes an unknown chain key through so the UI can still name it", () => {
+  assert.deepEqual(
+    groupPendingGatewayDeposits([{ id: "row-1", chain: "some-new-chain", amount: "1" }]),
+    [{ chain: "some-new-chain", amount: "1", count: 1 }],
   );
 });

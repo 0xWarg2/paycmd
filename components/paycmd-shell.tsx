@@ -47,6 +47,10 @@ import {
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { usePayCmdRuntime } from "@/components/paycmd-runtime";
+import {
+  PendingDepositsTooltip,
+  pendingDepositsDetailLabel,
+} from "@/components/paycmd/pending-deposits-tooltip";
 import { getChainMeta } from "@/components/chain-identity";
 import { cctpBridgeChainConfigs } from "@/lib/paycmd/cctp-bridge";
 import { useI18n } from "@/lib/i18n";
@@ -150,6 +154,7 @@ export function PayCmdShell({ children, sidebarPanel }: { children: ReactNode; s
     unifiedBalanceFailedChains,
     isBalanceLoading,
     pendingGatewayDepositCount,
+    pendingGatewayDeposits,
   } = usePayCmdRuntime();
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
@@ -177,6 +182,10 @@ export function PayCmdShell({ children, sidebarPanel }: { children: ReactNode; s
     pendingGatewayDepositCount === 1
       ? t("shell.gatewayDepositsPendingOne")
       : t("shell.gatewayDepositsPendingMany", { count: pendingGatewayDepositCount });
+  const gatewayDepositsPendingDetailLabel = pendingDepositsDetailLabel(
+    gatewayDepositsPendingLabel,
+    pendingGatewayDeposits,
+  );
   const activeChain = chains.find((chain) => chain.id === chainId);
   const activeChainMeta = chainMetaFromId(activeChain?.id);
   const ActiveChainIcon = isMounted ? (activeChainMeta?.Icon ?? ShieldCheck) : ShieldCheck;
@@ -272,16 +281,20 @@ export function PayCmdShell({ children, sidebarPanel }: { children: ReactNode; s
         </Button>
         {isMounted ? (
           <>
-            <Badge
-              variant={pendingGatewayDepositCount > 0 ? "waiting" : "success"}
-              aria-label={pendingGatewayDepositCount > 0 ? gatewayDepositsPendingLabel : t("shell.systemReady")}
-              className="h-9 shrink-0 gap-1.5 px-2.5"
-            >
-              {pendingGatewayDepositCount > 0 ? <Clock3 className="h-3.5 w-3.5" /> : <ShieldCheck className="h-3.5 w-3.5" />}
-              <span className="hidden xl:inline">
-                {pendingGatewayDepositCount > 0 ? gatewayDepositsPendingLabel : t("shell.systemReady")}
-              </span>
-            </Badge>
+            {/* This pill is the fallback path: the sidebar card below carries the same signal but
+                collapses to 0px width, and on xl- the label here is icon-only. */}
+            <PendingDepositsTooltip deposits={pendingGatewayDepositCount > 0 ? pendingGatewayDeposits : []}>
+              <Badge
+                variant={pendingGatewayDepositCount > 0 ? "waiting" : "success"}
+                aria-label={pendingGatewayDepositCount > 0 ? gatewayDepositsPendingDetailLabel : t("shell.systemReady")}
+                className="h-9 shrink-0 gap-1.5 px-2.5"
+              >
+                {pendingGatewayDepositCount > 0 ? <Clock3 className="h-3.5 w-3.5" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+                <span className="hidden xl:inline">
+                  {pendingGatewayDepositCount > 0 ? gatewayDepositsPendingLabel : t("shell.systemReady")}
+                </span>
+              </Badge>
+            </PendingDepositsTooltip>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -424,10 +437,18 @@ export function PayCmdShell({ children, sidebarPanel }: { children: ReactNode; s
                   long gone by then, so the wait needs a surface that persists. Amber + Clock3
                   matches the "waiting" bucket on /notifications. */}
               {pendingGatewayDepositCount > 0 ? (
-                <div className="mt-2 flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400">
-                  <Clock3 className="h-4 w-4 shrink-0" />
-                  <span>{gatewayDepositsPendingLabel}</span>
-                </div>
+                <PendingDepositsTooltip deposits={pendingGatewayDeposits}>
+                  {/* A button, not the plain row it used to be: Radix opens the tooltip on focus
+                      too, so the per-chain detail is reachable without a pointer. */}
+                  <button
+                    type="button"
+                    aria-label={gatewayDepositsPendingDetailLabel}
+                    className="mt-2 flex w-full items-center gap-2 rounded-lg text-left text-xs text-amber-600 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring dark:text-amber-400"
+                  >
+                    <Clock3 className="h-4 w-4 shrink-0" />
+                    <span>{gatewayDepositsPendingLabel}</span>
+                  </button>
+                </PendingDepositsTooltip>
               ) : null}
             </div>
 
@@ -516,8 +537,8 @@ export function PayCmdShell({ children, sidebarPanel }: { children: ReactNode; s
               <Badge
                 variant="outline"
                 className="shrink-0 gap-1 border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-400"
-                title={gatewayDepositsPendingLabel}
-                aria-label={gatewayDepositsPendingLabel}
+                title={gatewayDepositsPendingDetailLabel}
+                aria-label={gatewayDepositsPendingDetailLabel}
               >
                 <Clock3 className="h-3 w-3" aria-hidden="true" />
                 {pendingGatewayDepositCount}

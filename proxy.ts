@@ -48,6 +48,7 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith("/dev/ui-preview") ||
     pathname.startsWith("/dev/contacts-preview") ||
     pathname.startsWith("/dev/notifications-preview") ||
+    pathname.startsWith("/dev/pending-deposits-preview") ||
     pathname.startsWith("/api") ||
     // Framework internals, never a page that could need an auth redirect. The matcher below
     // only excludes `_next/static` and `_next/image`, so `_next/webpack-hmr` and `_next/data`

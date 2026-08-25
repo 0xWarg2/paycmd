@@ -67,6 +67,21 @@ export async function POST(req: NextRequest) {
     }
 
     const pending = (pendingRows ?? []) as PendingGatewayDeposit[];
+
+    // `pending` used to serialize as bare ids, which only answered "how many". The shell also
+    // wants to say *which chain* the money is waiting on, and the columns are already in the
+    // read above, so hand them over instead of making the client ask again. The amount is
+    // stringified because a Postgres numeric arrives as either a string or a number.
+    const pendingSummary = (row: {
+      id: string;
+      chain?: string | null;
+      amount?: number | string | null;
+    }) => ({
+      id: row.id,
+      chain: row.chain ?? "",
+      amount: String(row.amount ?? ""),
+    });
+
     if (pending.length === 0) {
       // Also archive here, not just after a settling loop: two syncs overlap routinely, and when
       // they split the rows between them neither one sees an empty `stillPending`, so neither
@@ -109,7 +124,7 @@ export async function POST(req: NextRequest) {
         success: true,
         completed: [],
         settled: await loadSettlementSnapshots(),
-        pending: pending.map((row) => row.id),
+        pending: pending.map(pendingSummary),
         reason: "No wallet address found. Run /wallet create first.",
       });
     }
@@ -181,7 +196,7 @@ export async function POST(req: NextRequest) {
     // held at 1. A fresh read is authoritative no matter which request settled what.
     const { data: remainingRows, error: remainingError } = await supabase
       .from("transaction_history")
-      .select("id")
+      .select("id, chain, amount")
       .eq("user_id", user.id)
       .eq("tx_type", "deposit")
       .eq("status", "pending_gateway_finality");
@@ -193,8 +208,10 @@ export async function POST(req: NextRequest) {
     // On a failed re-read, fall back to the local view: it can overcount, and overcounting only
     // keeps the badge up a minute longer, while undercounting would drop the waiting signal.
     const stillPending = remainingError
-      ? pending.filter((row) => !completed.some((item) => item.id === row.id)).map((row) => row.id)
-      : (remainingRows ?? []).map((row) => row.id);
+      ? pending
+          .filter((row) => !completed.some((item) => item.id === row.id))
+          .map(pendingSummary)
+      : (remainingRows ?? []).map(pendingSummary);
 
     // Nothing left waiting: retire the "waiting for finality" notifications. There is no
     // mark-as-read path anywhere in the app, so otherwise they would sit unread next to the
