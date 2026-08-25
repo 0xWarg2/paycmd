@@ -1,4 +1,5 @@
 import type { ParsedCommand } from "./commands.ts";
+import { isFastFinalityChain } from "./gateway-finality.ts";
 import { gatewayTransferAmounts } from "./gateway-transfer.ts";
 
 /**
@@ -342,7 +343,13 @@ export function composeSuccessNotification(input: {
         ? translate("notify.depositPending.title", { amount })
         : translate("notify.deposit.title", { amount, chain: chainLabel(chain) }),
       body: pending
-        ? translate("notify.depositPending.body", { chain: chainLabel(chain) })
+        ? translate(
+            // Arc settles in seconds; promising 13-19 minutes there reads as a stuck deposit.
+            isFastFinalityChain(chain)
+              ? "notify.depositPendingFast.body"
+              : "notify.depositPending.body",
+            { chain: chainLabel(chain) },
+          )
         : translate("notify.deposit.body"),
       metadata: {
         v: 1,
@@ -482,7 +489,10 @@ export function composeFailureNotification(input: {
       title: translate("notify.waiting.title", { amount }),
       body: autoDepositSubmitted
         ? translate("notify.waiting.autoDeposit.body", { amount, chain: chainLabel(chain) })
-        : translate("notify.waiting.body", { chain: chainLabel(chain) }),
+        : translate(
+            isFastFinalityChain(chain) ? "notify.waitingFast.body" : "notify.waiting.body",
+            { chain: chainLabel(chain) },
+          ),
       metadata: {
         v: 1,
         command: draft.command,

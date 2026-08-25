@@ -105,6 +105,19 @@ export function gatewayDepositSettlementsFromSync(
   return settlements;
 }
 
+// Arc reaches finality in about a second, so Circle credits an Arc deposit before the user can
+// switch tabs, while the other chains genuinely take 13-19 minutes. Quoting one number for both
+// made a finished Arc deposit read as stuck, so every ETA string is picked per chain.
+const FAST_FINALITY_CHAINS = new Set(["arc", "arctestnet"]);
+
+export function isFastFinalityChain(chain: string | null | undefined) {
+  // Normalized rather than matched against the exact `GATEWAY_CHAIN_CONFIGS` key: the chain
+  // reaches these call sites from a DB column, a parsed command draft and a Circle payload,
+  // which spell it `arcTestnet`, `arc-testnet` and `ARC` respectively.
+  const key = String(chain ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return FAST_FINALITY_CHAINS.has(key);
+}
+
 export type PendingGatewayDepositSummary = { id: string; chain: string; amount: string };
 export type PendingGatewayDepositGroup = { chain: string; amount: string; count: number };
 

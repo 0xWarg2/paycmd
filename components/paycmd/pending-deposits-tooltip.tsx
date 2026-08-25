@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useI18n } from "@/lib/i18n";
 import {
   groupPendingGatewayDeposits,
+  isFastFinalityChain,
   type PendingGatewayDepositGroup,
   type PendingGatewayDepositSummary,
 } from "@/lib/paycmd/gateway-finality";
@@ -59,6 +60,19 @@ export function PendingDepositsTooltip({
   // bare ids keeps its badge and simply gets no tooltip, rather than an empty one.
   if (groups.length === 0) return <>{children}</>;
 
+  // One shared ETA line would have to be wrong for one of the two groups, since Arc finalizes in
+  // seconds and the rest take a quarter of an hour. Naming the fast chains only in the mixed case
+  // keeps the common single-speed wait down to one plain sentence.
+  const fast = groups.filter((group) => isFastFinalityChain(group.chain));
+  const etaText =
+    fast.length === groups.length
+      ? t("shell.pendingTooltipEtaFast")
+      : fast.length === 0
+        ? t("shell.pendingTooltipEta")
+        : t("shell.pendingTooltipEtaMixed", {
+            chains: fast.map((group) => chainShortLabel(group.chain)).join(", "),
+          });
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>{children}</TooltipTrigger>
@@ -81,7 +95,7 @@ export function PendingDepositsTooltip({
             </li>
           ))}
         </ul>
-        <p className="opacity-70">{t("shell.pendingTooltipEta")}</p>
+        <p className="opacity-70">{etaText}</p>
       </TooltipContent>
     </Tooltip>
   );

@@ -161,6 +161,28 @@ test("deposit awaiting finality becomes a pending gateway notification", () => {
   assert.ok(composed.body.includes("Base"));
 });
 
+test("an Arc deposit quotes the fast ETA instead of the 13-19 minute one", () => {
+  const arc = composeSuccessNotification({
+    draft: draft("deposit", { amount: "10", sourceChain: "ARC" }),
+    result: { amount: 10, chain: "ARC", status: "pending_gateway_finality" },
+    translate,
+    chainLabel,
+  });
+
+  assert.ok(arc);
+  assert.ok(arc.body.includes("notify.depositPendingFast.body Arc"));
+
+  const base = composeSuccessNotification({
+    draft: draft("deposit", { amount: "10", sourceChain: "BASE" }),
+    result: { amount: 10, chain: "BASE", status: "pending_gateway_finality" },
+    translate,
+    chainLabel,
+  });
+
+  assert.ok(base);
+  assert.ok(base.body.includes("notify.depositPending.body Base"));
+});
+
 test("gateway finality failure keeps the retry command and lands in the waiting bucket", () => {
   const composed = composeFailureNotification({
     draft: draft("transfer", { amount: "4", sourceChain: "BASE" }),

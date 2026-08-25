@@ -19,7 +19,11 @@ const CASES: Array<{ name: string; deposits: PendingGatewayDepositSummary[] }> =
     deposits: [{ id: "row-1", chain: "baseSepolia", amount: "10" }],
   },
   {
-    name: "Two chains",
+    name: "Arc only (fast ETA)",
+    deposits: [{ id: "row-1", chain: "arcTestnet", amount: "5" }],
+  },
+  {
+    name: "Two chains (mixed ETA)",
     deposits: [
       { id: "row-1", chain: "baseSepolia", amount: "10" },
       { id: "row-2", chain: "arcTestnet", amount: "2.5" },
@@ -62,8 +66,8 @@ export function PendingDepositsPreview() {
         {CASES.map((item) => {
           const countLabel =
             item.deposits.length === 1
-              ? "1 deposit chờ finality"
-              : `${Math.max(item.deposits.length, 1)} deposit chờ finality`;
+              ? "1 deposit waiting for finality"
+              : `${Math.max(item.deposits.length, 1)} deposits waiting for finality`;
           const detailLabel = pendingDepositsDetailLabel(countLabel, item.deposits);
 
           return (
