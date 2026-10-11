@@ -786,6 +786,7 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
   // whenever a signed-in visitor's network blips — so keep the runtime inert there.
   const isPublicSurface =
     pathname === "/" ||
+    pathname === "/pay" ||
     pathname.startsWith("/auth") ||
     pathname.startsWith("/docs") ||
     pathname.startsWith("/dev");

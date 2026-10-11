@@ -1,5 +1,17 @@
 import { type PayCmdChain } from "./chains.ts";
-import { primaryRpcUrl } from "./rpc-endpoints.ts";
+import { ARC_MAINNET_PUBLIC_RPC_URL, primaryRpcUrl } from "./rpc-endpoints.ts";
+import { defineChain } from "viem";
+
+// Verified against Arc's connection/contract references and eth_chainId + decimals(),
+// 2026-10-12. Keep this outside the Gateway chain map until those rails are verified.
+export const arcMainnetChain = defineChain({
+  id: 5042,
+  name: "Arc Mainnet",
+  nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
+  rpcUrls: { default: { http: [ARC_MAINNET_PUBLIC_RPC_URL] } },
+  blockExplorers: { default: { name: "Arc Explorer", url: "https://explorer.arc.io" } },
+});
+export const ARC_MAINNET_USDC_ADDRESS = "0x3600000000000000000000000000000000000000" as const;
 
 export type PayCmdWeb3Chain = {
   id: number;

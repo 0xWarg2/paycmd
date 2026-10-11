@@ -24,9 +24,9 @@ import { useState } from "react";
 
 import { cctpBridgeViemChains } from "@/lib/paycmd/cctp-bridge";
 import { rpcTransport } from "@/lib/paycmd/rpc-endpoints";
-import { payCmdChainByChainId } from "@/lib/paycmd/web3-chains";
+import { arcMainnetChain, payCmdChainByChainId } from "@/lib/paycmd/web3-chains";
 
-const chains = cctpBridgeViemChains;
+const chains = [arcMainnetChain, ...cctpBridgeViemChains] as const;
 
 // `http()` with no URL falls back to whatever endpoint the chain object happens to ship, and those
 // go stale: viem's Base Sepolia default answered `eth_chainId` while returning

@@ -7,6 +7,7 @@ import {
 } from "./cctp-bridge.ts";
 import { chainAliases, chainCommandAlias, type PayCmdChain } from "./chains.ts";
 import { normalizeSwapToken } from "./swap.ts";
+import { containsMainnet } from "./network-guard.ts";
 
 export const commandNames = [
   "wallet",
@@ -232,8 +233,8 @@ const chainTokenPattern = Object.keys(chainAliases)
 // has to reach the same field as "on base" or the chain is dropped and the total comes back.
 function chainTokenFrom(input: string, prefix?: string) {
   const pattern = prefix
-    ? new RegExp(String.raw`\b(?:${prefix})\s+(${chainTokenPattern})\b`, "i")
-    : new RegExp(String.raw`\b(${chainTokenPattern})\b`, "i");
+    ? new RegExp(String.raw`\b(?:${prefix})\s+(${chainTokenPattern})\b(?![-\w])`, "i")
+    : new RegExp(String.raw`\b(${chainTokenPattern})\b(?![-\w])`, "i");
   const token = input.match(pattern)?.[1]?.toLowerCase();
 
   return token ? chainAliases[token] ?? "" : "";
@@ -865,7 +866,12 @@ export function parsePayCmd(input: string, locale?: CommandLocale): ParsedComman
     };
   }
 
-  return command.parse(normalized, locale);
+  const parsed = command.parse(normalized, locale);
+  if (containsMainnet(normalized)) {
+    return { ...parsed, status: "needs_input", missingFields: ["network"],
+      summary: locale === "en" ? "This command center uses testnets. Open /pay for Arc mainnet wallet payments." : "Command center này dùng testnet. Mở /pay để thanh toán Arc mainnet bằng ví." };
+  }
+  return parsed;
 }
 
 export function createDemoExecution(parsed: ParsedCommand) {

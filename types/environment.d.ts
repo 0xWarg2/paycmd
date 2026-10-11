@@ -34,7 +34,9 @@ namespace NodeJS {
     CIRCLE_GATEWAY_DOMAINS?: string
     PAYCMD_DEFAULT_LOCALE?: "vi" | "en"
 
-    // Arc remains testnet-only until the mainnet registry is complete and verified.
+    // ARC_NETWORK selects the legacy Circle/swap rail (testnet-only).
+    // Wallet payments use their explicit network and independent RPC.
+    ARC_MAINNET_PAYMENTS_ENABLED?: string
     ARC_NETWORK?: "testnet" | "mainnet"
     ARC_RPC_URL?: string
     ARC_RPC_FALLBACK_URL?: string

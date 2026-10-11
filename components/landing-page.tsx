@@ -105,6 +105,7 @@ export function LandingPage({ metricsSlot }: { metricsSlot: ReactNode }) {
             <a href="#product" className="transition hover:text-foreground">{t("landing.nav.product")}</a>
             <a href="#stack" className="transition hover:text-foreground">{t("landing.nav.stack")}</a>
             <Link href="/docs" className="transition hover:text-foreground">{t("landing.nav.docs")}</Link>
+            <Link href="/pay" className="transition hover:text-foreground">Arc wallet payments</Link>
           </nav>
 
           <div className="flex items-center gap-2">
@@ -141,6 +142,9 @@ export function LandingPage({ metricsSlot }: { metricsSlot: ReactNode }) {
           </p>
 
           <div className="paycmd-reveal paycmd-reveal-delay-3 mt-9 flex flex-col gap-3 sm:flex-row">
+            <Button asChild size="lg" variant="outline" className="h-14 rounded-full px-8 text-base">
+              <Link href="/pay">Arc wallet payments <ArrowRight className="h-5 w-5" /></Link>
+            </Button>
             <Button asChild size="lg" className="paycmd-button-shine h-14 rounded-full bg-foreground px-8 text-base text-background shadow-[0_20px_60px_color-mix(in_oklch,var(--primary)_18%,transparent)] hover:bg-foreground/90">
               <Link href="/app">
                 {t("landing.hero.openApp")}

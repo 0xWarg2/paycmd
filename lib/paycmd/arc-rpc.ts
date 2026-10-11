@@ -1,6 +1,6 @@
 import { createPublicClient, fallback, http, type Chain, type Transport } from "viem";
 
-import { web3Chains } from "./web3-chains.ts";
+import { arcMainnetChain, web3Chains } from "./web3-chains.ts";
 
 const arcChain = web3Chains.arcTestnet;
 
@@ -156,4 +156,12 @@ export const arcPublicClient = createPublicClient({
   chain: arcTestnetChain,
   transport: arcTransport,
   batch: { multicall: { wait: 10 } },
+});
+
+// Independent client: receipt registry, swap and Circle continue using arcPublicClient
+// on testnet. Mainnet wallet payments never reuse ARC_RPC_URL or its testnet fallback.
+export const arcMainnetPublicClient = createPublicClient({
+  chain: arcMainnetChain,
+  transport: throttled(http(process.env.ARC_MAINNET_RPC_URL?.trim() ||
+    arcMainnetChain.rpcUrls.default.http[0], { timeout: 15_000, retryCount: 2 })),
 });
