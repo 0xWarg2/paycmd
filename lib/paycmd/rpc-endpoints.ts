@@ -2,6 +2,9 @@ import { fallback, http, type Transport } from "viem";
 
 import { type PayCmdChain } from "./chains.ts";
 
+// Never fall back from mainnet to an endpoint belonging to a different network.
+export const ARC_MAINNET_PUBLIC_RPC_URL = "https://rpc.mainnet.arc.io";
+
 /**
  * The one place read endpoints are declared. Two maps used to hold them — `web3Chains.rpcUrl` and
  * a `RPC_URL_OVERRIDES` table inside lib/circle/gateway-sdk.ts — and they had drifted: the Gateway

@@ -71,6 +71,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { isAuthRetryableFetchError } from "@supabase/supabase-js";
+
 import { createClient } from "@/lib/supabase/client";
 import { localeRequestHeaders, translateClient, useI18n } from "@/lib/i18n";
 import type { GroundingStatus, KnowledgeSource, WalletContextStatus } from "@/lib/paycmd/ai/knowledge-types";
@@ -4150,11 +4152,19 @@ export function PayCmdApp() {
   useEffect(() => {
     async function bootstrapChat() {
       const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      // This gate keeps getUser() because it must verify the session, not trust it.
+      const auth = await supabase.auth.getUser().catch(() => null);
+      const user = auth?.data.user ?? null;
 
       if (!user) {
+        // A failed request resolves with user:null plus a retryable error (auth-js
+        // wraps the fetch failure), which is indistinguishable from being signed out
+        // unless we check. Redirecting on it would eject a signed-in user on a blip.
+        if (!auth || isAuthRetryableFetchError(auth.error)) {
+          setIsLoadingHistory(false);
+          return;
+        }
+
         window.location.href = "/auth/login?next=/app";
         return;
       }
@@ -4260,7 +4270,11 @@ export function PayCmdApp() {
       setIsLoadingHistory(false);
     }
 
-    void bootstrapChat();
+    bootstrapChat().catch((error) => {
+      // Unexpected failure: still clear the skeleton so the composer is usable.
+      console.error("Failed to bootstrap chat", error);
+      setIsLoadingHistory(false);
+    });
   }, []);
 
   return (
@@ -4533,20 +4547,21 @@ function ChatThreadSidebar({
         <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
           <History className="h-3.5 w-3.5" />
           {t("chat.history")}
+          <span className="text-[11px] font-normal tracking-normal">{threads.length}</span>
         </div>
-        <span className="text-[11px] text-muted-foreground">{threads.length}</span>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground"
+          onClick={onCreate}
+          disabled={!canCreate}
+          aria-label={t("chat.newChat")}
+          title={t("chat.newChat")}
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
       </div>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className="mx-1 mb-2 justify-start gap-2 rounded-xl"
-        onClick={onCreate}
-        disabled={!canCreate}
-      >
-        <Plus className="h-4 w-4" />
-        {t("chat.newChat")}
-      </Button>
       <div className="paycmd-command-palette-scrollbar min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
         {isLoading ? (
           <div className="px-3 py-3 text-xs text-muted-foreground">{t("chat.loadingThreads")}</div>
@@ -4805,9 +4820,12 @@ function ComposerModeControls({
           </label>
         </div>
       ) : (
-        <div className="flex h-10 items-center gap-1 rounded-2xl border bg-background/70 px-3 text-xs text-muted-foreground shadow-sm backdrop-blur" title="deepseek-v4-flash is the fixed command-router model">
+        <div
+          className="inline-flex items-center gap-1.5 px-1 text-xs text-muted-foreground"
+          title="deepseek-v4-flash is the fixed command-router model"
+        >
           <Bot className="h-3.5 w-3.5 text-primary" />
-          <span className="font-medium text-foreground">DeepSeek Flash</span>
+          DeepSeek Flash
         </div>
       )}
     </div>
@@ -6589,18 +6607,18 @@ function OnboardingGuide({
   const { t } = useI18n();
 
   return (
-    <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
-      <div className="flex flex-col gap-5 p-5 md:flex-row md:items-center">
-        <div className="relative mx-auto h-28 w-28 shrink-0 overflow-hidden rounded-2xl border border-emerald-400/30 bg-[#07090d] md:mx-0">
-          <Image src="/brand/antlers_transparent.png" alt="Payna AI Copilot" fill className="object-contain p-2" />
+    <div className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm">
+      <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center">
+        <div className="relative mx-auto h-16 w-16 shrink-0 overflow-hidden rounded-2xl border border-emerald-400/30 bg-[#07090d] md:mx-0">
+          <Image src="/brand/antlers_transparent.png" alt="Payna AI Copilot" fill className="object-contain p-1.5" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="mb-2 inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs text-muted-foreground">
             <Sparkles className="h-3.5 w-3.5 text-primary" />
             {t("onboarding.badge")}
           </div>
-          <h2 className="text-xl font-semibold tracking-normal">{t("onboarding.title")}</h2>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          <h2 className="text-lg font-semibold tracking-normal">{t("onboarding.title")}</h2>
+          <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
             {t("onboarding.description")}
           </p>
           {showQuotaNotice ? (
@@ -6629,20 +6647,20 @@ function OnboardingGuide({
           ) : null}
         </div>
       </div>
-      <div className="grid gap-2 border-t bg-background/45 p-3 md:grid-cols-2">
+      <div className="grid gap-2 border-t border-border/60 bg-background/45 p-3 md:grid-cols-2 xl:grid-cols-3">
         {onboardingCommands.map((item) => (
           <button
             key={item.sample}
             type="button"
-            className="group rounded-xl border bg-card p-3 text-left transition hover:-translate-y-0.5 hover:border-primary/60 hover:shadow-sm"
+            className="group rounded-xl border border-border/50 bg-card p-3 text-left transition hover:-translate-y-0.5 hover:border-primary/60 hover:shadow-sm"
             onClick={() => onSelect(item.sample)}
           >
             <div className="flex items-center justify-between gap-3">
-              <div className="font-medium">{t(item.titleKey)}</div>
+              <div className="text-sm font-medium">{t(item.titleKey)}</div>
               <ChevronRight className="h-4 w-4 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-primary" />
             </div>
-            <div className="mt-1 font-mono text-xs text-primary">{item.sample}</div>
-            <div className="mt-2 text-xs leading-5 text-muted-foreground">{t(item.descriptionKey)}</div>
+            <div className="mt-1 truncate font-mono text-xs text-primary">{item.sample}</div>
+            <div className="mt-1.5 line-clamp-2 text-xs leading-5 text-muted-foreground">{t(item.descriptionKey)}</div>
           </button>
         ))}
       </div>

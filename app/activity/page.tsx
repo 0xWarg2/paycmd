@@ -23,7 +23,7 @@ export default async function ActivityPage({
     searchParams,
     supabase
       .from("notifications")
-      .select("id, type, title, body, status, command_execution_id, created_at")
+      .select("id, type, title, body, status, command_execution_id, created_at, metadata")
       .eq("user_id", user.id)
       .neq("status", "archived")
       .order("created_at", { ascending: false })
@@ -36,6 +36,7 @@ export default async function ActivityPage({
         initialTab={activityTabFrom(tab)}
         notifications={(notificationsResult.data ?? []) as ActivityNotification[]}
         notificationError={notificationsResult.error?.message}
+        markReadOnOpen
       />
     </PayCmdShell>
   );

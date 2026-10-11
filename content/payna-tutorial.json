@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "updatedAt": "2026-08-18",
+  "updatedAt": "2026-08-25",
   "product": "Hey Payna",
   "locales": {
     "vi": {
@@ -235,7 +235,7 @@
           ],
           "content": [
             "Activity tách transaction history khỏi notifications; dùng receipt và explorer link đúng chain để đối soát từng stage.",
-            "Gateway finality notification chỉ được tạo sau khi settlement evidence đã xác minh cập nhật pending deposit; unread state hiện chỉ mang tính thông tin."
+            "Gateway finality notification chỉ được tạo sau khi settlement evidence đã xác minh cập nhật pending deposit; mở tab Notifications sẽ đánh dấu các item unread thành read."
           ],
           "url": "https://heypayna.xyz/docs/features/activity-and-notifications"
         },
@@ -610,7 +610,7 @@
           ],
           "content": [
             "Activity separates transaction history from notifications; use receipts and chain-correct explorer links to reconcile every stage.",
-            "Gateway finality notifications are created only after verified settlement evidence updates a pending deposit; unread state is informational in the current UI."
+            "Gateway finality notifications are created only after verified settlement evidence updates a pending deposit; opening the Notifications tab marks unread items as read."
           ],
           "url": "https://heypayna.xyz/docs/features/activity-and-notifications"
         },

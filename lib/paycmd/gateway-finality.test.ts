@@ -6,6 +6,9 @@ import * as gatewayWebhook from "../circle/gateway-webhook.ts";
 import * as gatewayFinalityModule from "./gateway-finality.ts";
 import {
   gatewayDepositPollingIntervalMs,
+  groupPendingGatewayDeposits,
+  isFastFinalityChain,
+  pendingGatewayDepositsFromSync,
   reconciliationDecision,
 } from "./gateway-finality.ts";
 import {
@@ -281,4 +284,82 @@ test("uses settled snapshots when polling missed the realtime completion", () =>
     }),
     [{ txHash: "0xABC", message: "Deposit complete" }],
   );
+});
+
+test("reads the per-chain detail behind the pending deposit count", () => {
+  assert.deepEqual(
+    pendingGatewayDepositsFromSync({
+      completed: [],
+      pending: [
+        { id: "row-1", chain: "base-sepolia", amount: "12.5" },
+        // Numeric column, numeric value: the driver decides, so both shapes must survive.
+        { id: "row-2", chain: "arc-testnet", amount: 3 },
+      ],
+    }),
+    [
+      { id: "row-1", chain: "base-sepolia", amount: "12.5" },
+      { id: "row-2", chain: "arc-testnet", amount: "3" },
+    ],
+  );
+});
+
+test("drops pending entries a tooltip could not name a chain from", () => {
+  // Bare ids are what the route used to send, and what the Playwright stub still sends.
+  assert.deepEqual(pendingGatewayDepositsFromSync({ pending: ["row-1", "row-2"] }), []);
+  assert.deepEqual(pendingGatewayDepositsFromSync({ pending: [{ id: "row-1" }] }), []);
+  assert.deepEqual(
+    pendingGatewayDepositsFromSync({ pending: [{ id: "row-1", chain: "   " }] }),
+    [],
+  );
+  assert.deepEqual(pendingGatewayDepositsFromSync({ pending: [{ chain: "base-sepolia" }] }), []);
+  assert.deepEqual(pendingGatewayDepositsFromSync({}), []);
+  assert.deepEqual(pendingGatewayDepositsFromSync(null), []);
+});
+
+test("groups pending deposits into one row per waiting chain", () => {
+  assert.deepEqual(
+    groupPendingGatewayDeposits([
+      { id: "row-1", chain: "base-sepolia", amount: "12.5" },
+      { id: "row-2", chain: "arc-testnet", amount: "3" },
+      { id: "row-3", chain: "base-sepolia", amount: "7.5" },
+    ]),
+    [
+      // First-seen order, and the two Base deposits collapse into one answer.
+      { chain: "base-sepolia", amount: "20", count: 2 },
+      { chain: "arc-testnet", amount: "3", count: 1 },
+    ],
+  );
+});
+
+test("keeps an unparseable amount from swallowing the rest of a chain's total", () => {
+  assert.deepEqual(
+    groupPendingGatewayDeposits([
+      { id: "row-1", chain: "base-sepolia", amount: "" },
+      { id: "row-2", chain: "base-sepolia", amount: "4" },
+    ]),
+    [{ chain: "base-sepolia", amount: "4", count: 2 }],
+  );
+});
+
+test("passes an unknown chain key through so the UI can still name it", () => {
+  assert.deepEqual(
+    groupPendingGatewayDeposits([{ id: "row-1", chain: "some-new-chain", amount: "1" }]),
+    [{ chain: "some-new-chain", amount: "1", count: 1 }],
+  );
+});
+
+test("recognises Arc as the fast-finality chain however the caller spells it", () => {
+  // The chain string reaches the ETA copy from a DB column, a command draft and a Circle
+  // payload, so all three spellings have to land on the same answer.
+  assert.equal(isFastFinalityChain("arcTestnet"), true);
+  assert.equal(isFastFinalityChain("arc-testnet"), true);
+  assert.equal(isFastFinalityChain("ARC"), true);
+
+  assert.equal(isFastFinalityChain("baseSepolia"), false);
+  assert.equal(isFastFinalityChain("arbitrumSepolia"), false);
+  // A chain named after Arc is not Arc: only exact keys count, so a new "arcadia" testnet
+  // inherits the safe 13-19 minute promise instead of a wrong one-minute promise.
+  assert.equal(isFastFinalityChain("arcadiaTestnet"), false);
+  assert.equal(isFastFinalityChain(null), false);
+  assert.equal(isFastFinalityChain(undefined), false);
 });

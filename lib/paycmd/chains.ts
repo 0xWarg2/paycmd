@@ -1,3 +1,8 @@
+// Gateway/Circle rails below remain testnet-only. Wallet payments use a separate network
+// registry so accepting Arc mainnet cannot accidentally enable these legacy rails.
+export const arcPaymentNetworks = ["mainnet", "testnet"] as const;
+export type ArcPaymentNetwork = (typeof arcPaymentNetworks)[number];
+
 export const supportedChains = [
   "arcTestnet",
   "arbitrumSepolia",

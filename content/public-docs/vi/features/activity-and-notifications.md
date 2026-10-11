@@ -4,12 +4,12 @@ title: "Activity, history và notifications"
 description: "Đối soát transaction receipt, lifecycle state, explorer link và operational alert."
 section: "features"
 order: 44
-lastUpdated: "2026-08-05"
+lastUpdated: "2026-08-25"
 keywords: ["activity", "history", "notification", "status"]
 tutorial: true
 aiSummary:
   - "Activity tách transaction history khỏi notifications; dùng receipt và explorer link đúng chain để đối soát từng stage."
-  - "Gateway finality notification chỉ được tạo sau khi settlement evidence đã xác minh cập nhật pending deposit; unread state hiện chỉ mang tính thông tin."
+  - "Gateway finality notification chỉ được tạo sau khi settlement evidence đã xác minh cập nhật pending deposit; mở tab Notifications sẽ đánh dấu các item unread thành read."
 ---
 
 ## Hai tab Activity
@@ -40,7 +40,9 @@ Source transaction có thể thành công khi destination mint, forwarder action
 
 Tab Notifications hiển thị tối đa 50 record non-archived mới nhất. Nó có text search và filter all, unread, waiting, failed. Các counter phía trên tổng hợp item unread, waiting/finality và failed/error. Notification có thể gồm payment đã nhận, request đã trả, payroll result, transaction failure và Gateway balance availability.
 
-Storage có `unread`, `read` và `archived`, nhưng Activity UI hiện chưa có mark-read action. Vì vậy unread badge nghĩa record chưa được cập nhật thành `read`, không có nghĩa chưa ai điều tra. Pending Gateway notice có thể tự archive khi không còn deposit pending. Deep link từ từng notification đến command execution detail cũng chưa có.
+Mỗi notification là một dòng tóm tắt kèm chip có cấu trúc bên dưới: số tiền, route (với transfer dùng unified balance sẽ hiện từng source chain đã góp tiền và số tiền theo chain), phí Gateway, và link explorer khi có transaction hash. Receipt đầy đủ nhiều dòng vẫn nằm trong chat. Các lệnh chỉ đọc như balance, history hay gas chỉ trả lời trong chat, không tạo entry trong inbox.
+
+Mở tab Notifications sẽ đánh dấu tất cả notification unread thành read, nên badge ở sidebar phản ánh những gì bạn chưa xem. Các row đang hiển thị giữ badge "New" đến lần mở sau. Pending Gateway notice có thể tự archive khi không còn deposit pending. Deep link từ từng notification đến command execution detail chưa có.
 
 ## Gateway webhook và finality alert
 

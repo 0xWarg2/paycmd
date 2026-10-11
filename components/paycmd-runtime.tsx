@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { usePathname } from "next/navigation";
 import { toast } from "sonner";
 
 import { getChainMeta } from "@/components/chain-identity";
@@ -24,12 +25,20 @@ import { faucetHint, isKnownTestnetChain } from "@/lib/paycmd/cctp-bridge";
 import {
   gatewayDepositPollingIntervalMs,
   gatewayDepositSettlementsFromSync,
+  pendingGatewayDepositsFromSync,
+  type PendingGatewayDepositSummary,
 } from "@/lib/paycmd/gateway-finality";
 import {
   gatewayReceiptFeeComponents,
   gatewayTransferAmounts,
 } from "@/lib/paycmd/gateway-transfer";
 import { formatNativeGasBalance } from "@/lib/paycmd/native-gas";
+import {
+  composeFailureNotification,
+  composeSuccessNotification,
+  formatDecimalAmount,
+  shortErrorSummary,
+} from "@/lib/paycmd/notification-content";
 import { createClient } from "@/lib/supabase/client";
 import { ParsedCommand } from "@/lib/paycmd/commands";
 import { executeContactGroupCommand } from "@/lib/paycmd/contact-group-command";
@@ -81,6 +90,9 @@ type RuntimeContext = {
   // Deposits whose on-chain transaction landed but whose Gateway balance is not spendable yet.
   // Circle finality runs ~10 minutes, so this needs a surface that outlives a toast.
   pendingGatewayDepositCount: number;
+  // Per-chain detail behind that count, so the shell can say *where* the money is waiting.
+  // Can be shorter than the count on an older deployment: the count stays authoritative.
+  pendingGatewayDeposits: PendingGatewayDepositSummary[];
   notifications: NotificationItem[];
   refreshBalance: () => Promise<void>;
   refreshNotifications: () => Promise<void>;
@@ -169,17 +181,13 @@ export function usesGatewayPipeline(draft: ParsedCommand) {
   );
 }
 
-export function formatDecimalAmount(value: unknown, maxFractionDigits = 6) {
-  const numberValue = Number(value ?? 0);
+export { formatDecimalAmount };
 
-  if (!Number.isFinite(numberValue)) {
-    return "0";
-  }
-
-  return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: maxFractionDigits,
-  }).format(numberValue);
+// Notification copy wants "Arb Sepolia", not the internal chain id, and must never crash on a
+// chain the registry does not know — fall back to whatever string the API returned.
+function notificationChainLabel(chain?: string | null) {
+  const meta = getChainMeta(chain);
+  return meta?.shortLabel ?? meta?.label ?? chain ?? "";
 }
 
 function gatewayFeeText(transfer: any, translate: Translator) {
@@ -771,12 +779,26 @@ function mapNotification(row: any): NotificationItem {
 
 export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
   const { t } = useI18n();
+  const pathname = usePathname();
+  // The provider wraps every route from the root layout, but only signed-in surfaces render
+  // anything that consumes it. On public pages the authed fetches below just fail — three 401s
+  // in every anonymous visitor's console, and "Failed to fetch" TypeErrors in the dev overlay
+  // whenever a signed-in visitor's network blips — so keep the runtime inert there.
+  const isPublicSurface =
+    pathname === "/" ||
+    pathname === "/pay" ||
+    pathname.startsWith("/auth") ||
+    pathname.startsWith("/docs") ||
+    pathname.startsWith("/dev");
   const [activeCommandCount, setActiveCommandCount] = useState(0);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unifiedBalance, setUnifiedBalance] = useState<number | null>(null);
   const [unifiedBalanceFailedChains, setUnifiedBalanceFailedChains] = useState<string[]>([]);
   const [isBalanceLoading, setIsBalanceLoading] = useState(true);
   const [pendingGatewayDepositCount, setPendingGatewayDepositCount] = useState(0);
+  const [pendingGatewayDeposits, setPendingGatewayDeposits] = useState<
+    PendingGatewayDepositSummary[]
+  >([]);
   const statusWriterRef = useRef<((text: string, execution: ExecutionItem) => Promise<void>) | null>(
     null,
   );
@@ -868,6 +890,9 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
       // The route has always returned `pending` on every path; nothing read it until now. It
       // drives both the sidebar badge and the polling interval below.
       setPendingGatewayDepositCount(Array.isArray(data?.pending) ? data.pending.length : 0);
+      // Read separately from the count on purpose: a payload this cannot parse costs the
+      // tooltip its detail, never the badge its number.
+      setPendingGatewayDeposits(pendingGatewayDepositsFromSync(data));
 
       if (settlements.length > 0) {
         // Realtime is the fast path, but a tab can disconnect exactly while Circle finalizes.
@@ -1005,6 +1030,7 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
       type: string;
       title: string;
       body: string;
+      metadata?: Record<string, unknown>;
     }) => {
       const supabase = createClient();
       const { data, error } = await supabase
@@ -1015,6 +1041,7 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
           type: params.type,
           title: params.title,
           body: params.body,
+          metadata: params.metadata ?? {},
           status: "unread",
         })
         .select("*")
@@ -1080,28 +1107,40 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
           txHash,
           result,
         };
+        // The chat keeps the full receipt; the notification and toast get the composer's
+        // one-line summary. Read-only commands (composer returns null) answer in chat only.
         const body = resultText(draft, result, t);
-        const title = awaitingFinality
-          ? t("runtime.gatewayPending")
-          : t("runtime.commandCompleted");
+        const notification = composeSuccessNotification({
+          draft,
+          result,
+          translate: t,
+          chainLabel: notificationChainLabel,
+        });
 
         await updateExecutionRecord(success);
-        await insertNotification({
-          userId: context.userId,
-          executionId: success.id,
-          // Substring-matched by `app/notifications/page.tsx`, which checks `pending|finality`
-          // before `gateway` — so this lands in the amber "waiting" bucket on its own.
-          type: awaitingFinality ? "gateway_deposit_pending" : "command_success",
-          title,
-          body,
-        });
+        if (notification) {
+          await insertNotification({
+            userId: context.userId,
+            executionId: success.id,
+            type: notification.type,
+            title: notification.title,
+            body: notification.body,
+            metadata: notification.metadata,
+          });
+        }
         await writeStatus(context, body, success);
-        if (awaitingFinality) {
-          // Deliberately not `toast.loading`: a toast held open for ten minutes is the wrong
-          // surface. The notification and the sidebar badge own the long wait.
-          toast.warning(title, { description: body });
+        if (notification) {
+          // Deliberately not `toast.loading` for the pending case: a toast held open for ten
+          // minutes is the wrong surface. The notification and the sidebar badge own the wait.
+          if (awaitingFinality || notification.metadata.outcome === "pending") {
+            toast.warning(notification.title, { description: notification.body || undefined });
+          } else {
+            toast.success(notification.title, { description: notification.body || undefined });
+          }
+        } else if (awaitingFinality) {
+          toast.warning(t("runtime.gatewayPending"), { description: body });
         } else {
-          toast.success(title, { description: body });
+          toast.success(t("runtime.commandCompleted"), { description: body });
         }
 
         if (usesGatewayPipeline(draft) || draft.command === "balance") {
@@ -1132,20 +1171,41 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
           safeToRetry,
         };
 
-        await updateExecutionRecord(failed);
-        await insertNotification({
-          userId: context.userId,
-          executionId: failed.id,
-          type: waitingGateway ? "gateway_finality_pending" : "command_failed",
-          title: waitingGateway ? t("runtime.gatewayPending") : t("runtime.commandFailed"),
-          body: localizedMessage,
+        // Chat and the execution record keep the long localized explanation; the notification
+        // gets the composer's short form built straight from the error data.
+        const notification = composeFailureNotification({
+          draft,
+          message,
+          errorData: (error as { data?: unknown })?.data,
+          waitingGateway,
+          fundsMoved: transferSubmitted,
+          translate: t,
+          chainLabel: notificationChainLabel,
         });
+
+        await updateExecutionRecord(failed);
+        if (notification) {
+          await insertNotification({
+            userId: context.userId,
+            executionId: failed.id,
+            type: notification.type,
+            title: notification.title,
+            body: notification.body,
+            metadata: notification.metadata,
+          });
+        }
         await writeStatus(context, localizedMessage, failed);
 
-        if (waitingGateway) {
+        if (notification) {
+          if (waitingGateway) {
+            toast.warning(notification.title, { description: notification.body || undefined });
+          } else {
+            toast.error(notification.title, { description: notification.body || undefined });
+          }
+        } else if (waitingGateway) {
           toast.warning(t("runtime.gatewayPending"), { description: localizedMessage });
         } else {
-          toast.error(t("runtime.commandFailed"), { description: localizedMessage });
+          toast.error(t("runtime.commandFailed"), { description: shortErrorSummary(message) });
         }
       } finally {
         setActiveCommandCount((current) => Math.max(0, current - 1));
@@ -1163,6 +1223,8 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
+    if (isPublicSurface) return;
+
     void refreshNotifications();
     const interval = window.setInterval(() => void refreshNotifications(), 30_000);
     const onFocus = () => void refreshNotifications();
@@ -1172,9 +1234,11 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
       window.clearInterval(interval);
       window.removeEventListener("focus", onFocus);
     };
-  }, [refreshNotifications]);
+  }, [isPublicSurface, refreshNotifications]);
 
   useEffect(() => {
+    if (isPublicSurface) return;
+
     void refreshBalance();
     const interval = window.setInterval(() => void refreshBalance(), 30_000);
     const onFocus = () => void refreshBalance();
@@ -1188,9 +1252,11 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("ra:balance-changed", onBalanceChanged);
     };
-  }, [refreshBalance]);
+  }, [isPublicSurface, refreshBalance]);
 
   useEffect(() => {
+    if (isPublicSurface) return;
+
     void syncGatewayDeposits();
     const onFocus = () => void syncGatewayDeposits();
     const onBalanceChanged = () => void syncGatewayDeposits();
@@ -1202,59 +1268,69 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("ra:balance-changed", onBalanceChanged);
     };
-  }, [syncGatewayDeposits]);
+  }, [isPublicSurface, syncGatewayDeposits]);
 
   useEffect(() => {
+    if (isPublicSurface) return;
+
     const supabase = createClient();
     let channel: ReturnType<typeof supabase.channel> | null = null;
     let cancelled = false;
 
-    void supabase.auth.getUser().then(({ data }) => {
-      const userId = data.user?.id;
-      if (!userId || cancelled) return;
+    // getSession() avoids getUser()'s network round-trip: the id only names the channel
+    // and its filter, and RLS on chat_messages is what actually authorizes the rows.
+    void supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        const userId = data.session?.user.id;
+        if (!userId || cancelled) return;
 
-      channel = supabase
-        .channel(`gateway-deposit-finality:${userId}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "UPDATE",
-            schema: "public",
-            table: "chat_messages",
-            filter: `user_id=eq.${userId}`,
-          },
-          (payload) => {
-            const row = payload.new as Record<string, unknown>;
-            const metadata = row.metadata as Record<string, unknown> | null;
-            const execution = metadata?.execution as Record<string, unknown> | null;
-            if (
-              execution?.status !== "success" ||
-              execution.finalitySource !== "circle_webhook" ||
-              typeof execution.txHash !== "string" ||
-              typeof row.content !== "string"
-            ) {
-              return;
-            }
+        channel = supabase
+          .channel(`gateway-deposit-finality:${userId}`)
+          .on(
+            "postgres_changes",
+            {
+              event: "UPDATE",
+              schema: "public",
+              table: "chat_messages",
+              filter: `user_id=eq.${userId}`,
+            },
+            (payload) => {
+              const row = payload.new as Record<string, unknown>;
+              const metadata = row.metadata as Record<string, unknown> | null;
+              const execution = metadata?.execution as Record<string, unknown> | null;
+              if (
+                execution?.status !== "success" ||
+                execution.finalitySource !== "circle_webhook" ||
+                typeof execution.txHash !== "string" ||
+                typeof row.content !== "string"
+              ) {
+                return;
+              }
 
-            window.dispatchEvent(
-              new CustomEvent("ra:gateway-deposit-settled", {
-                detail: [{ txHash: execution.txHash, message: row.content }],
-              }),
-            );
-            toast.success(t("runtime.gatewayBalanceUpdated"), { description: row.content });
-            void refreshNotifications();
-            void refreshBalance();
-            void syncGatewayDeposits();
-          },
-        )
-        .subscribe();
-    });
+              window.dispatchEvent(
+                new CustomEvent("ra:gateway-deposit-settled", {
+                  detail: [{ txHash: execution.txHash, message: row.content }],
+                }),
+              );
+              toast.success(t("runtime.gatewayBalanceUpdated"), { description: row.content });
+              void refreshNotifications();
+              void refreshBalance();
+              void syncGatewayDeposits();
+            },
+          )
+          .subscribe();
+      })
+      .catch(() => {
+        // Live finality updates are an optimisation: the focus listener and the
+        // interval both still call syncGatewayDeposits if this never subscribes.
+      });
 
     return () => {
       cancelled = true;
       if (channel) void supabase.removeChannel(channel);
     };
-  }, [refreshBalance, refreshNotifications, syncGatewayDeposits, t]);
+  }, [isPublicSurface, refreshBalance, refreshNotifications, syncGatewayDeposits, t]);
 
   // Deliberately a separate effect from the one above. Gating that one on `hasPending` would
   // tear down and re-register its focus + `ra:balance-changed` listeners every time the count
@@ -1270,6 +1346,10 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
       pendingPollingStartedAtRef.current = null;
       return;
     }
+
+    // Keep the started-at ref so backoff resumes where it left off when the user
+    // navigates back from a public page mid-settlement.
+    if (isPublicSurface) return;
 
     pendingPollingStartedAtRef.current ??= Date.now();
     let timer = 0;
@@ -1287,7 +1367,7 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [hasPendingGatewayDeposits, syncGatewayDeposits]);
+  }, [hasPendingGatewayDeposits, isPublicSurface, syncGatewayDeposits]);
 
   const value = useMemo(
     () => ({
@@ -1297,6 +1377,7 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
       unifiedBalanceFailedChains,
       isBalanceLoading,
       pendingGatewayDepositCount,
+      pendingGatewayDeposits,
       notifications,
       refreshBalance,
       refreshNotifications,
@@ -1308,6 +1389,7 @@ export function PayCmdRuntimeProvider({ children }: { children: ReactNode }) {
       isBalanceLoading,
       notifications,
       pendingGatewayDepositCount,
+      pendingGatewayDeposits,
       refreshBalance,
       refreshNotifications,
       registerStatusWriter,

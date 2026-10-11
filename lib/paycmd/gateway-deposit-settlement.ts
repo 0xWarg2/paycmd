@@ -189,6 +189,12 @@ export async function settleGatewayDeposit(params: {
     body: message,
     status: "unread",
     metadata: {
+      // v/amount/sourceChain follow NotificationMetadataV1 so the activity page renders this
+      // row with the same chips as composer-written notifications.
+      v: 1,
+      amount: amountText(params.deposit.amount),
+      chain: params.deposit.chain,
+      sourceChain: params.deposit.chain,
       txHash,
       finalitySource: params.source,
       circleNotificationId: params.notificationId ?? null,

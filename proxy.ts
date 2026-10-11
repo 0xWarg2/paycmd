@@ -18,9 +18,22 @@
 
 import { type NextRequest, NextResponse } from "next/server";
 import { createSupabaseReqResClient } from "@/lib/supabase/server-client";
+import { legacyRailBlocked } from "@/lib/paycmd/network-guard";
 
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+  if (pathname.startsWith("/api") && !pathname.startsWith("/api/arc-payments")) {
+    const body = request.method === "GET" || request.method === "HEAD"
+      ? null : await request.clone().json().catch(() => null);
+    if (legacyRailBlocked(pathname, {
+      network: request.headers.get("x-payna-network"),
+      query: Object.fromEntries(request.nextUrl.searchParams),
+      body,
+    })) {
+      return NextResponse.json({ error: "MAINNET_RAIL_UNSUPPORTED", message:
+        "This rail is testnet-only. Use /pay for Arc mainnet wallet payments." }, { status: 422 });
+    }
+  }
   const response = NextResponse.next({
     request: {
       headers: request.headers,
@@ -47,6 +60,8 @@ export async function proxy(request: NextRequest) {
     // that guard so production returns a real 404 instead of leaking an auth redirect.
     pathname.startsWith("/dev/ui-preview") ||
     pathname.startsWith("/dev/contacts-preview") ||
+    pathname.startsWith("/dev/notifications-preview") ||
+    pathname.startsWith("/dev/pending-deposits-preview") ||
     pathname.startsWith("/api") ||
     // Framework internals, never a page that could need an auth redirect. The matcher below
     // only excludes `_next/static` and `_next/image`, so `_next/webpack-hmr` and `_next/data`
@@ -56,6 +71,7 @@ export async function proxy(request: NextRequest) {
     pathname === "/docs" ||
     pathname.startsWith("/docs/") ||
     pathname === "/" ||
+    pathname === "/pay" ||
     pathname === "/favicon.ico" ||
     pathname === "/manifest.webmanifest"
   ) {

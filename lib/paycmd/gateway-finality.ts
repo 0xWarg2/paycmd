@@ -104,3 +104,84 @@ export function gatewayDepositSettlementsFromSync(
 
   return settlements;
 }
+
+// Arc reaches finality in about a second, so Circle credits an Arc deposit before the user can
+// switch tabs, while the other chains genuinely take 13-19 minutes. Quoting one number for both
+// made a finished Arc deposit read as stuck, so every ETA string is picked per chain.
+const FAST_FINALITY_CHAINS = new Set(["arc", "arctestnet"]);
+
+export function isFastFinalityChain(chain: string | null | undefined) {
+  // Normalized rather than matched against the exact `GATEWAY_CHAIN_CONFIGS` key: the chain
+  // reaches these call sites from a DB column, a parsed command draft and a Circle payload,
+  // which spell it `arcTestnet`, `arc-testnet` and `ARC` respectively.
+  const key = String(chain ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return FAST_FINALITY_CHAINS.has(key);
+}
+
+export type PendingGatewayDepositSummary = { id: string; chain: string; amount: string };
+export type PendingGatewayDepositGroup = { chain: string; amount: string; count: number };
+
+/**
+ * Per-deposit detail for the deposits still waiting on Circle finality. Deliberately separate
+ * from the pending *count*, which the client keeps reading off `pending.length`: an older
+ * deployment (or a test stub) still sends bare row ids, and a payload this cannot read should
+ * cost a tooltip, never a wrong badge.
+ */
+export function pendingGatewayDepositsFromSync(payload: unknown): PendingGatewayDepositSummary[] {
+  if (!payload || typeof payload !== "object") return [];
+  const value = payload as Record<string, unknown>;
+  if (!Array.isArray(value.pending)) return [];
+
+  const deposits: PendingGatewayDepositSummary[] = [];
+
+  for (const entry of value.pending) {
+    if (!entry || typeof entry !== "object") continue;
+    const row = entry as Record<string, unknown>;
+    if (typeof row.id !== "string" || !row.id) continue;
+    if (typeof row.chain !== "string" || !row.chain.trim()) continue;
+    deposits.push({
+      id: row.id,
+      chain: row.chain.trim(),
+      // Left as a string: this module has no formatter, and the amount comes off a numeric
+      // column that Postgres may hand back either way.
+      amount: row.amount === null || row.amount === undefined ? "" : String(row.amount),
+    });
+  }
+
+  return deposits;
+}
+
+/**
+ * One row per chain, because "which chain is my money waiting on" is the question — two deposits
+ * on the same chain are one answer. The chain key is passed through verbatim so the UI can run it
+ * through its own label lookup and fall back to the raw key for chains it does not know.
+ */
+export function groupPendingGatewayDeposits(
+  rows: readonly PendingGatewayDepositSummary[],
+): PendingGatewayDepositGroup[] {
+  // A Map iterates in insertion order, which is the order the route read the rows in
+  // (oldest deposit first), so no extra sort is needed to keep the list stable.
+  const totals = new Map<string, { total: number; count: number }>();
+
+  for (const row of rows) {
+    const parsed = Number(row.amount);
+    const amount = Number.isFinite(parsed) ? parsed : 0;
+    const existing = totals.get(row.chain);
+
+    if (existing) {
+      existing.total += amount;
+      existing.count += 1;
+      continue;
+    }
+
+    totals.set(row.chain, { total: amount, count: 1 });
+  }
+
+  // Float drift from summing (0.1 + 0.2) is left for the caller's formatter to round off;
+  // every display path runs these through `formatDecimalAmount`.
+  return [...totals].map(([chain, { total, count }]) => ({
+    chain,
+    amount: String(total),
+    count,
+  }));
+}
