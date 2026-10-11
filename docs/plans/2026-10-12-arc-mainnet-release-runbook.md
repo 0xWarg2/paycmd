@@ -64,7 +64,8 @@ The exact gas budget remains unknown until the funded wallet can pass live prefl
 
 ## Remaining external gates
 
-- Migration has not yet been applied: there is no available Supabase SQL/admin connector, DB connection credential or granted native browser control.
+- The user selected the existing Supabase project `mhfzuslhvrrlnfmqpjgc` and will apply the migration in SQL Editor. The latest read-only schema probe still returned PGRST205 (table not found); execution has not been confirmed. There is no available Supabase SQL/admin connector, DB connection credential or granted native browser control.
+- Vercel preview is READY and `/pay` returned HTTP 200 with mainnet disabled: https://paycmd-git-codex-arc-mainnet-microgrants-vuitinhvl7xs-projects.vercel.app/pay. Vercel authentication protects the preview. The existing service-role environment variable targets production only; the intended preview still needs a server-side key for the selected database.
 - Vercel CLI authentication is invalid; the connected Vercel MCP can inspect the existing project and is used for preview deployment instead.
 - Funded-wallet quote, user wallet signature, actual mainnet receipt and video remain outstanding.
 - Production enablement/promotion and grant submission follow actual transaction verification and user review.

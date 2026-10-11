@@ -133,10 +133,12 @@ Code đã được triển khai trên nhánh `codex/arc-mainnet-microgrants`. Lu
 
 Kiểm tra nền tảng đã xác nhận chain mainnet `5042`, RPC `https://rpc.mainnet.arc.io`, explorer `https://explorer.arc.io`, USDC ERC-20 6 decimals và native gas 18 decimals từ tài liệu chính thức và RPC. Repo hiện public. Thay đổi Gateway có sẵn được giữ nguyên và không gộp vào commit triển khai.
 
-Kết quả local: 301 unit test, 12 kiểm thử UI desktop/mobile, TypeScript, lint và production build đã qua. Lint có 5 warning có sẵn. Kiểm thử UI dùng ví/API giả lập; chưa thay thế kiểm chứng bằng giao dịch thật hoặc kiểm thử trên database production.
+Kết quả local: 301 unit test trong workspace; snapshot chỉ chứa code đã commit có 297 unit test, đều qua. 12 kiểm thử UI desktop/mobile, TypeScript, lint và production build đã qua. Lint có 5 warning có sẵn. Kiểm thử UI dùng ví/API giả lập; chưa thay thế kiểm chứng bằng giao dịch thật hoặc kiểm thử trên database production. File tutorial sinh tự động đã được đồng bộ để khớp tài liệu nguồn sau khi CI phát hiện bản cũ.
 
 Người dùng xác nhận chưa nhận tài trợ Circle/Arc và cung cấp ví gửi/nhận `0x83b22dcd84511C4bBb7abcd6b51056D8eA416877`, yêu cầu chi phí thấp nhất. RPC mainnet hiện trả số dư 0 USDC: chưa ký/gửi giao dịch. Lệnh thử dự kiến chuyển `0.000001 USDC` về chính ví này, cộng gas theo preview. Self-transfer được ghi rõ và không tính vào metrics thanh toán cho người khác.
 
 Các gate chưa hoàn tất: apply migration Supabase, kiểm tra database thật, funding ví, người dùng ký giao dịch, receipt/video thực tế, enable/promote production và người dùng kiểm tra hồ sơ trước submit. Mainnet có kill switch `ARC_MAINNET_PAYMENTS_ENABLED` mặc định false. Deadline chính thức đã được kiểm tra lại, vẫn là 15/10/2026 10:59 giờ Việt Nam; form DoraHacks hiện hành chưa đọc được.
 
-Chi tiết cấu hình, recovery, rollback và giới hạn: [release runbook](2026-10-12-arc-mainnet-release-runbook.md). Hồ sơ reviewable: [submission draft](2026-10-12-arc-microgrants-submission-draft.md). Tình trạng preview sẽ được bổ sung sau khi Vercel trả kết quả; chưa nộp hồ sơ.
+Draft PR: https://github.com/0xWarg2/paycmd/pull/13. Preview đã READY; `/pay` trả HTTP 200 và mainnet vẫn tắt: https://paycmd-git-codex-arc-mainnet-microgrants-vuitinhvl7xs-projects.vercel.app/pay. Preview có bảo vệ đăng nhập Vercel. Người dùng chọn Supabase hiện tại `mhfzuslhvrrlnfmqpjgc` và sẽ chạy migration trong SQL Editor; lần kiểm tra gần nhất chưa tìm thấy bảng mới. Preview chưa có service-role key cho database này.
+
+Chi tiết cấu hình, recovery, rollback và giới hạn: [release runbook](2026-10-12-arc-mainnet-release-runbook.md). Hồ sơ reviewable: [submission draft](2026-10-12-arc-microgrants-submission-draft.md). Chưa nộp hồ sơ.
